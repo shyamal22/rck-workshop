@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>RCK Workshop</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header id="topbar">
+  <button id="backBtn" class="icon-btn" hidden aria-label="Back">&#8592;</button>
+  <div class="brand">
+    <strong id="title">Gear</strong>
+    <span id="syncDot" class="dot" title="Connection"></span>
+  </div>
+  <button id="menuBtn" class="icon-btn" aria-label="Menu">&#8942;</button>
+</header>
+
+<nav id="menu" hidden>
+  <button data-go="#/">Gear board</button>
+  <button data-go="#/orders">Work orders</button>
+  <button data-go="#/report">Report damage</button>
+  <button data-go="#/reports">Reports</button>
+  <button data-go="#/screen">Workshop screen</button>
+  <hr>
+  <button data-go="#/gearadmin">Manage gear</button>
+  <button data-go="#/setup">Settings</button>
+</nav>
+
+<main id="view"></main>
+
+<nav id="tabbar">
+  <a href="#/" data-tab="board"><span>&#9632;</span>Gear</a>
+  <a href="#/orders" data-tab="orders"><span>&#9636;</span>Work orders</a>
+  <a href="#/report" data-tab="report" class="tab-primary"><span>+</span>Report</a>
+</nav>
+
+<div id="printArea" aria-hidden="true"></div>
+<div id="toast" hidden></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
