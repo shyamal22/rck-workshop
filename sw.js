@@ -1,7 +1,7 @@
 /* RCK Workshop service worker.
    The app shell is cached so it opens instantly and still works on a bad
    connection. Supabase calls are never cached — data must always be live. */
-const CACHE = 'rck-workshop-v2';
+const CACHE = 'rck-workshop-v3';
 const ASSETS = [
   './', './index.html', './app.css', './app.js', './config.js',
   './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'

@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 /* ------------------------------------------------------------ fleet */
 const CATEGORIES = [
@@ -111,6 +111,21 @@ function isOpen(o) {
 function catLabel(key) {
   const c = CATEGORIES.find(x => x.key === key);
   return c ? c.one : 'Other';
+}
+
+/* Inline icons — no icon font, no network request, they inherit text colour. */
+const ICONS = {
+  pin:     '<path d="M12 21.5s6.5-5.2 6.5-10.5a6.5 6.5 0 0 0-13 0C5.5 16.3 12 21.5 12 21.5z"/><circle cx="12" cy="10.7" r="2.4"/>',
+  clip:    '<path d="M20.4 11.6l-8.5 8.5a5.2 5.2 0 0 1-7.3-7.3l8.9-8.9a3.4 3.4 0 0 1 4.9 4.9l-8.8 8.8a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/>',
+  camera:  '<path d="M3.5 8.5h3l1.4-2.2h8.2L17.5 8.5h3v10h-17z"/><circle cx="12" cy="13" r="3.3"/>',
+  printer: '<path d="M7 9V3.5h10V9"/><path d="M4 9h16v7h-3"/><path d="M7 16v4.5h10V16"/>',
+  share:   '<path d="M12 15.5V3.5"/><path d="M8.5 7L12 3.5 15.5 7"/><path d="M5.5 13v6.5a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V13"/>',
+  copy:    '<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15"/>',
+  file:    '<path d="M14 3.5H7.5A1.5 1.5 0 0 0 6 5v14a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 18 19V7.5z"/><path d="M14 3.5V8h4"/>',
+  plus:    '<path d="M12 5.5v13M5.5 12h13"/>'
+};
+function icon(name) {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 }
 
 let toastTimer;
@@ -485,8 +500,20 @@ const SCREENS = {
   '/screen':    { title: 'Workshop screen', render: renderKiosk }
 };
 
+/* Coming back to a list should put you where you left it, not at the top. */
+const scrollMemory = {};
+let lastPath = null;
+
+function restoreScroll(path) {
+  const keepsPlace = path === '/' || path === '/orders';
+  const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
 function render() {
+  if (lastPath !== null) scrollMemory[lastPath] = window.scrollY;
   route = parseHash();
+  lastPath = route.path;
   stopKiosk();
   document.body.classList.toggle('kiosk', route.path === '/screen');
 
@@ -506,9 +533,14 @@ function render() {
 
   const view = $('#view');
   view.innerHTML = '';
+  // Restart the entrance animation on every navigation.
+  view.classList.remove('enter');
+  void view.offsetWidth;
+  view.classList.add('enter');
+
   if (needsSetup() && route.path !== '/setup' && route.path !== '/join') { renderWelcome(view); return; }
   screen.render(view);
-  window.scrollTo(0, 0);
+  restoreScroll(route.path);
 }
 
 function needsSetup() {
@@ -678,18 +710,20 @@ function renderBoard(view) {
       grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>Nothing matches</b>Try another filter.</div>`;
       return;
     }
-    grid.innerHTML = list.map(g => {
+    grid.innerHTML = list.map((g, i) => {
       const st = gearStatus(g);
       const eta = gearEta(g);
       const open = openOrdersFor(g.id).length;
       const due = eta ? dueText(eta) : null;
       return `
-        <button class="gear-card status-${st}" data-id="${g.id}">
+        <button class="gear-card status-${st}" data-id="${g.id}" style="--i:${Math.min(i, 14)}">
           <div class="code">${esc(g.code)}</div>
           <div class="name">${esc(g.name || catLabel(g.category))}</div>
-          <div class="meta"><span class="swatch"></span><b>${STATUS_TEXT[st]}</b></div>
+          <div class="meta"><span class="swatch"></span>${STATUS_TEXT[st]}</div>
           ${open ? `<div class="loc">${open} open job${open === 1 ? '' : 's'}${due ? ` · <span class="${due.late ? 'overdue' : ''}">${due.none ? 'no date' : due.text}</span>` : ''}</div>` : ''}
-          <div class="loc">${g.location ? '📍 ' + esc(g.location) : '<span class="muted">Location not set</span>'}</div>
+          <div class="loc">${g.location
+            ? icon('pin') + esc(g.location)
+            : '<span style="opacity:.7">Location not set</span>'}</div>
         </button>`;
     }).join('');
     $$('.gear-card', grid).forEach(b => b.onclick = () => go('#/gear/' + b.dataset.id));
@@ -712,7 +746,7 @@ function renderGearDetail(view) {
   $('#title').textContent = g.code;
 
   view.innerHTML = `
-    <div class="card status-${st}" style="border-left:5px solid var(--s)">
+    <div class="card accent status-${st}">
       <div class="row spread">
         <div class="grow">
           <h2 style="font-size:20px">${esc(g.code)}</h2>
@@ -732,7 +766,7 @@ function renderGearDetail(view) {
 
     <div class="btn-row">
       <a class="btn primary" href="#/report?gear=${g.id}">Report damage</a>
-      <button class="btn" id="hist">History report</button>
+      <button class="btn" id="hist">${icon('file')}History report</button>
     </div>
 
     <div class="section-title">Open work orders</div>
@@ -775,12 +809,12 @@ async function setLocation(g, text) {
   toast('Location updated');
 }
 
-function woCard(o) {
+function woCard(o, i) {
   const g = gearById(o.gear_id) || {};
   const due = dueText(o.target_date);
   const closed = !isOpen(o);
   return `
-    <button class="wo status-${closed ? 'green' : o.severity}" data-wo="${o.id}">
+    <button class="wo status-${closed ? 'green' : o.severity}" data-wo="${o.id}" style="--i:${Math.min(i || 0, 10)}">
       <div class="hdr">
         <span class="num">${woNo(o)}</span>
         <span class="num">${esc(g.code || '')}</span>
@@ -899,7 +933,7 @@ function renderReport(view) {
     <div class="card">
       <h2>Photos of the damage</h2>
       <input type="file" id="photos" accept="image/*" multiple hidden>
-      <button class="btn wide" id="addPhoto" type="button">Add photos</button>
+      <button class="btn wide" id="addPhoto" type="button">${icon('camera')}Add photos</button>
       <div class="thumbs" id="thumbs"></div>
     </div>
 
@@ -1004,16 +1038,14 @@ function renderWorkOrder(view) {
   $('#title').textContent = woNo(o);
 
   view.innerHTML = `
-    <div class="card status-${closed ? 'green' : o.severity}" style="border-left:5px solid var(--s)">
-      <div class="row spread">
-        <div class="grow">
-          <div class="tiny muted">${woNo(o)}</div>
-          <h2 style="font-size:18px">${esc(o.title)}</h2>
-          <a class="small" href="#/gear/${o.gear_id}">${esc(g.code || '')}${g.name ? ' — ' + esc(g.name) : ''}</a>
-        </div>
+    <div class="card accent status-${closed ? 'green' : o.severity}">
+      <div class="tiny" style="color:var(--ink-3);letter-spacing:.03em;font-weight:700">${woNo(o)}</div>
+      <h2 style="font-size:19px;margin:2px 0 4px">${esc(o.title)}</h2>
+      <a class="small muted" href="#/gear/${o.gear_id}">${esc(g.code || '')}${g.name ? ' — ' + esc(g.name) : ''}</a>
+      <div style="margin-top:11px">
         <span class="pill"><span class="swatch"></span>${closed ? 'Fixed' : STATUS_TEXT[o.severity]}</span>
       </div>
-      ${o.description ? `<p class="small mt" style="white-space:pre-wrap">${esc(o.description)}</p>` : ''}
+      ${o.description ? `<p class="small mt" style="white-space:pre-wrap;margin-bottom:0">${esc(o.description)}</p>` : ''}
     </div>
 
     <div class="card">
@@ -1032,7 +1064,7 @@ function renderWorkOrder(view) {
         ${closed && o.work_done ? `<tr><th>Work done</th><td style="white-space:pre-wrap">${esc(o.work_done)}</td></tr>` : ''}
       </table>
       <div class="btn-row mt">
-        <button class="btn sm" id="printWo">Print work order</button>
+        <button class="btn sm" id="printWo">${icon('printer')}Print work order</button>
       </div>
     </div>
 
@@ -1078,7 +1110,7 @@ function tlItem(u) {
       ${isImage
         ? `<div class="thumbs"><a href="${esc(m.url)}" target="_blank" rel="noopener"><img src="${esc(m.url)}" alt=""></a></div>`
         : isFile
-          ? `<a class="attach" href="${esc(m.url)}" target="_blank" rel="noopener">📎 ${esc(m.name || 'Attachment')}</a>`
+          ? `<a class="attach" href="${esc(m.url)}" target="_blank" rel="noopener">${icon('clip')}${esc(m.name || 'Attachment')}</a>`
           : ''}
       ${m.pending ? '<div class="tiny muted">Held on this device until there is signal.</div>' : ''}
     </div>`;
@@ -1670,11 +1702,11 @@ function renderKiosk(view) {
           <div class="k-col">
             <h2>Active work orders (${orders.length})</h2>
             <div class="k-scroll">
-              ${orders.slice(0, 9).map(o => {
+              ${orders.slice(0, 9).map((o, i) => {
                 const g = gearById(o.gear_id) || {};
                 const due = dueText(o.target_date);
                 return `
-                  <div class="k-wo status-${o.severity}">
+                  <div class="k-wo status-${o.severity}" style="--i:${i}">
                     <div>
                       <div class="kcode">${esc(g.code || '')}</div>
                       <div class="kno">${woNo(o)}</div>
@@ -1701,10 +1733,10 @@ function renderKiosk(view) {
           <div class="k-col">
             <h2>Gear needing attention</h2>
             <div class="k-scroll k-grid">
-              ${attention.map(g => {
+              ${attention.map((g, i) => {
                 const st = gearStatus(g);
                 const eta = gearEta(g);
-                return `<div class="k-chip status-${st}">
+                return `<div class="k-chip status-${st}" style="--i:${i}">
                   <div class="c">${esc(g.code)}</div>
                   <div class="s">${st === 'red' ? 'Out of action' : 'Usable'}${eta ? ' · ' + fmtShort(eta) : ''}</div>
                 </div>`;
@@ -1772,8 +1804,8 @@ function renderSetup(view) {
       <label class="field"><span>Setup link</span>
         <input type="text" id="sLink" value="${esc(setupLink())}" readonly onclick="this.select()"></label>
       <div class="btn-row">
-        <button class="btn primary" id="shareLink">Share link</button>
-        <button class="btn" id="copyLink">Copy link</button>
+        <button class="btn primary" id="shareLink">${icon('share')}Share link</button>
+        <button class="btn" id="copyLink">${icon('copy')}Copy link</button>
       </div>
     </div>` : ''}
 
@@ -1938,6 +1970,17 @@ $$('#menu [data-go]').forEach(b => b.onclick = () => { $('#menu').hidden = true;
 document.addEventListener('click', e => {
   if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('#menuBtn')) $('#menu').hidden = true;
 });
+
+// The header only grows a shadow once there is content behind it.
+let scrollTick = false;
+window.addEventListener('scroll', () => {
+  if (scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => {
+    $('#topbar').classList.toggle('lifted', window.scrollY > 4);
+    scrollTick = false;
+  });
+}, { passive: true });
 
 window.addEventListener('hashchange', render);
 window.addEventListener('online', () => refresh().then(render));
