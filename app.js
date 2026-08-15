@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 /* ------------------------------------------------------------ fleet */
 const CATEGORIES = [
@@ -481,6 +481,7 @@ const SCREENS = {
   '/reports':   { title: 'Reports',       render: renderReports,  back: true },
   '/gearadmin': { title: 'Manage gear',   render: renderGearAdmin, back: true },
   '/setup':     { title: 'Settings',      render: renderSetup,    back: true },
+  '/join':      { title: 'Set up',        render: renderJoin },
   '/screen':    { title: 'Workshop screen', render: renderKiosk }
 };
 
@@ -505,13 +506,95 @@ function render() {
 
   const view = $('#view');
   view.innerHTML = '';
-  if (needsSetup() && route.path !== '/setup') { renderWelcome(view); return; }
+  if (needsSetup() && route.path !== '/setup' && route.path !== '/join') { renderWelcome(view); return; }
   screen.render(view);
   window.scrollTo(0, 0);
 }
 
 function needsSetup() {
   return !S.name || (!connected() && !S.localMode);
+}
+
+/* ================================================================
+   Screen — one-tap setup from a shared link
+   The connection details ride in the URL's hash, which browsers never
+   send to the web server, so the key stays off the public site.
+   ================================================================ */
+function setupLink() {
+  return location.origin + location.pathname +
+    '#/join?u=' + encodeURIComponent(S.supabaseUrl) +
+    '&k=' + encodeURIComponent(S.supabaseKey);
+}
+
+function renderJoin(view) {
+  const url = route.query.u || '';
+  const key = route.query.k || '';
+
+  if (!url || !key) {
+    view.innerHTML = `
+      <div class="card">
+        <h2>That link is incomplete</h2>
+        <p class="muted small">Ask whoever sent it to share it again from
+        <strong>Settings → Share setup link</strong>, or enter the details by hand.</p>
+        <a class="btn wide mt" href="#/setup">Enter them by hand</a>
+      </div>`;
+    return;
+  }
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>Set up RCK Workshop</h2>
+      <p class="muted small">This links your phone to the shared gear list. You only do this once.</p>
+      <label class="field"><span>Your name</span>
+        <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
+      <label class="field"><span>You are</span>
+        <select id="jRole">
+          <option value="crew">Crew — report damage, see status</option>
+          <option value="workshop">Workshop — also update and close jobs</option>
+        </select></label>
+      <button class="btn primary wide" id="jGo">Connect</button>
+      <div id="jOut" class="small mt"></div>
+    </div>
+
+    <p class="muted small center">Once connected, use <strong>Add to Home Screen</strong>
+    in your browser's share menu so it opens like a normal app.</p>`;
+
+  $('#jGo', view).onclick = async function () {
+    const name = $('#jName', view).value.trim();
+    const role = $('#jRole', view).value;
+    if (!name) return toast('Enter your name');
+    if (role === 'workshop' && SITE.workshopPin) {
+      const pin = prompt('Workshop code:');
+      if (pin !== SITE.workshopPin) return toast('Wrong code');
+    }
+
+    this.disabled = true;
+    this.textContent = 'Connecting…';
+    const out = $('#jOut', view);
+    let problem = 'Could not reach the database. Check you have signal and try again, or ask for a new link.';
+    try {
+      const res = await fetch(`${url.replace(/\/+$/, '')}/rest/v1/gear?select=id&limit=1`, {
+        headers: { apikey: key, Authorization: 'Bearer ' + key }
+      });
+      if (!res.ok) {
+        problem = res.status === 404
+          ? 'The database is not set up yet — tell whoever sent you this link.'
+          : `This link is out of date (error ${res.status}). Ask for a new one.`;
+        throw new Error(problem);
+      }
+    } catch (err) {
+      this.disabled = false;
+      this.textContent = 'Connect';
+      out.innerHTML = `<span style="color:var(--red)">${esc(problem)}</span>`;
+      return;
+    }
+
+    Settings.write({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, name, role, localMode: false });
+    loadCache();
+    await refresh();
+    toast('Connected — you\'re all set');
+    go('#/');
+  };
 }
 
 /* ================================================================
@@ -1681,6 +1764,19 @@ function renderSetup(view) {
       <div id="testOut" class="small mt"></div>
     </div>
 
+    ${connected() ? `
+    <div class="card">
+      <h2>Set up someone else's phone</h2>
+      <p class="muted small">Send this link to the crew. One tap connects their phone —
+      they never type the key. Treat it like a key: only send it to RCK people.</p>
+      <label class="field"><span>Setup link</span>
+        <input type="text" id="sLink" value="${esc(setupLink())}" readonly onclick="this.select()"></label>
+      <div class="btn-row">
+        <button class="btn primary" id="shareLink">Share link</button>
+        <button class="btn" id="copyLink">Copy link</button>
+      </div>
+    </div>` : ''}
+
     <div class="card">
       <h2>Try it without a connection</h2>
       <p class="muted small">Practice mode: everything works, but the data stays on this phone only.
@@ -1750,6 +1846,30 @@ function renderSetup(view) {
     toast('Connected');
     go('#/');
   };
+
+  const share = $('#shareLink', view);
+  if (share) {
+    const link = setupLink();
+    const copy = async () => {
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('Link copied — paste it into a text or email');
+      } catch (e) {
+        $('#sLink', view).select();
+        toast('Press and hold the link above to copy it');
+      }
+    };
+    share.onclick = async () => {
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'RCK Workshop setup', text: 'Tap this to set up RCK Workshop on your phone', url: link });
+          return;
+        } catch (e) { /* cancelled, or not allowed — fall back to copying */ }
+      }
+      copy();
+    };
+    $('#copyLink', view).onclick = copy;
+  }
 
   $('#saveMode', view).onclick = async () => {
     Settings.write({ localMode: $('#sLocal', view).value === '1' });

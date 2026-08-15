@@ -92,6 +92,14 @@ can paste the two values into **Settings → Shared data** instead, and there's 
 
 ### 3. On each phone
 
+The quickest way: on a phone that is already connected, go to
+**Settings → Set up someone else's phone → Share link** and send that link to the
+crew. One tap connects their phone — they never type the key, and because the
+details ride in the URL's `#` fragment they are never sent to the web server.
+Treat the link like a key: only send it to RCK people.
+
+By hand instead:
+
 1. Open the app URL in the phone's browser.
 2. **Add to Home Screen** (Share menu on iPhone, ⋮ on Android). It installs like a
    normal app.
