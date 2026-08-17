@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="robots" content="noindex, nofollow">
+<title>RCK HR</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header id="topbar" hidden>
+  <button id="backBtn" class="icon-btn" hidden aria-label="Back">
+    <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+  </button>
+  <div class="brand">
+    <strong id="title">Compliance</strong>
+    <span id="syncDot" class="dot" title="Connection"></span>
+  </div>
+  <button id="menuBtn" class="icon-btn" aria-label="Menu">
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/>
+    </svg>
+  </button>
+</header>
+
+<nav id="menu" hidden>
+  <button data-go="#/">Compliance</button>
+  <button data-go="#/people">Staff</button>
+  <button data-go="#/expiring">Expiring &amp; expired</button>
+  <button data-go="#/matrix">Licence matrix</button>
+  <button data-go="#/reports">Reports</button>
+  <hr>
+  <button data-go="#/requirements">Requirements</button>
+  <button data-go="#/import">Import from spreadsheet</button>
+  <button data-go="#/settings">Settings</button>
+  <hr>
+  <button id="lockBtn">Lock now</button>
+</nav>
+
+<main id="view"></main>
+
+<nav id="tabbar" hidden>
+  <a href="#/" data-tab="dash">
+    <svg viewBox="0 0 24 24"><path d="M4.5 12.5l3.4 3.4 7.6-8.4"/><path d="M12 20.5a8.5 8.5 0 1 1 8.4-9.9"/></svg>
+    <span>Compliance</span>
+  </a>
+  <a href="#/people" data-tab="people">
+    <svg viewBox="0 0 24 24"><circle cx="9.5" cy="8" r="3.5"/><path d="M3.5 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16.5 5.2a3.2 3.2 0 0 1 0 6"/><path d="M18 14.9c2 .7 3.4 2.4 3.4 4.6"/></svg>
+    <span>Staff</span>
+  </a>
+  <a href="#/person/new" data-tab="new" class="tab-primary">
+    <span class="fab"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
+    <span>Add</span>
+  </a>
+</nav>
+
+<div id="printArea" aria-hidden="true"></div>
+<div id="toast" hidden></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
