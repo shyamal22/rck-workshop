@@ -31,6 +31,55 @@ const PERSON_STATUS = [
   { key: 'on_leave', label: 'On leave' },
   { key: 'finished', label: 'Finished' }
 ];
+/* The groups the SharePoint folders are organised into. Add or rename them
+   here and the whole app follows — filters, reports, the lot. */
+const CREWS = [
+  { key: 'traffic',   label: 'Traffic' },
+  { key: 'green',     label: 'Green Crew' },
+  { key: 'yellow',    label: 'Yellow Crew' },
+  { key: 'office',    label: 'Office Crew' },
+  { key: 'transport', label: 'Transport' },
+  { key: 'drivers',   label: 'Drivers' }
+];
+const CONTRACT_KINDS = [
+  { key: 'pay_rise',            label: 'Pay rise' },
+  { key: 'role_change',         label: 'Role change' },
+  { key: 'hours_change',        label: 'Hours change' },
+  { key: 'terms_change',        label: 'Terms change' },
+  { key: 'fixed_term_extension', label: 'Fixed term extension' },
+  { key: 'other',               label: 'Other addendum' }
+];
+/* Ordered least to most serious — the register sorts and colours by this. */
+const DISCIPLINE_LEVELS = [
+  { key: 'informal',         label: 'Informal chat',      rank: 1, tone: 'grey' },
+  { key: 'verbal_warning',   label: 'Verbal warning',     rank: 2, tone: 'orange' },
+  { key: 'written_warning',  label: 'Written warning',    rank: 3, tone: 'orange' },
+  { key: 'final_warning',    label: 'Final warning',      rank: 4, tone: 'red' },
+  { key: 'performance_plan', label: 'Performance plan',   rank: 3, tone: 'orange' },
+  { key: 'dismissal',        label: 'Dismissal',          rank: 5, tone: 'red' }
+];
+const levelOf = key => DISCIPLINE_LEVELS.find(l => l.key === key) || DISCIPLINE_LEVELS[0];
+
+/** Crew label, falling back to whatever text is already on the record. */
+function crewLabel(key) {
+  if (!key) return '';
+  const c = CREWS.find(x => x.key === key);
+  return c ? c.label : key;
+}
+
+/**
+ * The crew dropdown. Anything already on a record that isn't in CREWS —
+ * an import, or a crew since renamed — is kept as its own option so
+ * editing someone never silently reassigns them.
+ */
+function crewOptions(current) {
+  const opts = [{ key: '', label: '— none —' }].concat(CREWS);
+  const known = new Set(opts.map(o => o.key));
+  const extras = new Set(
+    DB.people.map(p => p.crew).concat([current]).filter(c => c && !known.has(c))
+  );
+  return opts.concat(Array.from(extras).sort().map(c => ({ key: c, label: c })));
+}
 const DOC_KINDS = [
   { key: 'contract', label: 'Employment agreement' },
   { key: 'addendum', label: 'Addendum / variation' },
@@ -297,7 +346,10 @@ const signedIn = () => !!(Auth.session && Auth.me);
 /* ================================================================
    Data, held in memory only
    ================================================================ */
-const DB = { people: [], credential_types: [], credentials: [], documents: [], audit: [] };
+const DB = {
+  people: [], credential_types: [], credentials: [], documents: [],
+  contract_changes: [], disciplinary_actions: [], audit: []
+};
 let loaded = false;
 let lastError = '';
 
@@ -321,16 +373,20 @@ async function rest(path, opts) {
 
 const Store = {
   async pull() {
-    const [people, types, creds, docs] = await Promise.all([
+    const [people, types, creds, docs, changes, discipline] = await Promise.all([
       rest('people?select=*&order=last_name.asc,first_name.asc'),
       rest('credential_types?select=*&order=sort.asc'),
       rest('credentials?select=*'),
-      rest('documents?select=*&order=created_at.desc')
+      rest('documents?select=*&order=created_at.desc'),
+      rest('contract_changes?select=*&order=effective_on.desc'),
+      rest('disciplinary_actions?select=*&order=action_on.desc')
     ]);
     DB.people = people || [];
     DB.credential_types = types || [];
     DB.credentials = creds || [];
     DB.documents = docs || [];
+    DB.contract_changes = changes || [];
+    DB.disciplinary_actions = discipline || [];
     loaded = true;
   },
 
@@ -400,6 +456,19 @@ const Store = {
     return path;
   },
 
+  /**
+   * Fetches a document into memory and hands back a blob: URL, so it can be
+   * shown inside the app instead of sending the user off to another tab.
+   * The URL is local to this device and dies with the page.
+   */
+  async blobUrl(storagePath) {
+    const signed = await Store.signedUrl(storagePath, 120);
+    const res = await fetch(signed);
+    if (!res.ok) throw new Error('Could not fetch that document');
+    const blob = await res.blob();
+    return { url: URL.createObjectURL(blob), type: blob.type, size: blob.size };
+  },
+
   /** A link that works for a few minutes and then stops working. */
   async signedUrl(storagePath, seconds) {
     const t = await Auth.token();
@@ -453,6 +522,54 @@ const activeTypes = () => DB.credential_types.filter(t => t.active !== false)
   .sort((a, b) => (a.sort || 0) - (b.sort || 0));
 const credsFor = pid => DB.credentials.filter(c => c.person_id === pid);
 const docsFor  = pid => DB.documents.filter(d => d.person_id === pid);
+const docById  = id => DB.documents.find(d => d.id === id);
+
+/* --------------------------------------------- contract changes ----- */
+const dateDesc = k => (a, b) => String(b[k] || '').localeCompare(String(a[k] || ''));
+
+const changesFor = pid =>
+  DB.contract_changes.filter(c => c.person_id === pid).sort(dateDesc('effective_on'));
+
+/** The most recent pay rise on record, or null. */
+function lastPayRise(pid) {
+  return changesFor(pid).filter(c => c.kind === 'pay_rise')[0] || null;
+}
+
+/**
+ * How long since this person's pay last moved, in months.
+ * Falls back to the "last reviewed" date on their record, then to their
+ * start date — a new starter has not been overlooked, they are just new.
+ */
+function payAge(person) {
+  const rise = lastPayRise(person.id);
+  const on = (rise && rise.effective_on) || person.pay_reviewed_on || person.start_date;
+  if (!on) return { months: null, since: null, basis: 'none' };
+  const d = daysFromToday(on);
+  return {
+    months: d === null ? null : Math.floor(-d / 30.44),
+    since: on,
+    basis: rise ? 'rise' : person.pay_reviewed_on ? 'review' : 'start'
+  };
+}
+
+/* ------------------------------------------------- disciplinary ----- */
+const disciplineFor = pid =>
+  DB.disciplinary_actions.filter(d => d.person_id === pid).sort(dateDesc('action_on'));
+
+/** A warning still counts if it has no expiry date, or that date is ahead. */
+function isLive(action) {
+  if (action.level === 'informal') return false;
+  if (!action.expires_on) return true;
+  const d = daysFromToday(action.expires_on);
+  return d !== null && d >= 0;
+}
+const liveWarnings = pid => disciplineFor(pid).filter(isLive);
+
+/** The most serious live warning against someone, or null. */
+function worstWarning(pid) {
+  return liveWarnings(pid)
+    .sort((a, b) => levelOf(b.level).rank - levelOf(a.level).rank)[0] || null;
+}
 
 function warnDaysOf(type) {
   const n = Number(type.warn_days);
@@ -538,6 +655,24 @@ function standing(person) {
 
 const onBooks = () => DB.people.filter(p => p.status !== 'finished');
 
+/** Crews that actually have someone in them, in the order CREWS defines. */
+function crewsInUse() {
+  const used = new Set(onBooks().map(p => p.crew).filter(Boolean));
+  const known = CREWS.filter(c => used.has(c.key));
+  const extras = Array.from(used).filter(k => !CREWS.some(c => c.key === k)).sort();
+  return known.concat(extras.map(k => ({ key: k, label: k })));
+}
+
+/** The compliance split for one crew. */
+function crewTallies(crewKey) {
+  const t = { green: 0, orange: 0, red: 0, total: 0 };
+  onBooks().filter(p => (p.crew || '') === crewKey).forEach(p => {
+    t[standing(p).level]++;
+    t.total++;
+  });
+  return t;
+}
+
 /** Flat list of every requirement row that needs attention, worst first. */
 function attention() {
   const out = [];
@@ -577,6 +712,8 @@ const SCREENS = {
   'person':       { title: 'Staff file',  render: renderPerson,   back: '#/people' },
   'edit':         { title: 'Details',     render: renderPersonEdit, back: true },
   'expiring':     { title: 'Expiring',    render: renderExpiring, back: '#/' },
+  'contracts':    { title: 'Pay & addendums', render: renderContracts, back: '#/' },
+  'discipline':   { title: 'Disciplinary', render: renderDiscipline, back: '#/' },
   'matrix':       { title: 'Licence matrix', render: renderMatrix, back: '#/' },
   'reports':      { title: 'Reports',     render: renderReports,  back: '#/' },
   'requirements': { title: 'Requirements', render: renderRequirements, back: '#/' },
@@ -781,7 +918,7 @@ function statusClass(level) { return 'status-' + (level === 'grey' ? 'grey' : le
 function personRow(p) {
   const st = standing(p);
   const bits = [labelOf(JOB_TYPES, p.job_type)];
-  if (p.crew) bits.push(p.crew);
+  if (p.crew) bits.push(crewLabel(p.crew));
   if (p.status === 'on_leave') bits.push('On leave');
   if (p.status === 'finished') bits.push('Finished');
   return `<button class="person ${statusClass(st.level)}" data-person="${esc(p.id)}">
@@ -858,6 +995,7 @@ function renderDash(view) {
   const expired = rows.filter(r => r.level === 'red');
   const soon    = rows.filter(r => r.level === 'orange');
   const total   = onBooks().length;
+  const crews   = crewsInUse();
 
   if (!DB.people.length) {
     view.innerHTML = `
@@ -895,12 +1033,39 @@ function renderDash(view) {
       ${soon.length > 10 ? `<button class="btn wide sm" data-go="#/expiring">See all ${soon.length}</button>` : ''}
     ` : ''}
 
+    ${crews.length ? `
+      <div class="section-title">By crew</div>
+      ${crews.map(c => {
+        const ct = crewTallies(c.key);
+        const worst = ct.red ? 'red' : ct.orange ? 'orange' : 'green';
+        return `<button class="cred status-${worst}" data-crew="${esc(c.key)}">
+          <span class="grow">
+            <span class="nm">${esc(c.label)}</span>
+            <span class="dt">${esc(plural(ct.total, 'person'))}${
+              ct.red ? ` · ${ct.red} needing action` : ''}${
+              ct.orange ? ` · ${ct.orange} due soon` : ''}</span>
+          </span>
+          <span class="st">${ct.red || ct.orange
+            ? esc(String(ct.red + ct.orange)) : 'All current'}</span>
+        </button>`;
+      }).join('')}` : ''}
+
     <div class="section-title">Quick moves</div>
     <div class="btn-row">
       <button class="btn" data-go="#/expiring">${icon('file')} Expiring</button>
+      <button class="btn" data-go="#/contracts">${icon('file')} Pay &amp; addendums</button>
+      <button class="btn" data-go="#/discipline">${icon('file')} Disciplinary</button>
       <button class="btn" data-go="#/matrix">${icon('people')} Licence matrix</button>
       <button class="btn" data-go="#/reports">${icon('print')} Reports</button>
     </div>`;
+
+  $$('[data-crew]', view).forEach(b => {
+    b.onclick = () => {
+      peopleFilter.crew = b.dataset.crew;
+      peopleFilter.level = 'all';
+      go('#/people');
+    };
+  });
 
   $$('[data-filter]', view).forEach(b => {
     b.onclick = () => { peopleFilter.level = b.dataset.filter; go('#/people'); };
@@ -928,18 +1093,19 @@ function wireGo(root) {
 /* ================================================================
    Screen — staff list
    ================================================================ */
-const peopleFilter = { level: 'all', job: 'all', q: '', showFinished: false };
+const peopleFilter = { level: 'all', job: 'all', crew: 'all', q: '', showFinished: false };
 
 function renderPeople(view) {
   const f = peopleFilter;
 
   let list = DB.people.filter(p => f.showFinished ? true : p.status !== 'finished');
   if (f.job !== 'all') list = list.filter(p => p.job_type === f.job);
+  if (f.crew !== 'all') list = list.filter(p => (p.crew || '') === f.crew);
   if (f.level !== 'all') list = list.filter(p => standing(p).level === f.level);
   if (f.q) {
     const q = f.q.toLowerCase();
     list = list.filter(p => (
-      fullName(p) + ' ' + p.employee_no + ' ' + p.position + ' ' + p.crew + ' ' + p.email
+      fullName(p) + ' ' + p.employee_no + ' ' + p.position + ' ' + crewLabel(p.crew) + ' ' + p.email
     ).toLowerCase().includes(q));
   }
 
@@ -955,6 +1121,10 @@ function renderPeople(view) {
       ${chip('red', 'level', 'Action needed')}
       ${chip('orange', 'level', 'Due soon')}
       ${chip('green', 'level', 'All current')}
+    </div>
+    <div class="filters">
+      ${chip('all', 'crew', 'All crews')}
+      ${crewsInUse().map(c => chip(c.key, 'crew', c.label)).join('')}
     </div>
     <div class="filters">
       ${chip('all', 'job', 'All roles')}
@@ -1004,13 +1174,18 @@ function renderPerson(view, id) {
   const st = standing(p);
   const rows = checksFor(p);
   const docs = docsFor(p.id);
+  const changes = changesFor(p.id);
+  const discipline = disciplineFor(p.id);
+  const live = liveWarnings(p.id);
+  const lastRise = lastPayRise(p.id);
+  const age = payAge(p);
 
   view.innerHTML = `
     <div class="card accent ${statusClass(st.level)}">
       <div class="row spread">
         <div class="grow">
           <h2 style="font-size:19px">${esc(fullName(p))}</h2>
-          <div class="small muted">${esc([labelOf(JOB_TYPES, p.job_type), p.position, p.crew]
+          <div class="small muted">${esc([labelOf(JOB_TYPES, p.job_type), p.position, crewLabel(p.crew)]
             .filter(Boolean).join(' · '))}</div>
         </div>
         <span class="pill">${st.level === 'green' ? 'All current' : st.level === 'grey' ? 'Finished'
@@ -1068,6 +1243,29 @@ function renderPerson(view, id) {
       <button class="btn ghost sm" id="addLink">${icon('link')} Link one in SharePoint</button>
     </div>
 
+    <div class="section-title">Contract changes${changes.length ? ` — ${changes.length}` : ''}</div>
+    ${lastRise ? `<div class="banner info">Last pay rise ${esc(fmtDate(lastRise.effective_on))}${
+        // the figures follow the Show pay toggle, same as the Pay section
+        payShown && lastRise.previous_value && lastRise.new_value
+          ? ` — ${esc(lastRise.previous_value)} to ${esc(lastRise.new_value)}` : ''
+      }${age.months !== null ? ` · ${esc(monthsText(age.months))} ago` : ''}</div>`
+      : `<div class="banner ${age.months !== null && age.months >= 18 ? 'status-orange' : 'info'}">
+          No pay rise recorded${age.months !== null
+            ? ` · ${esc(monthsText(age.months))} since ${age.basis === 'review' ? 'their last review' : 'they started'}`
+            : ''}.</div>`}
+    ${changes.length ? changes.map(c => changeRow(c)).join('')
+      : `<p class="small muted">Nothing recorded yet.</p>`}
+    <button class="btn ghost wide sm mb" id="addChange">${icon('plus')} Record a contract change</button>
+
+    <div class="section-title">Disciplinary${discipline.length ? ` — ${discipline.length}` : ''}</div>
+    ${live.length ? `<div class="banner status-red">${
+        live.length === 1 ? esc(levelOf(live[0].level).label) + ' in force'
+                          : esc(plural(live.length, 'live warning'))
+      }${live[0].expires_on ? ` until ${esc(fmtDate(live[0].expires_on))}` : ''}.</div>` : ''}
+    ${discipline.length ? discipline.map(d => disciplineRow(d)).join('')
+      : `<p class="small muted">Nothing on record.</p>`}
+    <button class="btn ghost wide sm mb" id="addDiscipline">${icon('plus')} Record a disciplinary action</button>
+
     <div class="section-title">Details</div>
     <div class="card">
       ${kv('Phone', p.phone)}
@@ -1104,7 +1302,16 @@ function renderPerson(view, id) {
     b.onclick = () => credSheet(p, typeById(b.dataset.cred));
   });
   $$('[data-doc]', view).forEach(b => {
-    b.onclick = () => docSheet(DB.documents.find(d => d.id === b.dataset.doc), p);
+    b.onclick = () => docSheet(docById(b.dataset.doc), p);
+  });
+
+  $('#addChange').onclick = () => changeSheet(p, null);
+  $('#addDiscipline').onclick = () => disciplineSheet(p, null);
+  $$('[data-change]', view).forEach(b => {
+    b.onclick = () => changeSheet(p, DB.contract_changes.find(c => c.id === b.dataset.change));
+  });
+  $$('[data-discipline]', view).forEach(b => {
+    b.onclick = () => disciplineSheet(p, DB.disciplinary_actions.find(d => d.id === b.dataset.discipline));
   });
   wireGo(view);
 
@@ -1121,6 +1328,48 @@ function renderPerson(view, id) {
     const box = $('#auditBox');
     if (box) box.innerHTML = `<p class="small muted">History unavailable.</p>`;
   });
+}
+
+/** "14 months" as "1 yr 2 mths" once it passes a year. */
+function monthsText(m) {
+  if (m === null || m === undefined) return '';
+  if (m < 1) return 'less than a month';
+  if (m < 12) return plural(m, 'month');
+  const y = Math.floor(m / 12), r = m % 12;
+  return r ? `${y} yr${y === 1 ? '' : 's'} ${r} mth${r === 1 ? '' : 's'}` : `${y} yr${y === 1 ? '' : 's'}`;
+}
+
+function changeRow(c) {
+  // Pay figures stay behind the Show pay toggle even here.
+  const hide = c.kind === 'pay_rise' && !payShown;
+  const moved = hide ? (c.summary || 'Figures hidden — tap Show pay')
+    : c.previous_value && c.new_value
+      ? `${c.previous_value} → ${c.new_value}` : (c.new_value || c.summary || '');
+  const doc = c.document_id ? docById(c.document_id) : null;
+  return `<button class="cred status-grey" data-change="${esc(c.id)}">
+    <span class="grow">
+      <span class="nm">${esc(labelOf(CONTRACT_KINDS, c.kind))}${
+        doc ? ` <span class="tiny muted">${esc(doc.source === 'sharepoint' ? '· in SharePoint' : '· document attached')}</span>` : ''}</span>
+      <span class="dt">${esc(moved || 'No detail recorded')}</span>
+    </span>
+    <span class="st">${esc(fmtDate(c.effective_on))}</span>
+  </button>`;
+}
+
+function disciplineRow(d) {
+  const lv = levelOf(d.level);
+  const live = isLive(d);
+  const doc = d.document_id ? docById(d.document_id) : null;
+  return `<button class="cred status-${live ? lv.tone : 'grey'}" data-discipline="${esc(d.id)}">
+    <span class="grow">
+      <span class="nm">${esc(lv.label)}${live ? '' : ' <span class="tiny muted">(spent)</span>'}${
+        doc ? ` <span class="tiny muted">· document attached</span>` : ''}</span>
+      <span class="dt">${esc([d.summary || 'No summary recorded',
+        d.expires_on ? (live ? 'in force to ' + fmtDate(d.expires_on) : 'lapsed ' + fmtDate(d.expires_on)) : ''
+      ].filter(Boolean).join(' · '))}</span>
+    </span>
+    <span class="st">${esc(fmtDate(d.action_on))}</span>
+  </button>`;
 }
 
 function kv(label, value) {
@@ -1156,7 +1405,7 @@ function renderPersonEdit(view, id) {
         <div class="fields2">
           ${field('Role type', 'job_type', p.job_type, 'select', { options: JOB_TYPES })}
           ${field('Job title', 'position', p.position, 'text', { placeholder: 'Paver operator' })}
-          ${field('Crew / depot', 'crew', p.crew)}
+          ${field('Crew', 'crew', p.crew, 'select', { options: crewOptions(p.crew) })}
           ${field('Employment type', 'employment_type', p.employment_type, 'select', { options: EMPLOYMENT_TYPES })}
           ${field('Started', 'start_date', p.start_date, 'date')}
           ${field('Status', 'status', p.status, 'select', { options: PERSON_STATUS })}
@@ -1334,6 +1583,232 @@ function credSheet(person, type) {
 }
 
 /* ================================================================
+   Contract changes and disciplinary actions
+
+   Both can carry the PDF in the same step — pick a file and it uploads,
+   lands in Documents, and links itself to the record.
+   ================================================================ */
+
+/** Shared: upload an optional file and return the new document's id, or null. */
+async function attachIfChosen(el, person, kind, title, docDate) {
+  const input = $('[data-file]', el);
+  const file = input && input.files[0];
+  if (!file) return null;
+  if (file.size > 40 * 1024 * 1024) throw new Error('That file is over 40 MB. Link it in SharePoint instead.');
+
+  const path = await Store.upload(person.id, file);
+  const saved = await Store.insert('documents', {
+    person_id: person.id,
+    kind,
+    title: title || file.name,
+    doc_date: docDate || null,
+    source: 'upload',
+    storage_path: path,
+    file_name: file.name,
+    file_type: file.type || '',
+    file_size: file.size,
+    added_by: (Auth.me && Auth.me.name) || (Auth.session && Auth.session.email) || ''
+  });
+  return saved.id;
+}
+
+const fileField = label =>
+  `<label class="field"><span>${esc(label)}</span>
+    <input type="file" data-file style="padding:11px"></label>`;
+
+function changeSheet(person, existing) {
+  const c = existing || { kind: 'pay_rise', effective_on: today() };
+  const doc = c.document_id ? docById(c.document_id) : null;
+
+  sheet(`
+    <h2>${existing ? 'Contract change' : 'Record a contract change'}</h2>
+    <p class="sub">${esc(fullName(person))}</p>
+    <form id="cc">
+      ${field('What changed', 'kind', c.kind, 'select', { options: CONTRACT_KINDS })}
+      <div class="fields2">
+        ${field('Took effect', 'effective_on', c.effective_on, 'date')}
+        ${field('Addendum signed', 'signed_on', c.signed_on, 'date')}
+        ${field('From', 'previous_value', c.previous_value, 'text', { placeholder: '$32.00 per hour' })}
+        ${field('To', 'new_value', c.new_value, 'text', { placeholder: '$34.50 per hour' })}
+      </div>
+      ${field('Summary', 'summary', c.summary, 'text', { placeholder: 'Annual review — 7.8% increase' })}
+      ${field('Notes', 'notes', c.notes, 'textarea', { rows: 2 })}
+      ${doc ? `<button type="button" class="attach" data-view>${icon('file')}
+          <span class="grow"><span class="ellip">${esc(doc.title || doc.file_name)}</span>
+          <span class="sub">Tap to read it</span></span></button>`
+        : fileField('Attach the addendum (optional)')}
+      <div class="btn-row">
+        <button type="button" class="btn ghost" data-no>Cancel</button>
+        <button type="submit" class="btn primary" data-save>${existing ? 'Save' : 'Record it'}</button>
+      </div>
+      ${existing ? `<button type="button" class="btn danger wide mt sm" data-del>Remove this record</button>` : ''}
+    </form>`, (el, close) => {
+
+    $('[data-no]', el).onclick = close;
+    const v = $('[data-view]', el);
+    if (v) v.onclick = () => { close(); viewDocument(doc); };
+
+    $('#cc', el).onsubmit = async e => {
+      e.preventDefault();
+      const btn = $('[data-save]', el);
+      const d = readForm(el);
+      d.person_id = person.id;
+      if (!d.effective_on) d.effective_on = null;
+      if (!d.signed_on) d.signed_on = null;
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        const kindLabel = labelOf(CONTRACT_KINDS, d.kind);
+        const docId = await attachIfChosen(el, person, 'addendum',
+          `${kindLabel} — ${fmtDate(d.effective_on)}`, d.effective_on);
+        if (docId) d.document_id = docId;
+        d.recorded_by = (Auth.me && Auth.me.name) || (Auth.session && Auth.session.email) || '';
+
+        const moved = d.previous_value && d.new_value ? ` (${d.previous_value} → ${d.new_value})` : '';
+        if (existing) {
+          await Store.patch('contract_changes', c.id, d);
+          note('contract', c.id, 'changed',
+            `${kindLabel} updated for ${fullName(person)}${moved}`, person.id);
+        } else {
+          const saved = await Store.insert('contract_changes', d);
+          note('contract', saved.id, 'added',
+            `${kindLabel} recorded for ${fullName(person)}, effective ${fmtDate(d.effective_on)}${moved}`,
+            person.id);
+        }
+
+        // A pay rise is also the answer to "when was pay last reviewed".
+        if (d.kind === 'pay_rise' && d.effective_on) {
+          await Store.patch('people', person.id, { pay_reviewed_on: d.effective_on });
+        }
+        close();
+        toast('Saved.');
+        render();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = existing ? 'Save' : 'Record it';
+        toast('Could not save: ' + err.message);
+      }
+    };
+
+    const del = $('[data-del]', el);
+    if (del) del.onclick = () => {
+      close();
+      confirmSheet('Remove this record?',
+        `${labelOf(CONTRACT_KINDS, c.kind)} for ${fullName(person)}. The document itself stays on file.`,
+        'Remove', async () => {
+          try {
+            await Store.remove('contract_changes', c.id);
+            note('contract', c.id, 'removed',
+              `${labelOf(CONTRACT_KINDS, c.kind)} removed for ${fullName(person)}`, person.id);
+            toast('Removed.');
+            render();
+          } catch (err) { toast('Could not remove: ' + err.message); }
+        });
+    };
+  });
+}
+
+function disciplineSheet(person, existing) {
+  const a = existing || { level: 'verbal_warning', action_on: today(), incident_on: today() };
+  const doc = a.document_id ? docById(a.document_id) : null;
+
+  sheet(`
+    <h2>${existing ? 'Disciplinary record' : 'Record a disciplinary action'}</h2>
+    <p class="sub">${esc(fullName(person))}</p>
+    <form id="da">
+      ${field('Level', 'level', a.level, 'select',
+        { options: DISCIPLINE_LEVELS.map(l => ({ key: l.key, label: l.label })) })}
+      <div class="fields2">
+        ${field('Incident happened', 'incident_on', a.incident_on, 'date')}
+        ${field('Action taken', 'action_on', a.action_on, 'date')}
+        ${field('In force until', 'expires_on', a.expires_on, 'date')}
+        ${field('Issued by', 'issued_by', a.issued_by, 'text')}
+      </div>
+      <p class="tiny muted" style="margin-top:-6px">Leave <b>in force until</b> blank and it counts
+        indefinitely. Twelve months from the action is the usual practice.</p>
+      ${field('What happened', 'summary', a.summary, 'textarea', { rows: 3 })}
+      ${field('Outcome', 'outcome', a.outcome, 'textarea', { rows: 2 })}
+      ${doc ? `<button type="button" class="attach" data-view>${icon('file')}
+          <span class="grow"><span class="ellip">${esc(doc.title || doc.file_name)}</span>
+          <span class="sub">Tap to read it</span></span></button>`
+        : fileField('Attach the letter (optional)')}
+      <div class="btn-row">
+        <button type="button" class="btn ghost" data-no>Cancel</button>
+        <button type="submit" class="btn primary" data-save>${existing ? 'Save' : 'Record it'}</button>
+      </div>
+      ${existing ? `<button type="button" class="btn danger wide mt sm" data-del>Remove this record</button>` : ''}
+    </form>`, (el, close) => {
+
+    $('[data-no]', el).onclick = close;
+    const v = $('[data-view]', el);
+    if (v) v.onclick = () => { close(); viewDocument(doc); };
+
+    // Setting the level to a warning offers twelve months by default.
+    const lvSel = $('select[name="level"]', el);
+    const expIn = $('input[name="expires_on"]', el);
+    lvSel.onchange = () => {
+      if (expIn.value || lvSel.value === 'informal' || lvSel.value === 'dismissal') return;
+      const base = $('input[name="action_on"]', el).value || today();
+      const d = new Date(base + 'T00:00:00');
+      if (isNaN(d)) return;
+      d.setFullYear(d.getFullYear() + 1);
+      expIn.value = d.toISOString().slice(0, 10);
+    };
+
+    $('#da', el).onsubmit = async e => {
+      e.preventDefault();
+      const btn = $('[data-save]', el);
+      const d = readForm(el);
+      d.person_id = person.id;
+      ['incident_on', 'action_on', 'expires_on'].forEach(k => { if (!d[k]) d[k] = null; });
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        const lv = levelOf(d.level).label;
+        const docId = await attachIfChosen(el, person, 'policy',
+          `${lv} — ${fmtDate(d.action_on)}`, d.action_on);
+        if (docId) d.document_id = docId;
+        d.recorded_by = (Auth.me && Auth.me.name) || (Auth.session && Auth.session.email) || '';
+
+        if (existing) {
+          await Store.patch('disciplinary_actions', a.id, d);
+          note('discipline', a.id, 'changed', `${lv} updated for ${fullName(person)}`, person.id);
+        } else {
+          const saved = await Store.insert('disciplinary_actions', d);
+          note('discipline', saved.id, 'added',
+            `${lv} recorded for ${fullName(person)}, action taken ${fmtDate(d.action_on)}`, person.id);
+        }
+        close();
+        toast('Saved.');
+        render();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = existing ? 'Save' : 'Record it';
+        toast('Could not save: ' + err.message);
+      }
+    };
+
+    const del = $('[data-del]', el);
+    if (del) del.onclick = () => {
+      close();
+      confirmSheet('Remove this record?',
+        `${levelOf(a.level).label} for ${fullName(person)}. This is an employment record — only remove it if it was entered in error.`,
+        'Remove', async () => {
+          try {
+            await Store.remove('disciplinary_actions', a.id);
+            note('discipline', a.id, 'removed',
+              `${levelOf(a.level).label} removed for ${fullName(person)}`, person.id);
+            toast('Removed.');
+            render();
+          } catch (err) { toast('Could not remove: ' + err.message); }
+        });
+    };
+  });
+}
+
+/* ================================================================
    Documents
    ================================================================ */
 function uploadSheet(person) {
@@ -1433,6 +1908,75 @@ function linkSheet(person) {
   });
 }
 
+/**
+ * Opens a document on the device: PDFs and images render right here, and
+ * anything else offers a download. SharePoint-linked documents still go to
+ * SharePoint, because the file is not ours to fetch.
+ */
+function viewDocument(doc) {
+  if (!doc) return;
+  if (doc.source === 'sharepoint') { window.open(doc.url, '_blank', 'noopener'); return; }
+
+  let objectUrl = null;
+
+  const close = sheet(`
+    <div class="row spread mb">
+      <div class="grow">
+        <h2 class="ellip">${esc(doc.title || doc.file_name || 'Document')}</h2>
+        <div class="sub" style="margin:0">${esc([labelOf(DOC_KINDS, doc.kind),
+          doc.doc_date ? fmtDate(doc.doc_date) : ''].filter(Boolean).join(' · '))}</div>
+      </div>
+      <button class="icon-btn" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="viewer" id="vBody">
+      <div class="viewer-wait">${icon('spin', 'spin')}<span>Fetching it…</span></div>
+    </div>
+    <div class="btn-row mt" id="vActions"></div>`, (el, closeFn) => {
+
+    $('[data-close]', el).onclick = closeFn;
+
+    Store.blobUrl(doc.storage_path).then(({ url, type }) => {
+      objectUrl = url;
+      const body = $('#vBody', el);
+      if (!body) { URL.revokeObjectURL(url); return; }
+
+      const isPdf = /pdf/i.test(type) || /\.pdf$/i.test(doc.file_name || '');
+      const isImg = /^image\//i.test(type) || /\.(png|jpe?g|gif|webp|heic)$/i.test(doc.file_name || '');
+
+      if (isPdf) {
+        body.innerHTML = `<iframe src="${url}#view=FitH" title="Document"></iframe>`;
+      } else if (isImg) {
+        body.innerHTML = `<img src="${url}" alt="${esc(doc.title || 'Document')}">`;
+      } else {
+        body.innerHTML = `<div class="viewer-wait">${icon('file')}
+          <span>This kind of file can't be shown here — download it to open it.</span></div>`;
+      }
+
+      const acts = $('#vActions', el);
+      if (acts) acts.innerHTML =
+        `<a class="btn" href="${url}" download="${esc(doc.file_name || doc.title || 'document')}">
+           ${icon('down')} Download</a>
+         <a class="btn ghost" href="${url}" target="_blank" rel="noopener">Open in a tab</a>`;
+    }).catch(err => {
+      const body = $('#vBody', el);
+      if (body) body.innerHTML = `<div class="viewer-wait">${esc(err.message)}</div>`;
+    });
+  });
+
+  // Give the browser back the memory when the sheet goes.
+  const bg = $('.sheet-bg');
+  if (bg) new MutationObserver((_, obs) => {
+    if (!document.body.contains(bg)) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      obs.disconnect();
+    }
+  }).observe(document.body, { childList: true });
+
+  return close;
+}
+
 function docSheet(doc, person) {
   if (!doc) return;
   sheet(`
@@ -1447,27 +1991,13 @@ function docSheet(doc, person) {
     </div>
     <button class="btn danger wide mt sm" data-del>${icon('trash')} Remove this document</button>
     ${doc.source === 'upload'
-      ? `<p class="tiny muted mt">Opens through a private link that stops working after five minutes.</p>` : ''}`,
+      ? `<p class="tiny muted mt">Opens here on the device. Nothing is left behind when you close it.</p>`
+      : `<p class="tiny muted mt">This one lives in SharePoint, so it opens there.</p>`}`,
     (el, close) => {
 
     $('[data-no]', el).onclick = close;
 
-    $('[data-open]', el).onclick = async () => {
-      const btn = $('[data-open]', el);
-      if (doc.source === 'sharepoint') { window.open(doc.url, '_blank', 'noopener'); return; }
-      btn.disabled = true;
-      btn.textContent = 'Opening…';
-      try {
-        const url = await Store.signedUrl(doc.storage_path, 300);
-        window.open(url, '_blank', 'noopener');
-        btn.disabled = false;
-        btn.innerHTML = icon('eye') + ' Open';
-      } catch (err) {
-        btn.disabled = false;
-        btn.innerHTML = icon('eye') + ' Open';
-        toast(err.message);
-      }
-    };
+    $('[data-open]', el).onclick = () => { close(); viewDocument(doc); };
 
     $('[data-del]', el).onclick = () => {
       close();
@@ -1522,6 +2052,122 @@ function renderExpiring(view) {
   $('#printExp').onclick = () => printExpiring(win);
   $('#csvExp').onclick = () => csvExpiring(win);
   wireAttention(view);
+}
+
+/* ================================================================
+   Screen — pay and addendum history
+
+   The question this answers: who has not had a rise in a long time, and
+   what has actually been changed on anyone's contract.
+   ================================================================ */
+const contractsView = { tab: 'pay' };
+
+function renderContracts(view) {
+  const mode = contractsView.tab;
+
+  const people = onBooks().slice().sort((a, b) => {
+    const am = payAge(a).months, bm = payAge(b).months;
+    return (bm === null ? -1 : bm) - (am === null ? -1 : am);
+  });
+
+  const all = DB.contract_changes.slice().sort(dateDesc('effective_on'));
+
+  const chip = (k, l) => `<button class="chip" data-tab="${k}" aria-pressed="${mode === k}">${esc(l)}</button>`;
+
+  view.innerHTML = `
+    <div class="filters">${chip('pay', 'Time since last rise')}${chip('all', 'Every change')}</div>
+
+    ${mode === 'pay' ? `
+      <p class="small muted mb">Longest wait first. Amber past 18 months, red past two years —
+        counted from their last rise, or from when they started if they have not had one.</p>
+      ${people.length ? people.map(p => {
+        const age = payAge(p);
+        const rise = lastPayRise(p.id);
+        const lvl = age.months === null ? 'grey' : age.months >= 24 ? 'red'
+                  : age.months >= 18 ? 'orange' : 'green';
+        return `<button class="cred status-${lvl}" data-person="${esc(p.id)}">
+          <span class="grow">
+            <span class="nm">${esc(fullName(p))}</span>
+            <span class="dt">${esc([crewLabel(p.crew), rise
+              ? `Last rise ${fmtDate(rise.effective_on)}${rise.new_value ? ' — now ' + rise.new_value : ''}`
+              : age.basis === 'review' ? `Reviewed ${fmtDate(age.since)}, no rise recorded`
+              : age.since ? `Started ${fmtDate(age.since)}, no rise recorded` : 'Nothing on record'
+            ].filter(Boolean).join(' · '))}</span>
+          </span>
+          <span class="st">${age.months === null ? '—' : esc(monthsText(age.months))}</span>
+        </button>`;
+      }).join('') : `<div class="empty"><b>Nobody on the books</b></div>`}
+    ` : `
+      <p class="small muted mb">Every recorded change to anyone's contract, newest first.</p>
+      ${all.length ? all.map(c => {
+        const p = personById(c.person_id);
+        const moved = c.previous_value && c.new_value ? `${c.previous_value} → ${c.new_value}` : c.summary;
+        return `<button class="cred status-grey" data-person="${esc(c.person_id)}">
+          <span class="grow">
+            <span class="nm">${esc(p ? fullName(p) : 'Unknown')}
+              <span class="tiny muted">· ${esc(labelOf(CONTRACT_KINDS, c.kind))}</span></span>
+            <span class="dt">${esc(moved || 'No detail recorded')}</span>
+          </span>
+          <span class="st">${esc(fmtDate(c.effective_on))}</span>
+        </button>`;
+      }).join('') : `<div class="empty"><b>No contract changes recorded yet</b>
+        Add them from a person's file.</div>`}
+    `}
+
+    <div class="btn-row mt">
+      <button class="btn" id="printPay">${icon('print')} Print this</button>
+      <button class="btn ghost" id="csvPay">${icon('down')} Export CSV</button>
+    </div>`;
+
+  $$('[data-tab]', view).forEach(b => {
+    b.onclick = () => { contractsView.tab = b.dataset.tab; render(); };
+  });
+  $('#printPay').onclick = () => mode === 'pay' ? printPayReview() : printContractChanges();
+  $('#csvPay').onclick = () => mode === 'pay' ? csvPayReview() : csvContractChanges();
+  wirePeople(view);
+}
+
+/* ================================================================
+   Screen — disciplinary register
+   ================================================================ */
+function renderDiscipline(view) {
+  const all = DB.disciplinary_actions.slice().sort(dateDesc('action_on'));
+  const live = all.filter(isLive);
+  const spent = all.filter(a => !isLive(a));
+
+  const row = a => {
+    const p = personById(a.person_id);
+    const lv = levelOf(a.level);
+    const on = isLive(a);
+    return `<button class="cred status-${on ? lv.tone : 'grey'}" data-person="${esc(a.person_id)}">
+      <span class="grow">
+        <span class="nm">${esc(p ? fullName(p) : 'Unknown')}
+          <span class="tiny muted">· ${esc(lv.label)}</span></span>
+        <span class="dt">${esc([p && crewLabel(p.crew), a.summary].filter(Boolean).join(' · ')) || 'No summary recorded'}</span>
+      </span>
+      <span class="st">${esc(fmtDate(a.action_on))}${a.expires_on
+        ? `<br><span class="muted" style="font-weight:500">${on ? 'to ' : 'lapsed '}${esc(fmtDate(a.expires_on))}</span>` : ''}</span>
+    </button>`;
+  };
+
+  view.innerHTML = `
+    ${!all.length ? `<div class="empty"><b>Nothing on record</b>
+        Disciplinary actions are added from a person's file.</div>` : `
+      <div class="section-title">In force — ${live.length}</div>
+      ${live.length ? live.map(row).join('')
+        : `<div class="banner status-green">No warnings currently in force.</div>`}
+
+      <div class="section-title">Spent or informal — ${spent.length}</div>
+      ${spent.length ? spent.map(row).join('') : `<p class="small muted">Nothing.</p>`}
+
+      <div class="btn-row mt">
+        <button class="btn" id="printDis">${icon('print')} Print the register</button>
+        <button class="btn ghost" id="csvDis">${icon('down')} Export CSV</button>
+      </div>`}`;
+
+  const pd = $('#printDis'); if (pd) pd.onclick = printDiscipline;
+  const cd = $('#csvDis');   if (cd) cd.onclick = csvDiscipline;
+  wirePeople(view);
 }
 
 /* ================================================================
@@ -1602,6 +2248,22 @@ function renderReports(view) {
     </div>
 
     <div class="card">
+      <h2>Pay review</h2>
+      <p class="small muted">Everyone by how long since their last rise, longest wait first.
+        The one for a pay round.</p>
+      <div class="btn-row">
+        <button class="btn sm grow" id="r5">${icon('print')} Print</button>
+        <button class="btn sm ghost" id="r6">${icon('print')} Every contract change</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Disciplinary register</h2>
+      <p class="small muted">Warnings in force, then spent ones, with dates, outcomes and who issued them.</p>
+      <button class="btn wide sm" id="r7">${icon('print')} Print the register</button>
+    </div>
+
+    <div class="card">
       <h2>Licence and ticket matrix</h2>
       <p class="small muted">One grid, everyone against everything. Good for the wall.</p>
       <button class="btn wide sm" id="r3">${icon('print')} Print the matrix</button>
@@ -1628,6 +2290,9 @@ function renderReports(view) {
         <button class="btn sm ghost" id="c1">${icon('down')} Staff list</button>
         <button class="btn sm ghost" id="c2">${icon('down')} All licences</button>
         <button class="btn sm ghost" id="c3">${icon('down')} Documents held</button>
+        <button class="btn sm ghost" id="c4">${icon('down')} Pay review</button>
+        <button class="btn sm ghost" id="c5">${icon('down')} Contract changes</button>
+        <button class="btn sm ghost" id="c6">${icon('down')} Disciplinary</button>
       </div>
     </div>`;
 
@@ -1638,9 +2303,15 @@ function renderReports(view) {
     const p = personById($('#r4who').value);
     if (p) printStaffFile(p, $('#r4pay').checked);
   };
+  $('#r5').onclick = printPayReview;
+  $('#r6').onclick = printContractChanges;
+  $('#r7').onclick = printDiscipline;
   $('#c1').onclick = csvStaff;
   $('#c2').onclick = csvCredentials;
   $('#c3').onclick = csvDocuments;
+  $('#c4').onclick = csvPayReview;
+  $('#c5').onclick = csvContractChanges;
+  $('#c6').onclick = csvDiscipline;
 }
 
 /* ================================================================
@@ -2048,7 +2719,7 @@ function printRegister() {
     const rows = checksFor(p);
     const st = standing(p);
     return `<div class="avoid-break" style="margin-bottom:5mm">
-      <h2>${esc(fullName(p))} — ${esc(labelOf(JOB_TYPES, p.job_type))}${p.crew ? ' · ' + esc(p.crew) : ''}
+      <h2>${esc(fullName(p))} — ${esc(labelOf(JOB_TYPES, p.job_type))}${p.crew ? ' · ' + esc(crewLabel(p.crew)) : ''}
         ${badgeFor(st.level, st.level === 'green' ? 'CURRENT' : st.level === 'orange' ? 'DUE SOON' : 'ACTION')}</h2>
       <table><thead><tr><th>Requirement</th><th>Detail</th><th>Number</th><th>Expires</th><th>Standing</th></tr></thead>
       <tbody>${rows.length ? rows.map(r => `<tr>
@@ -2080,7 +2751,7 @@ function printExpiring(win) {
     <thead><tr><th>Name</th><th>Role</th><th>Requirement</th><th>Detail</th><th>Expires</th><th>Standing</th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td>${esc(fullName(r.person))}</td>
-      <td>${esc(labelOf(JOB_TYPES, r.person.job_type))}${r.person.crew ? ' · ' + esc(r.person.crew) : ''}</td>
+      <td>${esc(labelOf(JOB_TYPES, r.person.job_type))}${r.person.crew ? ' · ' + esc(crewLabel(r.person.crew)) : ''}</td>
       <td>${esc(r.type.name)}</td>
       <td>${esc((r.cred && r.cred.detail) || '')}</td>
       <td>${r.cred && r.cred.expires_on ? esc(fmtDate(r.cred.expires_on)) : '—'}</td>
@@ -2115,13 +2786,15 @@ function printMatrix() {
 function printStaffFile(p, withPay) {
   const rows = checksFor(p);
   const docs = docsFor(p.id);
+  const changes = changesFor(p.id);
+  const discipline = disciplineFor(p.id);
   const st = standing(p);
 
   printDoc(docHead(fullName(p), `Staff file · ${fmtDate(today())}`) + `
     <table class="kv">
       <tr><td>Employee number</td><td>${esc(p.employee_no || '—')}</td></tr>
       <tr><td>Role</td><td>${esc(labelOf(JOB_TYPES, p.job_type))}${p.position ? ' — ' + esc(p.position) : ''}</td></tr>
-      <tr><td>Crew / depot</td><td>${esc(p.crew || '—')}</td></tr>
+      <tr><td>Crew</td><td>${esc(crewLabel(p.crew) || '—')}</td></tr>
       <tr><td>Employment</td><td>${esc(labelOf(EMPLOYMENT_TYPES, p.employment_type))}</td></tr>
       <tr><td>Started</td><td>${esc(fmtDate(p.start_date))} ${p.start_date ? '(' + esc(serviceText(p.start_date, p.end_date)) + ')' : ''}</td></tr>
       ${p.end_date ? `<tr><td>Finished</td><td>${esc(fmtDate(p.end_date))}</td></tr>` : ''}
@@ -2152,6 +2825,39 @@ function printStaffFile(p, withPay) {
         <td>${badgeFor(r.level, r.text)}</td></tr>`).join('')}</tbody></table>`
       : '<p>None recorded.</p>'}
 
+    <h2>Contract changes — ${changes.length}</h2>
+    ${changes.length ? `<table>
+      <thead><tr><th>Effective</th><th>What changed</th><th>From</th><th>To</th><th>Signed</th><th>Summary</th></tr></thead>
+      <tbody>${changes.map(c => {
+        // A pay rise carries the rate. Without "include pay" ticked, the fact
+        // of the rise still prints but the figures do not.
+        const hide = c.kind === 'pay_rise' && !withPay;
+        return `<tr>
+        <td>${esc(fmtDate(c.effective_on))}</td>
+        <td>${esc(labelOf(CONTRACT_KINDS, c.kind))}</td>
+        <td>${hide ? '<i>withheld</i>' : esc(c.previous_value || '—')}</td>
+        <td>${hide ? '<i>withheld</i>' : esc(c.new_value || '—')}</td>
+        <td>${c.signed_on ? esc(fmtDate(c.signed_on)) : '—'}</td>
+        <td class="note">${esc(c.summary || '')}</td></tr>`;
+      }).join('')}</tbody></table>
+      ${changes.some(c => c.kind === 'pay_rise') && !withPay
+        ? '<p style="font-size:8.5pt">Pay figures withheld — print with <b>Include pay</b> ticked to show them.</p>' : ''}`
+      : '<p>None recorded.</p>'}
+
+    <h2>Disciplinary — ${discipline.length}</h2>
+    ${discipline.length ? `<table>
+      <thead><tr><th>Action taken</th><th>Level</th><th>Incident</th><th>In force to</th>
+        <th>What happened</th><th>Outcome</th><th>Issued by</th></tr></thead>
+      <tbody>${discipline.map(a => `<tr>
+        <td>${esc(fmtDate(a.action_on))}</td>
+        <td>${badgeFor(isLive(a) ? levelOf(a.level).tone : 'grey', levelOf(a.level).label)}</td>
+        <td>${a.incident_on ? esc(fmtDate(a.incident_on)) : '—'}</td>
+        <td>${a.expires_on ? esc(fmtDate(a.expires_on)) : 'no end date'}</td>
+        <td class="note">${esc(a.summary || '')}</td>
+        <td class="note">${esc(a.outcome || '')}</td>
+        <td>${esc(a.issued_by || '')}</td></tr>`).join('')}</tbody></table>`
+      : '<p>Nothing on record.</p>'}
+
     <h2>Documents held — ${docs.length}</h2>
     ${docs.length ? `<table>
       <thead><tr><th>What</th><th>Title</th><th>Dated</th><th>Where</th></tr></thead>
@@ -2163,6 +2869,85 @@ function printStaffFile(p, withPay) {
       : '<p>None on file.</p>'}
 
     ${p.notes ? `<h2>Notes</h2><p class="note">${esc(p.notes)}</p>` : ''}`);
+}
+
+function printPayReview() {
+  const people = onBooks().slice().sort((a, b) => {
+    const am = payAge(a).months, bm = payAge(b).months;
+    return (bm === null ? -1 : bm) - (am === null ? -1 : am);
+  });
+  printDoc(docHead('Pay review — time since last rise', `${plural(people.length, 'person')} · ${fmtDate(today())}`) + `
+    <table>
+      <thead><tr><th>Name</th><th>Crew</th><th>Role</th><th>Last rise</th><th>Went to</th>
+        <th>Time since</th><th>Standing</th></tr></thead>
+      <tbody>${people.map(p => {
+        const age = payAge(p);
+        const rise = lastPayRise(p.id);
+        const lvl = age.months === null ? 'grey' : age.months >= 24 ? 'red'
+                  : age.months >= 18 ? 'orange' : 'green';
+        return `<tr>
+          <td>${esc(fullName(p))}</td>
+          <td>${esc(crewLabel(p.crew) || '—')}</td>
+          <td>${esc(labelOf(JOB_TYPES, p.job_type))}</td>
+          <td>${rise ? esc(fmtDate(rise.effective_on)) : '—'}</td>
+          <td>${esc((rise && rise.new_value) || '—')}</td>
+          <td>${age.months === null ? '—' : esc(monthsText(age.months))}</td>
+          <td>${badgeFor(lvl, age.months === null ? 'unknown'
+            : age.months >= 24 ? 'OVERDUE' : age.months >= 18 ? 'DUE' : 'recent')}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <p style="font-size:8.5pt;margin-top:3mm">Where no rise is recorded, the time is counted from the
+      person's last pay review, or from their start date.</p>`);
+}
+
+function printContractChanges() {
+  const all = DB.contract_changes.slice().sort(dateDesc('effective_on'));
+  printDoc(docHead('Contract changes and addendums', `${plural(all.length, 'change')} · ${fmtDate(today())}`) + `
+    <table>
+      <thead><tr><th>Effective</th><th>Name</th><th>Crew</th><th>What changed</th>
+        <th>From</th><th>To</th><th>Signed</th><th>Document</th></tr></thead>
+      <tbody>${all.map(c => {
+        const p = personById(c.person_id);
+        const d = c.document_id ? docById(c.document_id) : null;
+        return `<tr>
+          <td>${esc(fmtDate(c.effective_on))}</td>
+          <td>${esc(p ? fullName(p) : '—')}</td>
+          <td>${esc(p ? crewLabel(p.crew) : '')}</td>
+          <td>${esc(labelOf(CONTRACT_KINDS, c.kind))}${c.summary ? '<br>' + esc(c.summary) : ''}</td>
+          <td>${esc(c.previous_value || '—')}</td>
+          <td>${esc(c.new_value || '—')}</td>
+          <td>${c.signed_on ? esc(fmtDate(c.signed_on)) : '—'}</td>
+          <td>${d ? (d.source === 'sharepoint' ? 'SharePoint' : 'On file') : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`);
+}
+
+function printDiscipline() {
+  const all = DB.disciplinary_actions.slice().sort(dateDesc('action_on'));
+  const live = all.filter(isLive), spent = all.filter(a => !isLive(a));
+  const table = rows => rows.length ? `<table>
+    <thead><tr><th>Action taken</th><th>Name</th><th>Crew</th><th>Level</th><th>Incident</th>
+      <th>In force to</th><th>What happened</th><th>Outcome</th><th>Issued by</th></tr></thead>
+    <tbody>${rows.map(a => {
+      const p = personById(a.person_id);
+      return `<tr>
+        <td>${esc(fmtDate(a.action_on))}</td>
+        <td>${esc(p ? fullName(p) : '—')}</td>
+        <td>${esc(p ? crewLabel(p.crew) : '')}</td>
+        <td>${badgeFor(isLive(a) ? levelOf(a.level).tone : 'grey', levelOf(a.level).label)}</td>
+        <td>${a.incident_on ? esc(fmtDate(a.incident_on)) : '—'}</td>
+        <td>${a.expires_on ? esc(fmtDate(a.expires_on)) : 'no end date'}</td>
+        <td class="note">${esc(a.summary || '')}</td>
+        <td class="note">${esc(a.outcome || '')}</td>
+        <td>${esc(a.issued_by || '')}</td>
+      </tr>`;
+    }).join('')}</tbody></table>` : '<p>Nothing.</p>';
+
+  printDoc(docHead('Disciplinary register', `${fmtDate(today())}`) +
+    `<h2>In force — ${live.length}</h2>${table(live)}
+     <h2>Spent or informal — ${spent.length}</h2>${table(spent)}`);
 }
 
 /* ------------------------------------------------------------- CSV out */
@@ -2188,7 +2973,7 @@ function csvStaff() {
   DB.people.forEach(p => {
     const st = standing(p);
     rows.push([p.employee_no, p.first_name, p.last_name, labelOf(JOB_TYPES, p.job_type), p.position,
-      p.crew, labelOf(EMPLOYMENT_TYPES, p.employment_type), p.start_date || '',
+      crewLabel(p.crew), labelOf(EMPLOYMENT_TYPES, p.employment_type), p.start_date || '',
       serviceText(p.start_date, p.end_date), labelOf(PERSON_STATUS, p.status),
       p.phone, p.email, st.text]);
   });
@@ -2212,7 +2997,7 @@ function csvCredentials() {
 function csvExpiring(win) {
   const rows = [['Name', 'Role type', 'Crew', 'Requirement', 'Expires', 'Days left', 'Standing']];
   attention().filter(r => r.level === 'red' || r.days === null || r.days <= win).forEach(r => {
-    rows.push([fullName(r.person), labelOf(JOB_TYPES, r.person.job_type), r.person.crew,
+    rows.push([fullName(r.person), labelOf(JOB_TYPES, r.person.job_type), crewLabel(r.person.crew),
       r.type.name, (r.cred && r.cred.expires_on) || '', r.days === null ? '' : r.days, r.text]);
   });
   download(`rck-expiring-${win}days.csv`, rows);
@@ -2222,13 +3007,53 @@ function csvMatrix() {
   const types = activeTypes();
   const rows = [['Name', 'Role type', 'Crew'].concat(types.map(t => t.name))];
   onBooks().forEach(p => {
-    rows.push([fullName(p), labelOf(JOB_TYPES, p.job_type), p.crew].concat(types.map(t => {
+    rows.push([fullName(p), labelOf(JOB_TYPES, p.job_type), crewLabel(p.crew)].concat(types.map(t => {
       const r = checkOne(p, t);
       if (r.level === 'grey') return '';
       return r.cred && r.cred.expires_on ? r.cred.expires_on : r.text;
     })));
   });
   download('rck-licence-matrix.csv', rows);
+}
+
+function csvPayReview() {
+  const rows = [['Name', 'Employee no', 'Crew', 'Role', 'Last rise', 'From', 'To',
+    'Months since', 'Counted from', 'Current rate']];
+  onBooks().forEach(p => {
+    const age = payAge(p);
+    const rise = lastPayRise(p.id);
+    rows.push([fullName(p), p.employee_no, crewLabel(p.crew), labelOf(JOB_TYPES, p.job_type),
+      (rise && rise.effective_on) || '', (rise && rise.previous_value) || '',
+      (rise && rise.new_value) || '', age.months === null ? '' : age.months,
+      age.basis === 'rise' ? 'last rise' : age.basis === 'review' ? 'last review' : 'start date',
+      p.pay_rate == null ? '' : p.pay_rate]);
+  });
+  download('rck-pay-review.csv', rows);
+}
+
+function csvContractChanges() {
+  const rows = [['Effective', 'Signed', 'Name', 'Employee no', 'Crew', 'What changed',
+    'From', 'To', 'Summary', 'Document', 'Recorded by']];
+  DB.contract_changes.slice().sort(dateDesc('effective_on')).forEach(c => {
+    const p = personById(c.person_id);
+    const d = c.document_id ? docById(c.document_id) : null;
+    rows.push([c.effective_on || '', c.signed_on || '', p ? fullName(p) : '', p ? p.employee_no : '',
+      p ? crewLabel(p.crew) : '', labelOf(CONTRACT_KINDS, c.kind), c.previous_value, c.new_value,
+      c.summary, d ? (d.source === 'sharepoint' ? 'SharePoint' : 'On file') : '', c.recorded_by]);
+  });
+  download('rck-contract-changes.csv', rows);
+}
+
+function csvDiscipline() {
+  const rows = [['Action taken', 'Incident', 'In force to', 'Still in force', 'Name', 'Employee no',
+    'Crew', 'Level', 'What happened', 'Outcome', 'Issued by']];
+  DB.disciplinary_actions.slice().sort(dateDesc('action_on')).forEach(a => {
+    const p = personById(a.person_id);
+    rows.push([a.action_on || '', a.incident_on || '', a.expires_on || '', isLive(a) ? 'yes' : 'no',
+      p ? fullName(p) : '', p ? p.employee_no : '', p ? crewLabel(p.crew) : '',
+      levelOf(a.level).label, a.summary, a.outcome, a.issued_by]);
+  });
+  download('rck-disciplinary.csv', rows);
 }
 
 function csvDocuments() {

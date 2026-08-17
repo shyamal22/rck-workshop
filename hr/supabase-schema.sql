@@ -194,6 +194,64 @@ create table if not exists documents (
 create index if not exists documents_person_idx on documents (person_id, created_at desc);
 
 -- =====================================================================
+--  Contract changes — addendums, pay rises, role and hours changes
+--
+--  The addendum PDF itself goes in `documents`; this row is what makes it
+--  searchable and reportable: when it happened, what actually changed, and
+--  what the rate went from and to. That is what answers "when did this
+--  person last get a rise" without opening a single file.
+-- =====================================================================
+create table if not exists contract_changes (
+  id            uuid primary key default gen_random_uuid(),
+  person_id     uuid not null references people(id) on delete cascade,
+  kind          text not null default 'other'
+                check (kind in ('pay_rise', 'role_change', 'hours_change',
+                                'terms_change', 'fixed_term_extension', 'other')),
+  effective_on  date,                            -- when it took effect
+  signed_on     date,                            -- when the addendum was signed
+  previous_value text not null default '',       -- "$32.00 per hour"
+  new_value      text not null default '',       -- "$34.50 per hour"
+  summary       text not null default '',
+  notes         text not null default '',
+  document_id   uuid references documents(id) on delete set null,
+  recorded_by   text not null default '',
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists contract_changes_person_idx on contract_changes (person_id, effective_on desc);
+create index if not exists contract_changes_kind_idx   on contract_changes (kind, effective_on desc);
+
+-- =====================================================================
+--  Disciplinary actions
+--
+--  Two dates on purpose: when the incident happened, and when the action
+--  was actually taken. `expires_on` is when a warning stops counting —
+--  New Zealand practice is usually twelve months — so the register can
+--  show live warnings separately from spent ones.
+-- =====================================================================
+create table if not exists disciplinary_actions (
+  id           uuid primary key default gen_random_uuid(),
+  person_id    uuid not null references people(id) on delete cascade,
+  level        text not null default 'verbal_warning'
+               check (level in ('informal', 'verbal_warning', 'written_warning',
+                                'final_warning', 'performance_plan', 'dismissal')),
+  incident_on  date,
+  action_on    date,
+  expires_on   date,                             -- when the warning lapses
+  summary      text not null default '',         -- what happened
+  outcome      text not null default '',         -- what was decided
+  issued_by    text not null default '',
+  notes        text not null default '',
+  document_id  uuid references documents(id) on delete set null,
+  recorded_by  text not null default '',
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists disciplinary_person_idx on disciplinary_actions (person_id, action_on desc);
+
+-- =====================================================================
 --  Audit trail — who changed what, kept forever
 -- =====================================================================
 create table if not exists hr_audit (
@@ -229,21 +287,33 @@ drop trigger if exists credentials_touch on credentials;
 create trigger credentials_touch before update on credentials
   for each row execute function hr_touch();
 
+drop trigger if exists contract_changes_touch on contract_changes;
+create trigger contract_changes_touch before update on contract_changes
+  for each row execute function hr_touch();
+
+drop trigger if exists disciplinary_touch on disciplinary_actions;
+create trigger disciplinary_touch before update on disciplinary_actions
+  for each row execute function hr_touch();
+
 -- =====================================================================
 --  Access — signed in AND on the guest list, or nothing
 -- =====================================================================
-alter table hr_users         enable row level security;
-alter table people           enable row level security;
-alter table credential_types enable row level security;
-alter table credentials      enable row level security;
-alter table documents        enable row level security;
-alter table hr_audit         enable row level security;
+alter table hr_users             enable row level security;
+alter table people               enable row level security;
+alter table credential_types     enable row level security;
+alter table credentials          enable row level security;
+alter table documents            enable row level security;
+alter table contract_changes     enable row level security;
+alter table disciplinary_actions enable row level security;
+alter table hr_audit             enable row level security;
 
 drop policy if exists hr_users_self    on hr_users;
 drop policy if exists people_rw        on people;
 drop policy if exists cred_types_rw    on credential_types;
 drop policy if exists credentials_rw   on credentials;
 drop policy if exists documents_rw     on documents;
+drop policy if exists contract_rw      on contract_changes;
+drop policy if exists discipline_rw    on disciplinary_actions;
 drop policy if exists hr_audit_read    on hr_audit;
 drop policy if exists hr_audit_write   on hr_audit;
 
@@ -264,6 +334,12 @@ create policy credentials_rw on credentials
   for all to authenticated using (hr_member()) with check (hr_member());
 
 create policy documents_rw on documents
+  for all to authenticated using (hr_member()) with check (hr_member());
+
+create policy contract_rw on contract_changes
+  for all to authenticated using (hr_member()) with check (hr_member());
+
+create policy discipline_rw on disciplinary_actions
   for all to authenticated using (hr_member()) with check (hr_member());
 
 -- The audit trail can be added to and read, never edited or deleted.

@@ -24,20 +24,50 @@ turns red the moment a licence their job requires is missing or out of date.
   issue dates and expiry dates.
 - Anything their role requires that they *don't* hold, marked **Missing** in red.
 - Their documents — contracts, addendums, pay letters, licence scans.
+- Every contract change, and every disciplinary action.
 - Pay, hidden behind a **Show pay** button so it isn't on screen by accident.
 - A history of every change, with who made it and when.
 
-**Documents, both ways**
-- **Upload them here** and they go into a private store. Nobody can reach them
-  without signing in, and even then the link that opens a document stops working
-  after five minutes.
+**Contract changes and addendums**
+
+An addendum is a PDF, which is no use for answering *when did this person last
+get a rise*. So each one is recorded as a dated line — what changed, what it went
+from and to, when it took effect, when it was signed — with the PDF attached to
+it. Recording a pay rise updates their pay-review date by itself.
+
+**Pay & addendums** then lists everyone by how long since their last rise, longest
+wait first — amber past eighteen months, red past two years. Where somebody has no
+rise on record it counts from their last review, or from their start date, and says
+which. The second tab is every contract change across the company, newest first.
+
+**Disciplinary**
+
+Two dates on purpose: when the incident happened, and when action was actually
+taken. Warnings carry an **in force until** date — choose a warning level and it
+offers twelve months, the usual New Zealand practice — so the register shows
+warnings still in force separately from spent ones. Informal chats are recorded
+but never count as live warnings. The letter attaches to the record.
+
+**Documents, three ways**
+- **Upload them here** and they go into a private store, then **open on the
+  device** — PDFs and photos render inside the app, with a download button. No
+  trip to SharePoint, and nothing is left behind when you close it.
 - **Or leave them in SharePoint** and paste the link. The file never moves; the
-  app just knows where it is.
+  app just knows where it is, and opens it there.
 - Each person can also carry a link to their whole SharePoint folder, so their
   file is one tap from their record.
 
-Most people use both: contracts and licence scans uploaded here so expiry dates
-and documents sit together, everything else left in SharePoint.
+Most people use both: contracts, addendums and licence scans uploaded here so the
+dates and the documents sit together, everything else left in SharePoint.
+
+**Crews**
+
+Staff belong to a crew, and the list matches how the SharePoint folders are
+organised: **Traffic, Green Crew, Yellow Crew, Office Crew, Transport, Drivers**.
+The compliance screen breaks the numbers down by crew, and tapping one filters the
+staff list to it. To rename a crew or add one, edit `CREWS` near the top of
+`app.js` — anything already recorded under an old name keeps working and stays
+selectable.
 
 **The licence matrix** — everyone down the side, every requirement across the
 top, every expiry date in the grid. The one to print for a toolbox meeting.
@@ -46,9 +76,17 @@ top, every expiry date in the grid. The one to print for a toolbox meeting.
 - **Compliance register** — everyone, every requirement, every date, problems
   marked. The one to hand an auditor.
 - **Expiring and expired** — 30, 60, 90 days or six months ahead.
+- **Pay review** — everyone by how long since their last rise. The one for a
+  pay round.
+- **Every contract change** — all addendums with what moved and when.
+- **Disciplinary register** — in force first, then spent, with outcomes and who
+  issued them.
 - **Licence and ticket matrix** — the whole grid on one page.
-- **One person's file** — their record in full, with or without pay.
-- **CSV exports** of staff, licences and documents, for Excel.
+- **One person's file** — their record in full, including contract changes and
+  disciplinary history. Pay figures are withheld unless **Include pay** is
+  ticked, so it can be handed to a manager as it is.
+- **CSV exports** of staff, licences, documents, pay review, contract changes
+  and disciplinary, for Excel.
 
 **Getting started quickly** — ⋮ → *Import from spreadsheet* takes a CSV straight
 out of Excel and creates the staff list, then a second CSV for their licences and
@@ -210,6 +248,28 @@ match before importing anything.
 
 ---
 
+## About connecting SharePoint
+
+Two different things get called "connecting SharePoint", and only one of them is
+about the app.
+
+**Letting Claude read the folders while building.** There is a Microsoft 365
+connector on claude.ai that can search SharePoint and read files. Connecting it
+lets whoever is building this look at the real folder layout and file naming, so
+the crews, requirements and document kinds match what is actually there instead
+of being guessed at. It changes nothing about the app itself, and can be
+disconnected afterwards.
+
+**Making the app read SharePoint live.** That is a separate job: an app
+registration in the RCK Microsoft tenant, so the app can sign people in with
+their work account and list folders through Microsoft Graph. It needs someone
+with Microsoft 365 admin rights, it is free, and it takes about ten minutes.
+Worth doing only if you want the app to pull the file list out of SharePoint by
+itself rather than being told where things are.
+
+Neither is required. Uploading documents here and pasting SharePoint links covers
+the job as it stands.
+
 ## Things worth knowing
 
 - **It needs a connection.** Unlike the workshop app, there is no offline mode —
@@ -225,6 +285,11 @@ match before importing anything.
   usually needs to answer a question.
 - **Uploads** are capped at 40 MB. Anything larger should live in SharePoint with
   a link here.
+- **Removing a contract change or disciplinary record** deletes the line, not the
+  document — the PDF stays under Documents. Only remove one if it was entered in
+  error; these are employment records.
+- **Already run the schema?** Re-run `supabase-schema.sql` after pulling this
+  version. It only adds what is missing, so nothing you have entered is touched.
 
 ## Files
 
