@@ -84,13 +84,14 @@ create table if not exists people (
   preferred_name text not null default '',
 
   -- job_type drives which credentials are *required* of this person
-  -- driver | operator | crew | office | management
-  job_type      text not null default 'crew',
+  -- driver | operator | labourer | traffic | yard | office | management
+  job_type      text not null default 'labourer',
   position      text not null default '',        -- free text job title
   crew          text not null default '',        -- team / gang / depot
 
-  employment_type text not null default 'permanent',
-    -- permanent | fixed_term | casual | contractor
+  employment_type text not null default 'employee',
+    -- employee | casual | subcontractor | recruiter | standup | cellwatch | pacific
+    -- (the last three are labour-hire firms, as named in RCK's own tracker)
   start_date    date,
   end_date      date,
   status        text not null default 'active'
@@ -108,7 +109,7 @@ create table if not exists people (
   -- pay. Kept deliberately light: the rate and when it was last reviewed,
   -- so HR can answer questions without opening payroll. Bank accounts and
   -- tax numbers are NOT stored here — they belong in the payroll system.
-  pay_type      text not null default 'hourly' check (pay_type in ('hourly', 'salary')),
+  pay_type      text not null default 'hourly' check (pay_type in ('hourly', 'salary', 'daily')),
   pay_rate      numeric,
   pay_reviewed_on date,
   pay_notes     text not null default '',
@@ -127,14 +128,14 @@ create index if not exists people_name_idx    on people (last_name, first_name);
 -- =====================================================================
 --  What we require of people
 -- =====================================================================
--- Editable in the app under Requirements. Seeded below with the usual set
--- for a New Zealand roading crew.
+-- Editable in the app under Requirements. Seeded at the bottom of this
+-- file with what RCK already tracks in its staff spreadsheet.
 create table if not exists credential_types (
   id          uuid primary key default gen_random_uuid(),
   key         text not null unique,
   name        text not null,
   category    text not null default 'ticket',
-    -- licence | endorsement | ticket | medical | employment | other
+    -- licence | endorsement | ticket | induction | competency | medical | employment | other
   expires     boolean not null default true,
   warn_days   integer not null default 60,      -- amber this many days out
   -- which job types must hold this. Empty = optional for everyone.
@@ -172,7 +173,7 @@ create table if not exists documents (
   person_id     uuid not null references people(id) on delete cascade,
   credential_id uuid references credentials(id) on delete set null,
   kind          text not null default 'other',
-    -- contract | addendum | pay | licence | medical | id | policy | other
+    -- contract | addendum | pay | licence | medical | id | policy | leave | uniform | other
   title         text not null default '',
   doc_date      date,
 
@@ -383,27 +384,70 @@ create policy hr_files_delete on storage.objects
 -- =====================================================================
 --  The starting set of requirements
 --
---  These are the usual ones for a New Zealand roading crew. Change them,
---  delete them or add your own in the app under ⋮ → Requirements — this
---  block only ever fills in what is missing, so editing is safe and
---  re-running this file will not undo your changes.
+--  These mirror what RCK already tracks in
+--  "Staff List and Tracking.xlsx" → Update sheet, in the same three
+--  groups that spreadsheet uses:
+--
+--    · the paperwork that must be on file (contract, golden rules,
+--      vehicle policy, handbook, induction, driver check)
+--    · the licences and tickets that expire (driver licence, WTR,
+--      Site Safe, ConstructSafe, STMS, first aid, medical)
+--    · the site inductions and the competency matrix, which do not
+--      expire — they are either held or not
+--
+--  Change them, delete them or add your own in the app under
+--  ⋮ → Requirements. This block only fills in what is missing, so
+--  re-running this file never undoes your edits. That also means
+--  renaming one here has no effect on a database already set up —
+--  rename it in the app instead.
 -- =====================================================================
 insert into credential_types (key, name, category, expires, warn_days, required_for, detail_label, sort) values
-  ('driver_licence',  'Driver Licence',                     'licence',    true,  60, '{driver,operator}', 'Classes held',    10),
-  ('wtr',             'WTR Endorsement (Wheels/Tracks/Rollers)', 'endorsement', true, 60, '{operator}',  'Letters held',    20),
-  ('forklift',        'Forklift Endorsement (F)',           'endorsement', true, 60, '{}',              '',                30),
-  ('dangerous_goods', 'Dangerous Goods Endorsement (D)',    'endorsement', true, 60, '{}',              '',                40),
-  ('passenger',       'Passenger Endorsement (P)',          'endorsement', true, 60, '{}',              '',                50),
-  ('driver_medical',  'Driver Medical Certificate',         'medical',    true,  45, '{}',              '',                60),
-  ('site_safe',       'Site Safe Construction Card',        'ticket',     true,  90, '{driver,operator,crew}', '',         70),
-  ('first_aid',       'First Aid Certificate',              'ticket',     true,  60, '{}',              '',                80),
-  ('ttm_tc',          'TTM — Traffic Controller (TC)',      'ticket',     true,  60, '{}',              '',                90),
-  ('ttm_stms',        'TTM — STMS Level 1',                 'ticket',     true,  60, '{}',              '',               100),
-  ('confined_space',  'Confined Space',                     'ticket',     true,  60, '{}',              '',               110),
-  ('heights',         'Working at Heights',                 'ticket',     true,  60, '{}',              '',               120),
-  ('da_test',         'Drug & Alcohol Test',                'medical',    true,  30, '{}',              '',               130),
-  ('employment_agreement', 'Employment Agreement Signed',   'employment', false,  0, '{driver,operator,crew,office,management}', '', 140),
-  ('right_to_work',   'Right to Work / Visa',               'employment', true,  90, '{driver,operator,crew,office,management}', '', 150),
-  ('induction',       'Site Induction',                     'employment', false,  0, '{driver,operator,crew}', '',        160),
-  ('ird_kiwisaver',   'IRD & KiwiSaver Forms',              'employment', false,  0, '{driver,operator,crew,office,management}', '', 170)
+  -- paperwork that lives on file and does not expire
+  ('employment_agreement', 'Employment Agreement',        'employment', false,  0, '{driver,operator,labourer,traffic,yard,office,management}', '',  10),
+  ('application_form',     'Application of Employment',   'employment', false,  0, '{driver,operator,labourer,traffic,yard,office,management}', '',  20),
+  ('golden_rules',         '10 Golden Rules Signed',      'employment', false,  0, '{driver,operator,labourer,traffic,yard,management}',        '',  30),
+  ('vehicle_policy',       'Company Vehicle Policy Signed','employment',false,  0, '{driver,operator,traffic,yard,management}',                 '',  40),
+  ('induction_checklist',  'Induction Checklist',         'employment', false,  0, '{driver,operator,labourer,traffic,yard,office,management}', '',  50),
+  ('employee_handbook',    'Employee Handbook Signed',    'employment', false,  0, '{driver,operator,labourer,traffic,yard,office,management}', '',  60),
+  ('right_to_work',        'Right to Work / Visa',        'employment', true,  90, '{driver,operator,labourer,traffic,yard,office,management}', '',  70),
+  ('ird_kiwisaver',        'IRD & KiwiSaver Forms',       'employment', false,  0, '{driver,operator,labourer,traffic,yard,office,management}', '',  80),
+
+  -- licences and endorsements
+  ('driver_licence',   'Driver Licence',                  'licence',    true,  60, '{driver,operator,traffic,yard}', 'Classes held',  100),
+  ('wtr',              'WTR Endorsement (Wheels/Tracks/Rollers)', 'endorsement', true, 60, '{driver,operator}', 'Letters held', 110),
+  ('nzta_driver_check','NZTA Driver Check',               'licence',    true, 365, '{driver}',                      '',              120),
+  ('forklift',         'Forklift Endorsement (F)',        'endorsement', true, 60, '{}',                            '',              130),
+  ('dangerous_goods',  'Dangerous Goods Endorsement (D)', 'endorsement', true, 60, '{}',                            '',              140),
+
+  -- tickets and certificates
+  ('site_safe',      'Site Safe Card',                    'ticket',     true,  90, '{driver,operator,labourer,traffic,yard,management}', 'Card number', 200),
+  ('construct_safe', 'ConstructSafe',                     'ticket',     true,  90, '{operator,labourer}',           'Level',         210),
+  ('stms',           'STMS',                              'ticket',     true,  60, '{traffic}',                     'Category (A/B)', 220),
+  ('traffic_control','Traffic Controller (TC)',           'ticket',     true,  60, '{traffic}',                     '',              230),
+  ('first_aid',      'First Aid Certificate',             'ticket',     true,  60, '{}',                            '',              240),
+  ('confined_space', 'Confined Space',                    'ticket',     true,  60, '{}',                            '',              250),
+  ('heights',        'Working at Heights',                'ticket',     true,  60, '{}',                            '',              260),
+
+  -- medical
+  ('driver_medical', 'Medical Certificate',               'medical',    true,  45, '{}',                            '',              300),
+  ('da_test',        'Drug & Alcohol Test',               'medical',    true,  30, '{}',                            '',              310),
+
+  -- site inductions: held or not, no expiry
+  ('induction_fh',       'Fulton Hogan Inducted',         'induction',  false,  0, '{}',                            '',              400),
+  ('induction_rnzdf',    'RNZDF Inducted',                'induction',  false,  0, '{}',                            '',              410),
+  ('induction_kiwirail', 'KiwiRail Inducted',             'induction',  false,  0, '{}',                            '',              420),
+
+  -- the competency matrix
+  ('comp_power_tools',    'Power Tools',                  'competency', false,  0, '{}', '', 500),
+  ('comp_spotter',        'Spotter',                      'competency', false,  0, '{}', '', 510),
+  ('comp_excavator',      'Excavator',                    'competency', false,  0, '{}', '', 520),
+  ('comp_bobcat',         'Bobcat / Skid Steer',          'competency', false,  0, '{}', '', 530),
+  ('comp_roller',         'Roller / Compactor',           'competency', false,  0, '{}', '', 540),
+  ('comp_tractor',        'Tractor',                      'competency', false,  0, '{}', '', 550),
+  ('comp_loader',         'Loader',                       'competency', false,  0, '{}', '', 560),
+  ('comp_concrete_saw',   'Concrete Saw',                 'competency', false,  0, '{}', '', 570),
+  ('comp_asphalt_paving', 'Asphalt Paving',               'competency', false,  0, '{}', '', 580),
+  ('comp_miller',         'Miller Machine',               'competency', false,  0, '{}', '', 590),
+  ('comp_transporter',    'Transporter',                  'competency', false,  0, '{}', '', 600),
+  ('comp_truck',          'Truck',                        'competency', false,  0, '{}', '', 610)
 on conflict (key) do nothing;

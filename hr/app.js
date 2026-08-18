@@ -16,30 +16,69 @@ const SITE = window.RCKHR_CONFIG || {};
 const JOB_TYPES = [
   { key: 'driver',     label: 'Driver' },
   { key: 'operator',   label: 'Operator' },
-  { key: 'crew',       label: 'Crew' },
+  { key: 'labourer',   label: 'Labourer / crew' },
+  { key: 'traffic',    label: 'STMS / Traffic' },
+  { key: 'yard',       label: 'Yard / Workshop' },
   { key: 'office',     label: 'Office' },
   { key: 'management', label: 'Management' }
 ];
+/* The "Contract Type" column from Staff List and Tracking.xlsx, kept as it
+   is written there — Standup, Cellwatch and Pacific are labour-hire firms. */
 const EMPLOYMENT_TYPES = [
-  { key: 'permanent',  label: 'Permanent' },
-  { key: 'fixed_term', label: 'Fixed term' },
-  { key: 'casual',     label: 'Casual' },
-  { key: 'contractor', label: 'Contractor' }
+  { key: 'employee',      label: 'Employee' },
+  { key: 'casual',        label: 'Employee — casual' },
+  { key: 'subcontractor', label: 'Subcontractor' },
+  { key: 'recruiter',     label: 'Recruitment agency' },
+  { key: 'standup',       label: 'Standup' },
+  { key: 'cellwatch',     label: 'Cellwatch' },
+  { key: 'pacific',       label: 'Pacific' }
 ];
 const PERSON_STATUS = [
   { key: 'active',   label: 'Active' },
   { key: 'on_leave', label: 'On leave' },
   { key: 'finished', label: 'Finished' }
 ];
-/* The groups the SharePoint folders are organised into. Add or rename them
-   here and the whole app follows — filters, reports, the lot. */
+/* The folders under "6. RCK STAFF" in SharePoint, in their own order. */
 const CREWS = [
-  { key: 'traffic',   label: 'Traffic' },
-  { key: 'green',     label: 'Green Crew' },
-  { key: 'yellow',    label: 'Yellow Crew' },
-  { key: 'office',    label: 'Office Crew' },
-  { key: 'transport', label: 'Transport' },
-  { key: 'drivers',   label: 'Drivers' }
+  { key: 'yellow',        label: 'Yellow Crew' },
+  { key: 'green',         label: 'Green Crew' },
+  { key: 'office',        label: 'Office' },
+  { key: 'transport',     label: 'Transport' },
+  { key: 'yard',          label: 'Yard / Workshop' },
+  { key: 'stms',          label: 'STMS & Traffic Management' },
+  { key: 'subcontractor', label: 'Sub Contractors' },
+  { key: 'watercare',     label: 'Watercare & Civils' },
+  { key: 'civil',         label: 'Civil' },
+  { key: 'agency',        label: 'Recruitment Agencies' }
+];
+const PAY_UNITS = [
+  { key: 'hourly', label: 'Hourly' },
+  { key: 'salary', label: 'Salary' },
+  { key: 'daily',  label: 'Daily' }
+];
+const PAY_SUFFIX = { hourly: 'per hour', salary: 'per year', daily: 'per day' };
+
+const DOC_KINDS = [
+  { key: 'contract', label: 'Employment agreement' },
+  { key: 'addendum', label: 'Addendum / variation' },
+  { key: 'pay',      label: 'Pay letter' },
+  { key: 'licence',  label: 'Licence / certificate' },
+  { key: 'medical',  label: 'Medical' },
+  { key: 'id',       label: 'ID / right to work' },
+  { key: 'policy',   label: 'Signed policy' },
+  { key: 'leave',    label: 'Leave request' },
+  { key: 'uniform',  label: 'Uniform / PPE' },
+  { key: 'other',    label: 'Other' }
+];
+const CRED_CATEGORIES = [
+  { key: 'licence',     label: 'Licence' },
+  { key: 'endorsement', label: 'Endorsement' },
+  { key: 'ticket',      label: 'Ticket / certificate' },
+  { key: 'induction',   label: 'Site induction' },
+  { key: 'competency',  label: 'Competency' },
+  { key: 'medical',     label: 'Medical' },
+  { key: 'employment',  label: 'Employment paperwork' },
+  { key: 'other',       label: 'Other' }
 ];
 const CONTRACT_KINDS = [
   { key: 'pay_rise',            label: 'Pay rise' },
@@ -80,25 +119,6 @@ function crewOptions(current) {
   );
   return opts.concat(Array.from(extras).sort().map(c => ({ key: c, label: c })));
 }
-const DOC_KINDS = [
-  { key: 'contract', label: 'Employment agreement' },
-  { key: 'addendum', label: 'Addendum / variation' },
-  { key: 'pay',      label: 'Pay letter' },
-  { key: 'licence',  label: 'Licence / certificate' },
-  { key: 'medical',  label: 'Medical' },
-  { key: 'id',       label: 'ID / right to work' },
-  { key: 'policy',   label: 'Signed policy' },
-  { key: 'other',    label: 'Other' }
-];
-const CRED_CATEGORIES = [
-  { key: 'licence',     label: 'Licence' },
-  { key: 'endorsement', label: 'Endorsement' },
-  { key: 'ticket',      label: 'Ticket / certificate' },
-  { key: 'medical',     label: 'Medical' },
-  { key: 'employment',  label: 'Employment' },
-  { key: 'other',       label: 'Other' }
-];
-
 const labelOf = (list, key) => (list.find(x => x.key === key) || {}).label || key || '—';
 
 /* ------------------------------------------------------- small tools */
@@ -1280,7 +1300,7 @@ function renderPerson(view, id) {
     <div class="section-title">Pay</div>
     <div class="card">
       ${payShown ? `
-        ${kv('Rate', p.pay_rate ? `$${Number(p.pay_rate).toFixed(2)} ${p.pay_type === 'salary' ? 'per year' : 'per hour'}` : '')}
+        ${kv('Rate', p.pay_rate ? `$${Number(p.pay_rate).toFixed(2)} ${PAY_SUFFIX[p.pay_type] || 'per hour'}` : '')}
         ${kv('Last reviewed', p.pay_reviewed_on ? fmtDate(p.pay_reviewed_on) : '')}
         ${p.pay_notes ? `<div class="small muted" style="white-space:pre-wrap;margin-top:8px">${esc(p.pay_notes)}</div>` : ''}
         <button class="btn ghost sm mt" id="hidePay">Hide</button>`
@@ -1382,7 +1402,7 @@ function kv(label, value) {
 function renderPersonEdit(view, id) {
   const isNew = id === 'new' || !id;
   const p = isNew ? {
-    job_type: 'crew', employment_type: 'permanent', status: 'active', pay_type: 'hourly'
+    job_type: 'labourer', employment_type: 'employee', status: 'active', pay_type: 'hourly'
   } : personById(id);
 
   if (!p) { view.innerHTML = `<div class="empty"><b>Not found</b></div>`; return; }
@@ -1431,8 +1451,7 @@ function renderPersonEdit(view, id) {
       <div class="section-title">Pay</div>
       <div class="card">
         <div class="fields2">
-          ${field('Paid', 'pay_type', p.pay_type, 'select', {
-            options: [{ key: 'hourly', label: 'Hourly' }, { key: 'salary', label: 'Salary' }] })}
+          ${field('Paid', 'pay_type', p.pay_type, 'select', { options: PAY_UNITS })}
           ${field('Rate (NZD)', 'pay_rate', p.pay_rate, 'number', { step: '0.01' })}
           ${field('Last reviewed', 'pay_reviewed_on', p.pay_reviewed_on, 'date')}
         </div>
@@ -2468,12 +2487,16 @@ function renderImport(view) {
   const COLS = {
     people: {
       need: ['first_name', 'last_name'],
-      all: ['employee_no', 'first_name', 'last_name', 'job_type', 'position', 'crew',
-            'employment_type', 'start_date', 'status', 'phone', 'email', 'sharepoint_url'],
+      all: ['employee_no', 'first_name', 'last_name', 'preferred_name', 'job_type', 'position',
+            'crew', 'employment_type', 'start_date', 'end_date', 'status', 'phone', 'email',
+            'address', 'date_of_birth', 'pay_type', 'pay_rate', 'sharepoint_url', 'notes'],
       hint: `<b>Columns:</b> employee_no, first_name, last_name, job_type
-        (driver / operator / crew / office / management), position, crew, employment_type,
-        start_date (YYYY-MM-DD), status, phone, email, sharepoint_url.
-        Only first_name and last_name are required.`
+        (driver / operator / labourer / traffic / yard / office / management), position,
+        crew (yellow / green / office / transport / yard / stms / subcontractor /
+        watercare / civil / agency), employment_type, start_date and date_of_birth
+        (YYYY-MM-DD), status, phone, email, address, pay_type (hourly / salary / daily),
+        pay_rate, sharepoint_url, notes.
+        Only first_name and last_name are required — leave any column out entirely.`
     },
     creds: {
       need: ['employee_no', 'type'],
@@ -2551,9 +2574,15 @@ function renderImport(view) {
             const row = {};
             COLS.people.all.forEach(k => { if (o[k]) row[k] = o[k]; });
             if (!row.first_name && !row.last_name) { fail++; continue; }
-            if (row.job_type && !JOB_TYPES.some(j => j.key === row.job_type)) row.job_type = 'crew';
+            if (row.job_type && !JOB_TYPES.some(j => j.key === row.job_type)) row.job_type = 'labourer';
             if (row.status && !PERSON_STATUS.some(s => s.key === row.status)) row.status = 'active';
-            if (row.employment_type && !EMPLOYMENT_TYPES.some(t => t.key === row.employment_type)) row.employment_type = 'permanent';
+            if (row.employment_type && !EMPLOYMENT_TYPES.some(t => t.key === row.employment_type)) row.employment_type = 'employee';
+            if (row.pay_type && !PAY_UNITS.some(u => u.key === row.pay_type)) row.pay_type = 'hourly';
+            if (row.pay_rate !== undefined) {
+              // "$34.50" and "95,000.00" both arrive as text out of Excel
+              const n = Number(String(row.pay_rate).replace(/[$,\s]/g, ''));
+              if (Number.isFinite(n)) row.pay_rate = n; else delete row.pay_rate;
+            }
             await Store.insert('people', row);
           } else {
             const p = findPerson(o);
@@ -2808,7 +2837,7 @@ function printStaffFile(p, withPay) {
     </table>
 
     ${withPay ? `<h2>Pay</h2><table class="kv">
-      <tr><td>Rate</td><td>${p.pay_rate ? '$' + Number(p.pay_rate).toFixed(2) + (p.pay_type === 'salary' ? ' per year' : ' per hour') : '—'}</td></tr>
+      <tr><td>Rate</td><td>${p.pay_rate ? '$' + Number(p.pay_rate).toFixed(2) + ' ' + (PAY_SUFFIX[p.pay_type] || 'per hour') : '—'}</td></tr>
       <tr><td>Last reviewed</td><td>${esc(p.pay_reviewed_on ? fmtDate(p.pay_reviewed_on) : '—')}</td></tr>
       ${p.pay_notes ? `<tr><td>Notes</td><td class="note">${esc(p.pay_notes)}</td></tr>` : ''}
     </table>` : ''}

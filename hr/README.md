@@ -62,15 +62,18 @@ dates and the documents sit together, everything else left in SharePoint.
 
 **Crews**
 
-Staff belong to a crew, and the list matches how the SharePoint folders are
-organised: **Traffic, Green Crew, Yellow Crew, Office Crew, Transport, Drivers**.
-The compliance screen breaks the numbers down by crew, and tapping one filters the
-staff list to it. To rename a crew or add one, edit `CREWS` near the top of
-`app.js` — anything already recorded under an old name keeps working and stays
-selectable.
+Staff belong to a crew, and the list is taken straight from the folders under
+**6. RCK STAFF** in SharePoint: **Yellow Crew, Green Crew, Office, Transport,
+Yard / Workshop, STMS & Traffic Management, Sub Contractors, Watercare & Civils,
+Civil, Recruitment Agencies**. The compliance screen breaks the numbers down by
+crew, and tapping one filters the staff list to it. To rename a crew or add one,
+edit `CREWS` near the top of `app.js` — anything already recorded under an old
+name keeps working and stays selectable.
 
-**The licence matrix** — everyone down the side, every requirement across the
-top, every expiry date in the grid. The one to print for a toolbox meeting.
+Contract types follow the **Contract Type** column of the staff spreadsheet, and
+keep its wording: Employee, Employee — casual, Subcontractor, Recruitment agency,
+and the labour-hire firms **Standup, Cellwatch** and **Pacific**. Pay can be
+hourly, salary or daily, matching the **Unit** column.
 
 **Reports** — one button each, all printable as PDF:
 - **Compliance register** — everyone, every requirement, every date, problems
@@ -208,36 +211,49 @@ It installs like a normal app.
 
 ### The requirements
 
-⋮ → **Requirements** is the list of what RCK requires people to hold. It starts
-with the usual set for a New Zealand roading crew:
+⋮ → **Requirements** is the list of what RCK requires people to hold. It is
+seeded from what the staff spreadsheet already tracks, in the same three groups:
 
-Driver Licence · WTR endorsement (wheels, tracks, rollers) · Forklift (F) ·
-Dangerous Goods (D) · Passenger (P) · Driver Medical Certificate · Site Safe
-Construction Card · First Aid · TTM Traffic Controller · TTM STMS Level 1 ·
-Confined Space · Working at Heights · Drug & Alcohol Test · Employment Agreement
-Signed · Right to Work / Visa · Site Induction · IRD & KiwiSaver Forms
+- **Paperwork on file, no expiry** — Employment Agreement, Application of
+  Employment, 10 Golden Rules, Company Vehicle Policy, Induction Checklist,
+  Employee Handbook, IRD & KiwiSaver, Right to Work.
+- **Licences and tickets that expire** — Driver Licence (with the classes held),
+  WTR endorsement, NZTA Driver Check, Site Safe Card (with the card number),
+  ConstructSafe, STMS (with the category), Traffic Controller, First Aid,
+  Medical Certificate, Drug & Alcohol, plus forklift, dangerous goods, confined
+  space and heights if you want them.
+- **Site inductions and the competency matrix, held or not** — Fulton Hogan,
+  RNZDF and KiwiRail inductions; Power Tools, Spotter, Excavator, Bobcat / Skid
+  Steer, Roller / Compactor, Tractor, Loader, Concrete Saw, Asphalt Paving,
+  Miller Machine, Transporter, Truck.
 
 For each one you set:
 
 - **Whether it expires**, and **how many days before** it should turn amber.
   Site Safe warns at 90 days because renewals take a while; a drug test warns at
-  30.
-- **Who it is required of** — driver, operator, crew, office, management. This is
-  the important one: anything ticked for a role shows as **Missing** in red on
-  that person's file until it's recorded. Anything not ticked is optional, and
-  only appears if they happen to hold it.
+  30. Competencies and signed paperwork never expire, so they read simply as
+  on file or missing.
+- **Who it is required of** — driver, operator, labourer, STMS/traffic, yard,
+  office, management. This is the important one: anything ticked for a role
+  shows as **Missing** in red on that person's file until it's recorded.
+  Anything not ticked is optional, and only appears if they happen to hold it.
 
 Change them, delete them, add your own. A requirement people already hold can't
-be deleted, but it can be hidden, which keeps the history.
+be deleted, but it can be hidden, which keeps the history. Renaming one in this
+file has no effect once the database is set up — rename it in the app instead.
 
 ### The staff
 
 Either add people one at a time, or ⋮ → **Import from spreadsheet**:
 
-**Staff** — `employee_no, first_name, last_name, job_type, position, crew,
-employment_type, start_date, status, phone, email, sharepoint_url`.
-Only the two name columns are required. `job_type` must be one of
-driver / operator / crew / office / management, and dates go in as `YYYY-MM-DD`.
+**Staff** — `employee_no, first_name, last_name, preferred_name, job_type,
+position, crew, employment_type, start_date, end_date, status, phone, email,
+address, date_of_birth, pay_type, pay_rate, sharepoint_url, notes`. Only the two
+name columns are required; leave any other column out entirely. `job_type` is
+one of driver / operator / labourer / traffic / yard / office / management,
+`crew` one of yellow / green / office / transport / yard / stms / subcontractor /
+watercare / civil / agency, and dates go in as `YYYY-MM-DD`. Pay rates may be
+written `$34.50` or `95,000.00` — both are read correctly.
 
 **Licences and tickets** — `employee_no` (or `name`), `type`, `detail`,
 `reference`, `issued_on`, `expires_on`. `type` must match a requirement's name
