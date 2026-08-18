@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 /* ------------------------------------------------------------ fleet */
 const CATEGORIES = [
@@ -1130,7 +1130,7 @@ function workshopPanel(o) {
         </label>
         <label class="field grow"><span>Severity</span>
           <select id="wSeverity">
-            <option value="orange" ${o.severity === 'orange' ? 'selected' : ''}>Usable (orange)</option>
+            <option value="orange" ${o.severity === 'orange' ? 'selected' : ''}>Usable (yellow)</option>
             <option value="red" ${o.severity === 'red' ? 'selected' : ''}>Out of operation (red)</option>
           </select>
         </label>
@@ -1474,7 +1474,7 @@ async function printDoc(html) {
   setTimeout(() => window.print(), 80);
 }
 function badge(sev, closed) {
-  return `<span class="badge">${closed ? 'FIXED — GREEN' : sev === 'red' ? 'OUT OF OPERATION — RED' : 'USABLE — ORANGE'}</span>`;
+  return `<span class="badge">${closed ? 'FIXED — GREEN' : sev === 'red' ? 'OUT OF OPERATION — RED' : 'USABLE — YELLOW'}</span>`;
 }
 
 function printWorkOrder(o) {
@@ -1628,7 +1628,7 @@ function printFleetStatus() {
           return `<tr>
             <td><strong>${esc(g.code)}</strong></td>
             <td>${esc(g.name || '')}</td>
-            <td>${st === 'green' ? 'GREEN — working' : st === 'orange' ? 'ORANGE — usable' : 'RED — out of operation'}</td>
+            <td>${st === 'green' ? 'GREEN — working' : st === 'orange' ? 'YELLOW — usable' : 'RED — out of operation'}</td>
             <td>${esc(g.location || '—')}</td>
             <td>${eta ? fmtDate(eta) : st === 'green' ? '—' : 'not set'}</td>
           </tr>`;

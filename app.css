@@ -20,13 +20,15 @@
   --line:      #e9ecef;
   --line-2:    #d9dee3;
 
-  /* status */
-  --green:     #15803d;
-  --green-bg:  #eaf6ef;
-  --orange:    #b45309;
-  --orange-bg: #fdf2e4;
-  --red:       #b91c1c;
-  --red-bg:    #fdedec;
+  /* Status. Each has a pastel fill for the whole card and a deep tone for
+     text on top of it — every pairing clears 4.5:1, including yellow, which
+     only works because the text is a dark amber rather than actual yellow. */
+  --green:     #15703c;
+  --green-bg:  #e4f4ea;
+  --yellow:    #7d5e00;
+  --yellow-bg: #fdf3cc;
+  --red:       #a81f1f;
+  --red-bg:    #fce9e9;
 
   /* shape */
   --r:      14px;
@@ -115,7 +117,7 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
   transition: background var(--t) var(--ease);
 }
 .dot.ok   { background: var(--green); color: var(--green); }
-.dot.warn { background: var(--orange); color: var(--orange); animation: ping 1.9s ease-out infinite; }
+.dot.warn { background: var(--yellow); color: var(--yellow); animation: ping 1.9s ease-out infinite; }
 .dot.bad  { background: var(--red); color: var(--red); }
 
 /* -------------------------------------------------------------- menu */
@@ -161,11 +163,8 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 }
 .card > h2 { font-size: 15.5px; margin-bottom: 10px; }
 
-/* A card that carries a status colour down its left edge. */
-.card.accent { position: relative; overflow: hidden; padding-left: 19px; }
-.card.accent::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--s);
-}
+/* A card that takes the status colour as its own surface. */
+.card.accent { background: var(--s-bg); }
 
 .section-title {
   font-size: 11.5px; font-weight: 700; letter-spacing: .09em;
@@ -175,8 +174,11 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 
 /* ------------------------------------------------------------ status */
 .status-green  { --s: var(--green);  --s-bg: var(--green-bg); }
-.status-orange { --s: var(--orange); --s-bg: var(--orange-bg); }
+.status-orange { --s: var(--yellow); --s-bg: var(--yellow-bg); }  /* stored as 'orange', shown yellow */
 .status-red    { --s: var(--red);    --s-bg: var(--red-bg); }
+
+/* On a tinted card the grey text scale is too pale to read, so darken it. */
+.gear-card, .wo, .card.accent, .tally button { --ink-2: #49535d; --ink-3: #5f6972; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -186,6 +188,13 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 }
 .pill.plain { background: var(--panel-2); color: var(--ink-2); }
 .swatch { width: 7px; height: 7px; border-radius: 50%; background: var(--s, var(--ink-3)); flex: none; }
+
+/* A tinted pill would vanish into a tinted card. Translucent white keeps it
+   legible and lets it pick up the warmth of whatever it is sitting on. */
+.gear-card .pill, .wo .pill, .card.accent .pill { background: rgba(255, 255, 255, .78); }
+.gear-card .pill.plain, .wo .pill.plain, .card.accent .pill.plain {
+  background: rgba(255, 255, 255, .62); color: var(--ink-2);
+}
 
 /* -------------------------------------------------------- gear board */
 .filters {
@@ -209,18 +218,18 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .tally { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 16px; }
 .tally button {
   position: relative; overflow: hidden;
-  border: 0; background: var(--panel); box-shadow: var(--sh-2);
+  border: 0; background: var(--s-bg); box-shadow: var(--sh-2);
   border-radius: var(--r); padding: 12px 12px 13px; cursor: pointer;
   font: inherit; text-align: left;
-  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease), background var(--t) var(--ease);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
 }
+/* Filtering by a status rings that tile rather than recolouring it. */
 .tally button::after {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-  background: var(--s); transform: scaleY(0);
-  transition: transform var(--t) var(--ease-soft);
+  content: ''; position: absolute; inset: 0; border-radius: var(--r);
+  box-shadow: inset 0 0 0 2px var(--s); opacity: 0;
+  transition: opacity var(--t) var(--ease-soft);
 }
-.tally button[aria-pressed="true"]::after { transform: scaleY(1); }
-.tally button[aria-pressed="true"] { background: var(--s-bg); }
+.tally button[aria-pressed="true"]::after { opacity: 1; }
 .tally button:active { transform: scale(.97); }
 .tally .n {
   display: block; font-size: 26px; font-weight: 700; line-height: 1.05;
@@ -233,14 +242,11 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .gear-card {
   position: relative; display: block; text-align: left; width: 100%;
   cursor: pointer; font: inherit; color: inherit; overflow: hidden;
-  background: var(--panel); border: 0; border-radius: var(--r);
-  box-shadow: var(--sh-2); padding: 13px 14px 14px 16px;
+  background: var(--s-bg); border: 0; border-radius: var(--r);
+  box-shadow: var(--sh-2); padding: 14px 15px 15px;
   animation: riseIn var(--t) var(--ease) both;
   animation-delay: calc(var(--i, 0) * 16ms);
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
-}
-.gear-card::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--s);
 }
 .gear-card:active { transform: scale(.975); box-shadow: var(--sh-1); }
 .gear-card .code { font-size: 16px; font-weight: 700; letter-spacing: -.02em; }
@@ -263,13 +269,12 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .wo {
   position: relative; display: block; width: 100%; text-align: left;
   font: inherit; color: inherit; cursor: pointer; overflow: hidden;
-  background: var(--panel); border: 0; border-radius: var(--r);
-  box-shadow: var(--sh-2); padding: 14px 15px 14px 17px; margin-bottom: 10px;
+  background: var(--s-bg); border: 0; border-radius: var(--r);
+  box-shadow: var(--sh-2); padding: 15px 16px; margin-bottom: 10px;
   animation: riseIn var(--t) var(--ease) both;
   animation-delay: calc(var(--i, 0) * 26ms);
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
 }
-.wo::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--s); }
 .wo:active { transform: scale(.99); box-shadow: var(--sh-1); }
 .wo .hdr { display: flex; gap: 9px; align-items: baseline; }
 .wo .num { font-size: 11.5px; font-weight: 700; color: var(--ink-3); letter-spacing: .03em; }
@@ -377,7 +382,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .empty b { display: block; color: var(--ink-2); font-size: 15.5px; margin-bottom: 6px; font-weight: 640; }
 
 .banner {
-  background: var(--orange-bg); color: #7c3d06;
+  background: var(--yellow-bg); color: #6b5000;
   border-radius: var(--r); padding: 12px 14px;
   font-size: 13.5px; margin-bottom: 12px; line-height: 1.4;
 }
@@ -434,7 +439,12 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 /* =====================================================================
    Workshop wall screen
    ===================================================================== */
-body.kiosk { padding: 0; background: #0b0d10; color: #fff; }
+body.kiosk {
+  padding: 0; background: #0b0d10; color: #fff;
+  --green:  #4ade80; --green-bg:  #11251a;
+  --yellow: #fcd34d; --yellow-bg: #251f0d;
+  --red:    #fb7185; --red-bg:    #2a1419;
+}
 body.kiosk #topbar, body.kiosk #tabbar, body.kiosk #menu { display: none; }
 body.kiosk #view { max-width: none; padding: 0; animation: none; }
 
@@ -448,18 +458,15 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .k-tally > div {
   position: relative; overflow: hidden;
   display: flex; align-items: baseline; gap: 15px;
-  background: #14181d; border-radius: 14px; padding: 17px 22px 17px 26px;
+  background: var(--s-bg); border-radius: 14px; padding: 17px 22px;
   animation: riseIn var(--t-slow) var(--ease-soft) both;
 }
-.k-tally > div::before, .k-wo::before, .k-chip::before, .k-allclear::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-  width: 5px; background: var(--s);
-}
+
 .k-tally > div:nth-child(2) { animation-delay: 60ms; }
 .k-tally > div:nth-child(3) { animation-delay: 120ms; }
 .k-tally .n { font-size: 54px; font-weight: 700; line-height: 1; color: var(--s);
   font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
-.k-tally .l { font-size: 16px; color: #8d97a3; }
+.k-tally .l { font-size: 16px; color: #a3adb9; }
 
 .k-body { flex: 1; display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; min-height: 0; }
 .k-col {
@@ -473,23 +480,23 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .k-wo {
   display: grid; grid-template-columns: 100px 1fr auto; gap: 15px; align-items: center;
   position: relative; overflow: hidden;
-  background: #171b21; border-radius: 11px;
-  padding: 13px 17px 13px 21px; margin-bottom: 9px;
+  background: var(--s-bg); border-radius: 11px;
+  padding: 14px 18px; margin-bottom: 9px;
   animation: riseIn var(--t-slow) var(--ease-soft) both;
   animation-delay: calc(140ms + var(--i, 0) * 55ms);
 }
 .k-wo .kcode { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
-.k-wo .kno   { font-size: 11px; color: #7d8794; letter-spacing: .04em; }
+.k-wo .kno   { font-size: 11px; color: #98a2ae; letter-spacing: .04em; }
 .k-wo .kttl  { font-size: 17px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.k-wo .kmeta { font-size: 13px; color: #8d97a3; margin-top: 3px; }
+.k-wo .kmeta { font-size: 13px; color: #a3adb9; margin-top: 3px; }
 .k-wo .keta  { text-align: right; font-size: 14px; color: #c3ccd6; white-space: nowrap; }
 .k-wo .keta b { display: block; font-size: 17px; font-weight: 620; }
 .k-wo .keta .late { color: #ff8078; }
 
 .k-allclear {
   position: relative; overflow: hidden;
-  background: #171b21; border-radius: 11px;
-  padding: 28px 26px 28px 30px; color: #8d97a3;
+  background: var(--s-bg); border-radius: 11px;
+  padding: 28px 26px; color: #96a0ac;
   animation: riseIn var(--t-slow) var(--ease-soft) both; animation-delay: 140ms;
 }
 .k-allclear .big { font-size: 31px; font-weight: 640; color: var(--s); margin-bottom: 5px; letter-spacing: -.02em; }
@@ -497,12 +504,12 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .k-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 9px; align-content: start; }
 .k-chip {
   position: relative; overflow: hidden;
-  background: #171b21; border-radius: 9px; padding: 10px 11px 10px 15px;
+  background: var(--s-bg); border-radius: 9px; padding: 10px 12px;
   animation: riseIn var(--t-slow) var(--ease-soft) both;
   animation-delay: calc(160ms + var(--i, 0) * 30ms);
 }
 .k-chip .c { font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
-.k-chip .s { font-size: 11.5px; color: #8d97a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-chip .s { font-size: 11.5px; color: #a3adb9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .k-foot { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: #5f6975; }
 .k-foot button {
@@ -523,7 +530,7 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   .k-tally .n { font-size: 72px; }
   .k-tally .l { font-size: 20px; }
   .k-col h2 { font-size: 14px; }
-  .k-wo { grid-template-columns: 136px 1fr auto; padding: 17px 21px 17px 25px; }
+  .k-wo { grid-template-columns: 136px 1fr auto; padding: 18px 22px; }
   .k-wo .kcode { font-size: 29px; }
   .k-wo .kno  { font-size: 13px; }
   .k-wo .kttl { font-size: 22px; }
