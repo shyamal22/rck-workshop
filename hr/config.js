@@ -18,8 +18,8 @@
        supabaseKey = the "anon / public" key   (NEVER the service_role key)
 --------------------------------------------------------------------- */
 window.RCKHR_CONFIG = {
-  supabaseUrl: '',
-  supabaseKey: '',
+  supabaseUrl: 'https://yipqmdokvcpyoiiswvqo.supabase.co',
+  supabaseKey: 'sb_publishable_QDOlC6UJ5OG5xQg5sdHDEg_H9loKWnX',
 
   // Lock the screen after this many minutes with no activity, so an open
   // laptop doesn't leave staff files on display. Set to 0 to never lock.
