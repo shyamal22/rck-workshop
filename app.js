@@ -4,10 +4,13 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 
 /* ------------------------------------------------------------ fleet */
-const CATEGORIES = [
+/* The types RCK started with. Anyone can add more when adding gear — a new
+   type simply exists from the moment a machine is filed under it, so there is
+   no separate list to maintain and nothing to migrate. */
+const BUILTIN_CATEGORIES = [
   { key: 'miller',  label: 'Millers',  one: 'Miller',  prefix: 'MIL' },
   { key: 'paver',   label: 'Pavers',   one: 'Paver',   prefix: 'PAV' },
   { key: 'roller',  label: 'Rollers',  one: 'Roller',  prefix: 'ROL' },
@@ -108,9 +111,51 @@ function isOpen(o) {
   const s = WO_STATUS.find(x => x.key === o.status);
   return s ? s.open : true;
 }
+/** The type a gear item belongs to, with blanks treated as Other. */
+function catOf(g) { return ((g && g.category) || '').trim() || 'other'; }
+
+function builtinCat(key) { return BUILTIN_CATEGORIES.find(c => c.key === key); }
+
+/** Built-in types, then any type someone has added, then Other last. */
+function allCategoryKeys() {
+  const keys = BUILTIN_CATEGORIES.filter(c => c.key !== 'other').map(c => c.key);
+  const seen = new Set(keys.concat('other'));
+  const custom = [];
+  DB.gear.forEach(g => {
+    const k = catOf(g);
+    if (!seen.has(k)) { seen.add(k); custom.push(k); }
+  });
+  custom.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return keys.concat(custom, 'other');
+}
+
+/** Singular, for one machine: "Emulsion trailer". */
 function catLabel(key) {
-  const c = CATEGORIES.find(x => x.key === key);
-  return c ? c.one : 'Other';
+  const c = builtinCat(key);
+  return c ? c.one : (key || 'Other');
+}
+
+/** Plural, for a heading or filter: "Emulsion trailers". */
+function catPlural(key) {
+  const c = builtinCat(key);
+  if (c) return c.label;
+  const w = key || 'Other';
+  if (/s$/i.test(w)) return w;
+  if (/(x|ch|sh|ss|z)$/i.test(w)) return w + 'es';
+  if (/[^aeiou]y$/i.test(w)) return w.slice(0, -1) + 'ies';
+  return w + 's';
+}
+
+function catRank(key) {
+  if (key === 'other') return 999;
+  const i = BUILTIN_CATEGORIES.findIndex(c => c.key === key);
+  return i >= 0 ? i : 100;
+}
+
+/** Existing spelling of a type if one matches, so near-duplicates can't creep in. */
+function matchCategory(name) {
+  const n = (name || '').trim().toLowerCase();
+  return allCategoryKeys().find(k => k.toLowerCase() === n) || null;
 }
 
 /* Inline icons — no icon font, no network request, they inherit text colour. */
@@ -380,10 +425,12 @@ function activeGear() {
   return DB.gear.filter(g => !g.retired);
 }
 function sortedGear(list) {
-  const order = CATEGORIES.map(c => c.key);
   return list.slice().sort((a, b) => {
-    const d = order.indexOf(a.category) - order.indexOf(b.category);
-    return d !== 0 ? d : String(a.code).localeCompare(String(b.code), undefined, { numeric: true });
+    const d = catRank(catOf(a)) - catRank(catOf(b));
+    if (d !== 0) return d;
+    const c = catOf(a).localeCompare(catOf(b), undefined, { sensitivity: 'base' });
+    if (c !== 0) return c;
+    return String(a.code).localeCompare(String(b.code), undefined, { numeric: true });
   });
 }
 /** Open work orders, worst and oldest first. */
@@ -520,7 +567,8 @@ function render() {
   let screen = SCREENS[route.path];
   let back = false;
 
-  if (route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
+  if (route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
+  else if (route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
   else if (route.path.startsWith('/wo/')) { screen = { title: 'Work order', render: renderWorkOrder }; back = true; }
 
   if (!screen) { go('#/'); return; }
@@ -663,7 +711,7 @@ function renderBoard(view) {
   const counts = { green: 0, orange: 0, red: 0 };
   gear.forEach(g => counts[gearStatus(g)]++);
 
-  const cats = CATEGORIES.filter(c => gear.some(g => g.category === c.key));
+  const cats = allCategoryKeys().filter(k => gear.some(g => catOf(g) === k));
 
   view.innerHTML = `
     <div class="tally">
@@ -676,7 +724,7 @@ function renderBoard(view) {
 
     <div class="filters">
       <button class="chip" data-cat="all" aria-pressed="${boardFilter.cat === 'all'}">All gear</button>
-      ${cats.map(c => `<button class="chip" data-cat="${c.key}" aria-pressed="${boardFilter.cat === c.key}">${c.label}</button>`).join('')}
+      ${cats.map(k => `<button class="chip" data-cat="${esc(k)}" aria-pressed="${boardFilter.cat === k}">${esc(catPlural(k))}</button>`).join('')}
     </div>
 
     <label class="field"><input type="text" id="q" placeholder="Search code, name or location" value="${esc(boardFilter.q)}"></label>
@@ -699,7 +747,7 @@ function renderBoard(view) {
   function paintGrid() {
     const needle = boardFilter.q.trim().toLowerCase();
     const list = gear.filter(g => {
-      if (boardFilter.cat !== 'all' && g.category !== boardFilter.cat) return false;
+      if (boardFilter.cat !== 'all' && catOf(g) !== boardFilter.cat) return false;
       if (boardFilter.status !== 'all' && gearStatus(g) !== boardFilter.status) return false;
       if (needle && !`${g.code} ${g.name} ${g.location} ${g.make_model}`.toLowerCase().includes(needle)) return false;
       return true;
@@ -718,7 +766,7 @@ function renderBoard(view) {
       return `
         <button class="gear-card status-${st}" data-id="${g.id}" style="--i:${Math.min(i, 14)}">
           <div class="code">${esc(g.code)}</div>
-          <div class="name">${esc(g.name || catLabel(g.category))}</div>
+          <div class="name">${esc(g.name || catLabel(catOf(g)))}</div>
           <div class="meta"><span class="swatch"></span>${STATUS_TEXT[st]}</div>
           ${open ? `<div class="loc">${open} open job${open === 1 ? '' : 's'}${due ? ` · <span class="${due.late ? 'overdue' : ''}">${due.none ? 'no date' : due.text}</span>` : ''}</div>` : ''}
           <div class="loc">${g.location
@@ -889,9 +937,9 @@ function renderReport(view) {
         <span>Which gear?</span>
         <select id="gearSel">
           <option value="">Choose…</option>
-          ${CATEGORIES.filter(c => gear.some(g => g.category === c.key)).map(c => `
-            <optgroup label="${c.label}">
-              ${gear.filter(g => g.category === c.key).map(g =>
+          ${allCategoryKeys().filter(k => gear.some(g => catOf(g) === k)).map(k => `
+            <optgroup label="${esc(catPlural(k))}">
+              ${gear.filter(g => catOf(g) === k).map(g =>
                 `<option value="${g.id}" ${g.id === preset ? 'selected' : ''}>${esc(g.code)}${g.name ? ' — ' + esc(g.name) : ''}</option>`).join('')}
             </optgroup>`).join('')}
         </select>
@@ -1282,6 +1330,40 @@ function wireWorkshopPanel(view, o) {
 /* ================================================================
    Screen — manage gear
    ================================================================ */
+
+/** Every known type, plus the option to name a new one. */
+function typeOptions(selected) {
+  return allCategoryKeys().map(k =>
+      `<option value="${esc(k)}" ${k === selected ? 'selected' : ''}>${esc(catLabel(k))}</option>`).join('')
+    + `<option value="__new">+ Add a new type…</option>`;
+}
+
+/** Turns "+ Add a new type…" into a real, immediately usable type. */
+function wireTypeSelect(sel) {
+  let previous = sel.value;
+  sel.onchange = () => {
+    if (sel.value !== '__new') { previous = sel.value; return; }
+
+    const typed = (prompt('What type of gear is this?\n\nName one of them, e.g. "Emulsion trailer".') || '').trim();
+    if (!typed) { sel.value = previous; return; }
+
+    // Reuse an existing type if it is the same thing spelled differently,
+    // so the fleet doesn't end up with three flavours of the same word.
+    const existing = matchCategory(typed);
+    const key = existing || typed;
+    if (existing) {
+      toast(`Already have "${catLabel(existing)}" — using that`);
+    } else {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = key;
+      sel.insertBefore(opt, sel.querySelector('option[value="__new"]'));
+    }
+    sel.value = key;
+    previous = key;
+  };
+}
+
 function renderGearAdmin(view) {
   const gear = sortedGear(DB.gear);
 
@@ -1291,7 +1373,7 @@ function renderGearAdmin(view) {
       <div class="row" style="gap:10px">
         <label class="field grow"><span>Code</span><input type="text" id="nCode" placeholder="TRK-07"></label>
         <label class="field grow"><span>Type</span>
-          <select id="nCat">${CATEGORIES.map(c => `<option value="${c.key}">${c.one}</option>`).join('')}</select>
+          <select id="nCat">${typeOptions()}</select>
         </label>
       </div>
       <label class="field"><span>Name</span><input type="text" id="nName" placeholder="Truck 7"></label>
@@ -1313,14 +1395,18 @@ function renderGearAdmin(view) {
       <div class="card row spread" style="padding:11px 13px">
         <div class="grow">
           <strong>${esc(g.code)}</strong> <span class="muted small">${esc(g.name || '')}</span>
-          <div class="tiny muted">${catLabel(g.category)}${g.make_model ? ' · ' + esc(g.make_model) : ''}${g.retired ? ' · RETIRED' : ''}</div>
+          <div class="tiny muted">${catLabel(catOf(g))}${g.make_model ? ' · ' + esc(g.make_model) : ''}${g.retired ? ' · RETIRED' : ''}</div>
         </div>
-        <button class="btn sm" data-edit="${g.id}">Edit</button>
+        <a class="btn sm" href="#/gearedit/${g.id}">Edit</a>
         <button class="btn sm" data-retire="${g.id}">${g.retired ? 'Restore' : 'Retire'}</button>
       </div>`).join('') || '<div class="card muted small">No gear yet.</div>'}`;
 
+  wireTypeSelect($('#nCat', view));
+
   $('#addGear', view).onclick = async function () {
     const code = $('#nCode', view).value.trim().toUpperCase();
+    const category = $('#nCat', view).value;
+    if (category === '__new') return toast('Name the new type first');
     if (!code) return toast('Give it a code');
     if (DB.gear.some(g => (g.code || '').toUpperCase() === code)) return toast('That code is already used');
     this.disabled = true;
@@ -1328,7 +1414,7 @@ function renderGearAdmin(view) {
       id: uid(),
       code,
       name: $('#nName', view).value.trim(),
-      category: $('#nCat', view).value,
+      category,
       make_model: $('#nModel', view).value.trim(),
       location: $('#nLoc', view).value.trim(),
       location_updated_at: $('#nLoc', view).value.trim() ? new Date().toISOString() : null,
@@ -1344,7 +1430,7 @@ function renderGearAdmin(view) {
     this.disabled = true;
     this.textContent = 'Creating…';
     for (const [cat, n] of SEED_FLEET) {
-      const c = CATEGORIES.find(x => x.key === cat);
+      const c = builtinCat(cat);
       for (let i = 1; i <= n; i++) {
         await Store.insert('gear', {
           id: uid(),
@@ -1359,21 +1445,81 @@ function renderGearAdmin(view) {
     render();
   };
 
-  $$('[data-edit]', view).forEach(b => b.onclick = async () => {
-    const g = gearById(b.dataset.edit);
-    const code = prompt('Code', g.code); if (code === null) return;
-    const name = prompt('Name', g.name || ''); if (name === null) return;
-    const model = prompt('Make / model', g.make_model || ''); if (model === null) return;
-    await Store.patch('gear', g.id, { code: code.trim().toUpperCase(), name: name.trim(), make_model: model.trim() });
-    toast('Saved');
-    render();
-  });
-
   $$('[data-retire]', view).forEach(b => b.onclick = async () => {
     const g = gearById(b.dataset.retire);
     await Store.patch('gear', g.id, { retired: !g.retired });
     render();
   });
+}
+
+/* ================================================================
+   Screen — edit one piece of gear
+   ================================================================ */
+function renderGearEdit(view) {
+  const g = gearById(route.path.split('/')[2]);
+  if (!g) { view.innerHTML = `<div class="empty"><b>Gear not found</b></div>`; return; }
+
+  $('#title').textContent = g.code;
+
+  view.innerHTML = `
+    <div class="card">
+      <div class="row" style="gap:10px">
+        <label class="field grow"><span>Code</span>
+          <input type="text" id="eCode" value="${esc(g.code)}"></label>
+        <label class="field grow"><span>Type</span>
+          <select id="eCat">${typeOptions(catOf(g))}</select></label>
+      </div>
+      <label class="field"><span>Name</span>
+        <input type="text" id="eName" value="${esc(g.name || '')}" placeholder="e.g. Emulsion trailer 1"></label>
+      <label class="field"><span>Make / model</span>
+        <input type="text" id="eModel" value="${esc(g.make_model || '')}" placeholder="Optional"></label>
+      <label class="field"><span>Location</span>
+        <input type="text" id="eLoc" value="${esc(g.location || '')}" placeholder="Site, yard or address"></label>
+      <button class="btn primary wide" id="eSave">Save changes</button>
+    </div>
+
+    <div class="card">
+      <h2>${g.retired ? 'Retired' : 'Retire this gear'}</h2>
+      <p class="muted small">${g.retired
+        ? 'It is hidden from the board and cannot have damage reported against it. Its repair history is kept.'
+        : 'For gear that has been sold or scrapped. It disappears from the board but keeps its full repair history.'}</p>
+      <button class="btn wide" id="eRetire">${g.retired ? 'Put back in the fleet' : 'Retire it'}</button>
+    </div>`;
+
+  wireTypeSelect($('#eCat', view));
+
+  $('#eSave', view).onclick = async function () {
+    const code = $('#eCode', view).value.trim().toUpperCase();
+    const category = $('#eCat', view).value;
+    if (!code) return toast('It needs a code');
+    if (category === '__new') return toast('Name the new type first');
+    if (DB.gear.some(x => x.id !== g.id && (x.code || '').toUpperCase() === code)) {
+      return toast('Another machine already uses that code');
+    }
+
+    this.disabled = true;
+    const loc = $('#eLoc', view).value.trim();
+    const patch = {
+      code,
+      category,
+      name: $('#eName', view).value.trim(),
+      make_model: $('#eModel', view).value.trim(),
+      location: loc
+    };
+    if (loc !== (g.location || '')) {
+      patch.location_updated_at = new Date().toISOString();
+      patch.location_updated_by = whoami();
+    }
+    await Store.patch('gear', g.id, patch);
+    toast('Saved');
+    go('#/gearadmin');
+  };
+
+  $('#eRetire', view).onclick = async () => {
+    await Store.patch('gear', g.id, { retired: !g.retired });
+    toast(g.retired ? 'Back in the fleet' : 'Retired');
+    go('#/gearadmin');
+  };
 }
 
 /* ================================================================
@@ -1426,7 +1572,7 @@ function exportCsv() {
     .slice().sort((a, b) => (a.number || 0) - (b.number || 0))
     .map(o => {
       const g = gearById(o.gear_id) || {};
-      return [woNo(o), g.code || '', g.name || '', catLabel(g.category), o.title, o.description,
+      return [woNo(o), g.code || '', g.name || '', catLabel(catOf(g)), o.title, o.description,
         o.severity === 'red' ? 'No — out of operation' : 'Yes — usable', statusLabel(o.status),
         o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
         o.repairer || '', o.external_company || '', o.external_ref || '', o.cost != null ? o.cost : '',
@@ -1483,14 +1629,14 @@ function printWorkOrder(o) {
   const ups = updatesFor(o.id);
 
   printDoc(`
-    ${docHead('Work order ' + woNo(o), `${g.code || ''} — ${g.name || catLabel(g.category)}`)}
+    ${docHead('Work order ' + woNo(o), `${g.code || ''} — ${g.name || catLabel(catOf(g))}`)}
     <p>${badge(o.severity, closed)}</p>
 
     <h2>Gear</h2>
     <table class="kv">
       <tr><td>Code</td><td><strong>${esc(g.code || '')}</strong></td></tr>
       <tr><td>Name</td><td>${esc(g.name || '')}</td></tr>
-      <tr><td>Type</td><td>${catLabel(g.category)}</td></tr>
+      <tr><td>Type</td><td>${catLabel(catOf(g))}</td></tr>
       <tr><td>Make / model</td><td>${esc(g.make_model || '—')}</td></tr>
       <tr><td>Location</td><td>${esc(o.location_at_report || g.location || '—')}</td></tr>
     </table>
@@ -1572,7 +1718,7 @@ function printHistory(g, from, to) {
     : 'All records';
 
   printDoc(`
-    ${docHead('Repair history', g ? `${g.code} — ${g.name || catLabel(g.category)} · ${range}` : `Whole fleet · ${range}`)}
+    ${docHead('Repair history', g ? `${g.code} — ${g.name || catLabel(catOf(g))} · ${range}` : `Whole fleet · ${range}`)}
 
     <h2>Summary</h2>
     <table class="kv">
@@ -1617,12 +1763,12 @@ function printFleetStatus() {
 
   printDoc(`
     ${docHead('Fleet status', `${gear.length} items · ${counts.green} working · ${counts.orange} usable · ${counts.red} out of operation`)}
-    ${CATEGORIES.filter(c => gear.some(g => g.category === c.key)).map(c => `
-      <h2>${c.label}</h2>
+    ${allCategoryKeys().filter(k => gear.some(g => catOf(g) === k)).map(k => `
+      <h2>${esc(catPlural(k))}</h2>
       <table>
         <tr><th style="width:24mm">Code</th><th>Name</th><th style="width:34mm">Status</th>
             <th>Location</th><th style="width:28mm">Back in service</th></tr>
-        ${gear.filter(g => g.category === c.key).map(g => {
+        ${gear.filter(g => catOf(g) === k).map(g => {
           const st = gearStatus(g);
           const eta = gearEta(g);
           return `<tr>

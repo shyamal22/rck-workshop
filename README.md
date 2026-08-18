@@ -120,6 +120,14 @@ as MIL-01…05, PAV-01…05, ROL-01…07, BOB-01…04, TRK-01…06, TRL-01…06.
 add make and model, or add more gear any time from the same screen. Sold or scrapped
 machines get **Retired**, which hides them from the board but keeps their history.
 
+**Types of gear** are not a fixed list. When adding or editing a machine, pick
+**+ Add a new type…** in the Type box and name it — "Emulsion trailer", say — and
+from then on it is a type like any other: its own filter on the board, its own
+group in the damage report picker, its own section in the fleet report. A type
+exists for as long as there is gear filed under it, so there is no separate list
+to keep tidy. Naming one that already exists in a different spelling reuses the
+existing one rather than making a near-duplicate.
+
 ### 5. The workshop screen
 
 On the wall PC or tablet: open the app, **⋮ → Workshop screen**, then **Full screen**.
