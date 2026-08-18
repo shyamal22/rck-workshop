@@ -1684,7 +1684,11 @@ function changeSheet(person, existing) {
         if (docId) d.document_id = docId;
         d.recorded_by = (Auth.me && Auth.me.name) || (Auth.session && Auth.session.email) || '';
 
-        const moved = d.previous_value && d.new_value ? ` (${d.previous_value} → ${d.new_value})` : '';
+        // The history is shown regardless of the Show pay toggle, so the
+        // figures stay out of it — they live on the record itself, which is
+        // gated. Everything else records what moved.
+        const moved = d.kind !== 'pay_rise' && d.previous_value && d.new_value
+          ? ` (${d.previous_value} → ${d.new_value})` : '';
         if (existing) {
           await Store.patch('contract_changes', c.id, d);
           note('contract', c.id, 'changed',
