@@ -38,6 +38,25 @@ const BUILTIN_WORK_TYPES = [
   { key: 'other',       label: 'Other' }
 ];
 
+/* ------------------------------------------------------------- roles */
+/* Two things a device can do beyond reading a job and keeping its diary:
+   plan jobs, and see the documents marked office-only. Both come together,
+   so one flag covers them, and adding a role is one line here rather than
+   a hunt through the screens. */
+const ROLES = [
+  { key: 'supervisor', label: 'Supervisor', blurb: 'On site, keeps the job diary',
+    hint: 'Reads the paperwork, keeps the diary, closes the job when it is finished.',
+    officeAccess: false },
+  { key: 'office',     label: 'Office',     blurb: 'Plans jobs and loads the paperwork',
+    hint: 'All of that, plus creating and editing jobs and the office-only documents.',
+    officeAccess: true },
+  { key: 'director',   label: 'Director',   blurb: 'Everything, plus the overview across all jobs',
+    hint: 'The whole app, plus what no single job shows: value, cost and margin across a period, and the power to archive.',
+    officeAccess: true, directorAccess: true }
+];
+function roleDef(key) { return ROLES.find(r => r.key === key) || ROLES[0]; }
+function roleLabel(key) { return roleDef(key).label; }
+
 /* ---------------------------------------------------------- documents */
 const DOC_KINDS = [
   { key: 'pmp',      label: 'PMP' },
@@ -184,6 +203,35 @@ function startText(dateStr) {
   if (n === -1) return { text: 'was due yesterday', late: true };
   return { text: `${-n} days overdue`, late: true };
 }
+/** Dollars, the way they read on a New Zealand invoice. Rounded to whole
+    dollars on a board where the shape matters more than the cents. */
+function fmtMoney(v, cents) {
+  if (v == null || v === '' || !isFinite(Number(v))) return '—';
+  const n = Number(v);
+  const dp = cents ? 2 : 0;
+  try {
+    return new Intl.NumberFormat('en-NZ', {
+      style: 'currency', currency: 'NZD',
+      minimumFractionDigits: dp, maximumFractionDigits: dp
+    }).format(n);
+  } catch (e) {
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(dp).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+}
+function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
+
+/** What a job made, or null when we don't know both halves. Guessing a
+    margin from half the numbers is worse than showing nothing. */
+function jobMargin(p) {
+  if (!hasMoney(p.contract_value) || !hasMoney(p.actual_cost)) return null;
+  return Number(p.contract_value) - Number(p.actual_cost);
+}
+function marginPct(value, margin) {
+  const v = Number(value);
+  if (!isFinite(v) || v === 0 || margin == null) return null;
+  return (margin / v) * 100;
+}
+
 function fileSizeText(bytes) {
   const n = Number(bytes) || 0;
   if (n < 1024) return n + ' B';
@@ -325,7 +373,10 @@ const Settings = {
 };
 let S = Settings.read();
 
-const isOffice   = () => S.role === 'office';
+/** Can this device plan jobs and see the office-only documents? */
+const isOffice   = () => roleDef(S.role).officeAccess;
+/** ... and see the overview across every job, and archive them? */
+const isDirector = () => !!roleDef(S.role).directorAccess;
 const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 function whoami() { return S.name || 'Unnamed user'; }
 
@@ -682,6 +733,69 @@ function isTodayJob(p) {
   return false;
 }
 
+/* --------------------------------------------------------- periods */
+/* A director thinks in months and financial years, not in dates typed
+   twice. RCK's year runs 1 April to 31 March like everyone else's here. */
+const PERIODS = [
+  { key: 'month',   label: 'This month' },
+  { key: 'last',    label: 'Last month' },
+  { key: 'quarter', label: 'This quarter' },
+  { key: 'fy',      label: 'Financial year' },
+  { key: 'all',     label: 'All time' }
+];
+
+function periodRange(key) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  const lastDay = (yy, mm) => new Date(yy, mm + 1, 0).getDate();
+  if (key === 'month')   return [iso(y, m, 1), iso(y, m, lastDay(y, m))];
+  if (key === 'last')    { const d = new Date(y, m - 1, 1), ly = d.getFullYear(), lm = d.getMonth();
+                           return [iso(ly, lm, 1), iso(ly, lm, lastDay(ly, lm))]; }
+  if (key === 'quarter') { const q = Math.floor(m / 3) * 3;
+                           return [iso(y, q, 1), iso(y, q + 2, lastDay(y, q + 2))]; }
+  if (key === 'fy')      { const fy = m >= 3 ? y : y - 1; return [iso(fy, 3, 1), iso(fy + 1, 2, 31)]; }
+  return ['', ''];
+}
+function periodLabel(key, from, to) {
+  const p = PERIODS.find(x => x.key === key);
+  if (p && key !== 'all') return `${p.label} — ${fmtDate(from)} to ${fmtDate(to)}`;
+  if (key === 'all') return 'All time';
+  if (from || to) return `${from ? fmtDate(from) : 'the beginning'} to ${to ? fmtDate(to) : 'today'}`;
+  return 'All time';
+}
+
+/** A job belongs to a period if it was actually on site in it, or was due
+    to start in it, or finished in it — so a long job counts in every month
+    the crew was out on it, not only the one it started in. */
+function jobInPeriod(p, from, to) {
+  if (!from && !to) return true;
+  const within = d => !!d && (!from || d >= from) && (!to || d <= to);
+  if (within(p.start_date)) return true;
+  if (within((p.completed_at || '').slice(0, 10))) return true;
+  return diaryDays(p.id).some(within);
+}
+
+/** The numbers a director asks for, added up honestly: value and cost are
+    summed only over the jobs that carry them, and the count of those jobs
+    comes back too, so a total can say what it is missing. */
+function periodTotals(list) {
+  const t = { jobs: list.length, days: 0, entries: 0, issues: 0,
+              value: 0, valued: 0, cost: 0, costed: 0,
+              ongoing: 0, planned: 0, completed: 0 };
+  list.forEach(p => {
+    t.days += diaryDays(p.id).length;
+    t.entries += entriesFor(p.id).length;
+    t.issues += issueCount(p.id);
+    if (hasMoney(p.contract_value)) { t.value += Number(p.contract_value); t.valued++; }
+    if (hasMoney(p.actual_cost))    { t.cost  += Number(p.actual_cost);    t.costed++; }
+    t[p.status] = (t[p.status] || 0) + 1;
+  });
+  t.margin = (t.valued && t.costed) ? t.value - t.cost : null;
+  t.marginPct = marginPct(t.value, t.margin);
+  return t;
+}
+
 /** Board order: on site first, then what starts soonest, then finished. */
 function boardOrder(list) {
   const rank = { ongoing: 0, planned: 1, completed: 2 };
@@ -851,6 +965,7 @@ const SCREENS = {
   '/today':   { title: 'Today on site', render: renderToday },
   '/log':     { title: 'Log',           render: renderLogPicker, back: true },
   '/new':     { title: 'New job',       render: renderJobEdit, back: true },
+  '/overview':{ title: 'Overview',      render: renderOverview, back: true },
   '/reports': { title: 'Reports',       render: renderReports, back: true },
   '/setup':   { title: 'Settings',      render: renderSetup,   back: true },
   '/join':    { title: 'Set up',        render: renderJoin },
@@ -891,6 +1006,7 @@ function render() {
   $('#menu').hidden = true;
 
   paintTabs();
+  paintMenu();
   $$('#tabbar a').forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + route.path));
 
   const view = $('#view');
@@ -911,6 +1027,13 @@ function needsSetup() {
 
 /** The big middle tab is whatever this device does most: the office plans
     jobs, the supervisor logs what is happening on the one they're running. */
+/** Menu items marked for one role only appear for that role. */
+function paintMenu() {
+  $$('#menu [data-role]').forEach(el => {
+    el.hidden = el.dataset.role === 'director' ? !isDirector() : !isOffice();
+  });
+}
+
 function paintTabs() {
   const tab = $('#tabbar a.tab-primary');
   if (!tab) return;
@@ -1022,8 +1145,7 @@ function renderJoin(view) {
         <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>You are</span>
         <select id="jRole">
-          <option value="supervisor">Supervisor — on site, keeps the job diary</option>
-          <option value="office">Office — plans jobs and loads the paperwork</option>
+          ${ROLES.map(r => `<option value="${r.key}">${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
         </select></label>
       <button class="btn primary wide" id="jGo">Connect</button>
       <div id="jOut" class="small mt"></div>
@@ -1036,7 +1158,7 @@ function renderJoin(view) {
     const name = $('#jName', view).value.trim();
     const role = $('#jRole', view).value;
     if (!name) return toast('Enter your name');
-    if (role === 'office' && SITE.officePin) {
+    if (roleDef(role).officeAccess && SITE.officePin) {
       const pin = prompt('Office code:');
       if (pin !== SITE.officePin) return toast('Wrong code');
     }
@@ -1298,6 +1420,21 @@ function renderJob(view) {
       </table>
     </div>
 
+    ${isOffice() && (hasMoney(p.contract_value) || hasMoney(p.actual_cost)) ? `
+      <div class="card">
+        <h2>Value and cost</h2>
+        <table class="data">
+          <tr><th>Contract value</th><td>${fmtMoney(p.contract_value, true)}</td></tr>
+          <tr><th>Cost to RCK</th><td>${fmtMoney(p.actual_cost, true)}</td></tr>
+          ${jobMargin(p) != null ? `<tr><th>Margin</th><td><strong style="color:${
+            jobMargin(p) < 0 ? 'var(--red)' : 'var(--green)'}">${fmtMoney(jobMargin(p), true)}${
+            marginPct(p.contract_value, jobMargin(p)) != null
+              ? ' · ' + marginPct(p.contract_value, jobMargin(p)).toFixed(1) + '%' : ''}</strong></td></tr>`
+            : '<tr><th>Margin</th><td class="muted">needs both numbers</td></tr>'}
+        </table>
+        <p class="muted tiny" style="margin:8px 0 0">Not visible to supervisors.</p>
+      </div>` : ''}
+
     ${p.status === 'planned' ? `
       <button class="btn primary wide" id="start">${icon('play')}Start job — crew is on site</button>
       <p class="muted small center mt">Adding the first diary entry does this for you.</p>` : ''}
@@ -1328,10 +1465,11 @@ function renderJob(view) {
         <div class="btn-row">
           <a class="btn sm" href="#/edit/${p.id}">Edit job details</a>
           ${p.status === 'completed' ? '<button class="btn sm" id="reopen">Reopen job</button>' : ''}
-          <button class="btn sm" id="archive">${p.archived ? 'Restore' : 'Archive'}</button>
+          ${isDirector() ? `<button class="btn sm" id="archive">${p.archived ? 'Restore' : 'Archive'}</button>` : ''}
         </div>
-        <p class="muted tiny mt" style="margin-bottom:0">Archiving hides the job from the board and keeps
-        every record. Nothing is ever deleted.</p>
+        <p class="muted tiny mt" style="margin-bottom:0">${isDirector()
+          ? 'Archiving hides the job from the board and keeps every record. Nothing is ever deleted.'
+          : 'Archiving a job is a director\'s call. Nothing here is ever deleted.'}</p>
       </div>` : ''}`;
 
   const startBtn = $('#start', view);
@@ -1579,7 +1717,7 @@ function diaryItem(e, i) {
         ${photos.length ? `<div class="thumbs">${photos.map(f =>
           `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}</div>` : ''}
         ${others.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('clip')}${esc(f.name || 'Attachment')}</a>`).join('')}
-        <div class="dw">${esc(e.author || 'Unknown')}${e.role === 'office' ? ' · Office' : ''}${
+        <div class="dw">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
           pending ? ' · photos waiting for signal' : ''}</div>
       </div>
     </div>`;
@@ -1776,6 +1914,14 @@ function renderEntry(view) {
 /* ================================================================
    Screen — create or edit a job (office)
    ================================================================ */
+/** A money box left empty means "not known", which is a null, not a zero. */
+function moneyField(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
 function renderJobEdit(view) {
   const editing = route.path.startsWith('/edit/') ? jobById(jobIdFromPath()) : null;
   if (route.path.startsWith('/edit/') && !editing) {
@@ -1786,9 +1932,9 @@ function renderJobEdit(view) {
     view.innerHTML = `
       <div class="card">
         <h2>Office only</h2>
-        <p class="muted small">Jobs are planned and edited from an office device. This phone is set
-        to <strong>Supervisor</strong> — you can run any job that is dispatched to you, keep its diary
-        and read its paperwork.</p>
+        <p class="muted small">Jobs are planned and edited from an <strong>Office</strong> or
+        <strong>Director</strong> device. This phone is set to <strong>Supervisor</strong> — you can
+        run any job that is dispatched to you, keep its diary and read its paperwork.</p>
         <a class="btn wide mt" href="#/">Back to the jobs</a>
         <a class="btn wide mt" href="#/setup">Change this device's role</a>
       </div>`;
@@ -1842,6 +1988,20 @@ function renderJobEdit(view) {
         <input type="text" id="contact" value="${esc(p.contact || '')}" placeholder="Name and phone"></label>
     </div>
 
+    <div class="card">
+      <h2>Value and cost</h2>
+      <p class="muted small">Never shown on a site phone. Leave either blank until somebody
+      knows the number — a margin is only worked out when both are filled in.</p>
+      <div class="row">
+        <label class="field grow"><span>Contract value (excl. GST)</span>
+          <input type="number" id="value" inputmode="decimal" step="0.01" min="0"
+            value="${esc(hasMoney(p.contract_value) ? p.contract_value : '')}" placeholder="e.g. 84000"></label>
+        <label class="field grow"><span>Cost to RCK</span>
+          <input type="number" id="cost" inputmode="decimal" step="0.01" min="0"
+            value="${esc(hasMoney(p.actual_cost) ? p.actual_cost : '')}" placeholder="e.g. 61500"></label>
+      </div>
+    </div>
+
     ${editing ? `
     <div class="card">
       <label class="field"><span>Status</span>
@@ -1887,7 +2047,9 @@ function renderJobEdit(view) {
       start_date: start,
       end_date: end,
       supervisor: $('#super', view).value.trim(),
-      contact: $('#contact', view).value.trim()
+      contact: $('#contact', view).value.trim(),
+      contract_value: moneyField($('#value', view).value),
+      actual_cost: moneyField($('#cost', view).value)
     };
 
     this.disabled = true;
@@ -1923,6 +2085,140 @@ function renderJobEdit(view) {
 }
 
 /* ================================================================
+   Screen — the director's overview
+   Every job at once over a period: what the crews did, what went wrong,
+   and what it was worth. Everything on it is added up from what the
+   supervisors and the office entered on the jobs themselves — nothing
+   here is typed twice.
+   ================================================================ */
+const overview = { period: 'month', from: '', to: '', sort: 'value' };
+
+function overviewRange() {
+  if (overview.period === 'custom') return [overview.from, overview.to];
+  return periodRange(overview.period);
+}
+
+function renderOverview(view) {
+  if (!isDirector()) {
+    view.innerHTML = `
+      <div class="card">
+        <h2>Director only</h2>
+        <p class="muted small">The overview across every job — days on site, issues, value and
+        margin over a period — is for devices set to <strong>Director</strong>. Everything it adds
+        up is on the jobs themselves, which you can already see.</p>
+        <a class="btn wide mt" href="#/reports">Open reports</a>
+      </div>`;
+    return;
+  }
+
+  const [from, to] = overviewRange();
+  const list = DB.projects.filter(p => jobInPeriod(p, from, to));
+  const t = periodTotals(list);
+
+  const sorters = {
+    value:  (a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1),
+    margin: (a, b) => ((jobMargin(b) == null ? -Infinity : jobMargin(b)) - (jobMargin(a) == null ? -Infinity : jobMargin(a))),
+    days:   (a, b) => diaryDays(b.id).length - diaryDays(a.id).length,
+    issues: (a, b) => issueCount(b.id) - issueCount(a.id)
+  };
+  const sorted = list.slice().sort(sorters[overview.sort] || sorters.value);
+
+  view.innerHTML = `
+    <div class="filters" id="periodChips">
+      ${PERIODS.map(x => `<button class="chip" data-period="${x.key}"
+        aria-pressed="${overview.period === x.key}">${esc(x.label)}</button>`).join('')}
+      <button class="chip" data-period="custom" aria-pressed="${overview.period === 'custom'}">Pick dates</button>
+    </div>
+
+    ${overview.period === 'custom' ? `
+      <div class="card">
+        <div class="row">
+          <label class="field grow"><span>From</span><input type="date" id="from" value="${esc(overview.from)}"></label>
+          <label class="field grow"><span>To</span><input type="date" id="to" value="${esc(overview.to)}"></label>
+        </div>
+      </div>` : ''}
+
+    <p class="muted small mb">${esc(periodLabel(overview.period, from, to))}</p>
+
+    <div class="card">
+      <div class="stat">
+        <div><span class="n">${t.jobs}</span><span class="l">Jobs</span></div>
+        <div><span class="n">${t.days}</span><span class="l">Days on site</span></div>
+        <div><span class="n">${t.entries}</span><span class="l">Diary entries</span></div>
+        <div><span class="n" style="color:${t.issues ? 'var(--red)' : 'inherit'}">${t.issues}</span><span class="l">Issues</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Value and margin</h2>
+      <div class="stat">
+        <div><span class="n" style="font-size:19px">${esc(fmtMoney(t.value))}</span><span class="l">Contract value</span></div>
+        <div><span class="n" style="font-size:19px">${esc(fmtMoney(t.cost))}</span><span class="l">Cost</span></div>
+        <div><span class="n" style="font-size:19px;color:${t.margin == null ? 'inherit' : t.margin < 0 ? 'var(--red)' : 'var(--green)'}">${
+          t.margin == null ? '—' : esc(fmtMoney(t.margin))}</span><span class="l">Margin${
+          t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</span></div>
+      </div>
+      ${t.valued < t.jobs || t.costed < t.jobs ? `<p class="muted tiny mt" style="margin-bottom:0">
+        Value is filled in on ${t.valued} of ${t.jobs} job(s), cost on ${t.costed}. The totals only
+        count the jobs that carry the number, so they are a floor, not the whole picture.</p>` : ''}
+    </div>
+
+    <div class="filters" id="sortChips">
+      ${[['value','By value'],['margin','By margin'],['days','By days on site'],['issues','By issues']]
+        .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${overview.sort === k}">${l}</button>`).join('')}
+    </div>
+
+    ${sorted.length ? sorted.map((p, i) => {
+      const m = jobMargin(p), days = diaryDays(p.id).length, iss = issueCount(p.id);
+      const pct = marginPct(p.contract_value, m);
+      return `
+        <button class="job-row status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
+          <div class="hdr">
+            <span class="num">${jobNo(p)}</span>
+            <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+            ${p.archived ? '<span class="pill plain">Archived</span>' : ''}
+          </div>
+          <div class="ttl">${esc(p.name)}</div>
+          <div class="sub">
+            ${p.client ? `<span>${esc(p.client)}</span>` : ''}
+            ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
+            <span>${days} day${days === 1 ? '' : 's'} on site</span>
+            ${iss ? `<span class="overdue">${iss} issue${iss > 1 ? 's' : ''}</span>` : ''}
+          </div>
+          <div class="sub">
+            <span><strong>${esc(fmtMoney(p.contract_value))}</strong> value</span>
+            <span>${esc(fmtMoney(p.actual_cost))} cost</span>
+            ${m != null ? `<span style="color:${m < 0 ? 'var(--red)' : 'var(--green)'};font-weight:640">${
+              esc(fmtMoney(m))}${pct != null ? ' · ' + pct.toFixed(1) + '%' : ''}</span>` : ''}
+          </div>
+        </button>`;
+    }).join('') : '<div class="empty"><b>No jobs in this period</b>Try a wider one.</div>'}
+
+    <div class="card">
+      <button class="btn wide" id="print">${icon('printer')}Print the director's report</button>
+      <p class="muted tiny center mt" style="margin-bottom:0">Every job in the period, plus every issue
+      and delay the supervisors logged.</p>
+    </div>`;
+
+  $$('#periodChips .chip', view).forEach(b => b.onclick = () => {
+    overview.period = b.dataset.period;
+    if (overview.period === 'custom' && !overview.from && !overview.to) {
+      const [f, t2] = periodRange('month');
+      overview.from = f; overview.to = t2;
+    }
+    render();
+  });
+  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { overview.sort = b.dataset.sort; render(); });
+
+  const f = $('#from', view), t2 = $('#to', view);
+  if (f) f.onchange = () => { overview.from = f.value; render(); };
+  if (t2) t2.onchange = () => { overview.to = t2.value; render(); };
+
+  $$('.job-row', view).forEach(b => b.onclick = () => go('#/job/' + b.dataset.id));
+  $('#print', view).onclick = () => printDirectorReport(from, to);
+}
+
+/* ================================================================
    Screen — reports
    ================================================================ */
 function renderReports(view) {
@@ -1954,6 +2250,14 @@ function renderReports(view) {
       </div>
       <button class="btn wide" id="period">${icon('printer')}Print jobs summary</button>
     </div>
+
+    ${isDirector() ? `
+    <div class="card">
+      <h2>Across every job</h2>
+      <p class="muted small">The overview: days on site, issues, value and margin over a period,
+      added up from what the crews and the office entered on the jobs themselves.</p>
+      <a class="btn primary wide" href="#/overview">Open the director's overview</a>
+    </div>` : ''}
 
     <div class="card">
       <h2>For Excel</h2>
@@ -1993,16 +2297,22 @@ function downloadCsv(name, rows) {
 }
 
 function exportJobsCsv() {
+  const money = isOffice();     // a site phone exports a spreadsheet without the money in it
   const rows = [['Job', 'Name', 'Client', 'Site', 'Type of work', 'Status', 'First day',
     'Last day', 'Supervisor', 'Started', 'Completed', 'Days on site', 'Diary entries',
-    'Issues', 'Documents', 'Closing note']];
+    'Issues', 'Documents', 'Closing note']
+    .concat(money ? ['Contract value', 'Cost', 'Margin'] : [])];
   boardOrder(DB.projects.slice()).forEach(p => rows.push([
     jobNo(p), p.name, p.client, p.site, typeLabel(typeOf(p)), statusLabel(p.status),
     p.start_date || '', p.end_date || '', p.supervisor,
     p.started_at ? fmtDate(p.started_at) : '', p.completed_at ? fmtDate(p.completed_at) : '',
     diaryDays(p.id).length, entriesFor(p.id).length, issueCount(p.id), allDocsFor(p.id).length,
     p.completion_notes || ''
-  ]));
+  ].concat(money ? [
+    hasMoney(p.contract_value) ? Number(p.contract_value) : '',
+    hasMoney(p.actual_cost) ? Number(p.actual_cost) : '',
+    jobMargin(p) == null ? '' : jobMargin(p)
+  ] : [])));
   downloadCsv('rck-jobs.csv', rows);
 }
 
@@ -2181,6 +2491,83 @@ function printDocRegister(p) {
     ${docsTable(p, isOffice())}`);
 }
 
+/** The director's report: the period's numbers, every job in it, and every
+    issue and delay the crews logged — the supervisors' and the office's own
+    entries added up, rather than a separate thing anyone has to write. */
+function printDirectorReport(from, to) {
+  const list = DB.projects.filter(p => jobInPeriod(p, from, to));
+  const t = periodTotals(list);
+  const sorted = list.slice().sort((a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1));
+
+  const inRange = d => !!d && (!from || d >= from) && (!to || d <= to);
+  const troubles = [];
+  list.forEach(p => entriesFor(p.id).forEach(e => {
+    if ((e.kind === 'issue' || e.kind === 'delay') && inRange(e.entry_date)) troubles.push({ p, e });
+  }));
+  troubles.sort((a, b) => (a.e.entry_date || '').localeCompare(b.e.entry_date || ''));
+
+  printDoc(`
+    ${docHead('Director\'s report', periodLabel(overview.period, from, to))}
+
+    <h2>The period</h2>
+    <table class="kv">
+      <tr><td>Jobs</td><td><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
+        ${t.planned || 0} planned, ${t.completed || 0} completed</td></tr>
+      <tr><td>Days on site</td><td>${t.days}</td></tr>
+      <tr><td>Diary entries</td><td>${t.entries}</td></tr>
+      <tr><td>Issues and delays</td><td>${t.issues}</td></tr>
+      <tr><td>Contract value</td><td><strong>${esc(fmtMoney(t.value))}</strong>${
+        t.valued < t.jobs ? ` <em>(on ${t.valued} of ${t.jobs} jobs)</em>` : ''}</td></tr>
+      <tr><td>Cost</td><td>${esc(fmtMoney(t.cost))}${
+        t.costed < t.jobs ? ` <em>(on ${t.costed} of ${t.jobs} jobs)</em>` : ''}</td></tr>
+      <tr><td>Margin</td><td><strong>${t.margin == null ? '—' : esc(fmtMoney(t.margin))}</strong>${
+        t.marginPct != null ? ` · ${t.marginPct.toFixed(1)}%` : ''}</td></tr>
+    </table>
+    ${t.valued < t.jobs || t.costed < t.jobs
+      ? `<p style="font-size:10pt;color:#444">Totals count only the jobs carrying a figure, so they
+         are a floor rather than the whole picture.</p>` : ''}
+
+    <h2>Jobs</h2>
+    <table>
+      <tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:22mm">Status</th>
+        <th style="width:13mm">Days</th><th style="width:13mm">Iss.</th>
+        <th style="width:24mm">Value</th><th style="width:24mm">Cost</th><th style="width:26mm">Margin</th></tr>
+      ${sorted.map(p => {
+        const m = jobMargin(p), pct = marginPct(p.contract_value, m);
+        return `<tr class="avoid-break">
+          <td><strong>${jobNo(p)}</strong></td>
+          <td>${esc(p.name)}${p.client ? `<br><em>${esc(p.client)}</em>` : ''}${
+            p.supervisor ? `<br>${esc(p.supervisor)}` : ''}</td>
+          <td>${esc(statusLabel(p.status))}${p.archived ? '<br><em>archived</em>' : ''}</td>
+          <td>${diaryDays(p.id).length}</td>
+          <td>${issueCount(p.id) || ''}</td>
+          <td>${esc(fmtMoney(p.contract_value))}</td>
+          <td>${esc(fmtMoney(p.actual_cost))}</td>
+          <td>${m == null ? '—' : esc(fmtMoney(m)) + (pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : '')}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="8">No jobs in this period.</td></tr>'}
+    </table>
+
+    <h2>What went wrong on site</h2>
+    ${troubles.length ? `
+      <table>
+        <tr><th style="width:24mm">Date</th><th style="width:22mm">Job</th>
+          <th>What happened</th><th style="width:26mm">Logged by</th></tr>
+        ${troubles.map(({ p, e }) => `<tr class="avoid-break">
+          <td>${esc(fmtShort(e.entry_date))} ${esc(fmtTime(e.at))}</td>
+          <td>${jobNo(p)}</td>
+          <td class="note"><strong>${esc(entryLabel(e))}</strong>${e.body ? ' — ' + esc(e.body) : ''}</td>
+          <td>${esc(e.author || '')}</td>
+        </tr>`).join('')}
+      </table>`
+      : '<p>Nothing was logged as an issue or a delay in this period.</p>'}
+
+    <div class="sig">
+      <div>Director &amp; date</div>
+      <div>Reviewed &amp; date</div>
+    </div>`);
+}
+
 function printJobsSummary(from, to) {
   const inRange = p => {
     const d = (p.start_date || (p.created_at || '').slice(0, 10) || '');
@@ -2350,12 +2737,10 @@ function renderSetup(view) {
         <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>This device is used by</span>
         <select id="sRole">
-          <option value="supervisor" ${S.role === 'supervisor' ? 'selected' : ''}>Supervisor — on site, keeps the job diary</option>
-          <option value="office" ${S.role === 'office' ? 'selected' : ''}>Office — plans jobs and loads the paperwork</option>
+          ${ROLES.map(r => `<option value="${r.key}" ${S.role === r.key ? 'selected' : ''}>${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
         </select></label>
-      <p class="muted tiny">A supervisor reads the job, downloads its paperwork, keeps the diary and
-      closes the job when it is finished. The office also creates and edits jobs, loads documents and
-      sees the office-only ones.</p>
+      <div class="tiny muted">${ROLES.map(r =>
+        `<p style="margin-bottom:6px"><strong>${esc(r.label)}</strong> — ${esc(r.hint)}</p>`).join('')}</div>
       <button class="btn primary wide" id="saveMe">Save</button>
     </div>
 
@@ -2402,6 +2787,7 @@ function renderSetup(view) {
     <div class="card">
       <h2>Status</h2>
       <table class="data">
+        <tr><th>This device</th><td>${esc(roleLabel(S.role))}${isOffice() ? '' : ' — office-only documents are hidden'}</td></tr>
         <tr><th>Connection</th><td>${S.localMode ? 'This device only' : connected() ? 'Shared database' : 'Not set up'}</td></tr>
         <tr><th>Jobs</th><td>${DB.projects.length}</td></tr>
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
@@ -2419,7 +2805,7 @@ function renderSetup(view) {
     const role = $('#sRole', view).value;
     const name = $('#sName', view).value.trim();
     if (!name) return toast('Enter your name');
-    if (role === 'office' && S.role !== 'office' && SITE.officePin) {
+    if (roleDef(role).officeAccess && !isOffice() && SITE.officePin) {
       const pin = prompt('Office code:');
       if (pin !== SITE.officePin) return toast('Wrong code');
     }

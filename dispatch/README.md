@@ -17,7 +17,7 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 
 ## What it does
 
-**For the office**
+**For the office (and directors, who can do everything)**
 - Create a job: name, client, site, type of work, the dates, and who's running it.
 - Load anything onto it — PMP, scope, job cards, TMP, drawings, permits, spreadsheets,
   photos. Several files at once is fine.
@@ -39,6 +39,21 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   is a real type from that moment, on everyone's phone.
 - Every entry takes photos. They're shrunk on the phone so they go through on site.
 - When the job's finished: **Project completed**, with a closing note.
+
+**For the director**
+- Everything above, on the same phone — a director can plan a job in the morning and keep
+  its diary on site in the afternoon.
+- **⋮ → Director overview**: every job at once over a period — this month, last month, this
+  quarter, the financial year (1 April to 31 March), or dates you pick. Days on site, diary
+  entries, issues, contract value, cost and margin, sorted by whichever of those you care
+  about. Nothing on it is typed twice: it is added up from what the crews and the office
+  already entered on the jobs.
+- **The director's report** prints that period — the totals, every job with its margin, and
+  **every issue and delay the supervisors logged**, gathered across all the jobs into one table.
+- Value and cost live on the job itself, entered by the office or a director. They are never
+  shown on a site phone, and never exported in a supervisor's CSV. A margin is only worked out
+  when both numbers are there — half the figures is worse than none.
+- Archiving a job is a director's call. Nothing in the app is ever deleted.
 
 **The report**
 The full job report is the whole record in one document: the job's details, a summary,
@@ -71,7 +86,8 @@ Two jobs, about 15 minutes total, done once.
 3. Wait about two minutes for the project to build.
 4. Open **SQL Editor** → **New query**.
 5. Open `supabase-schema.sql` from this folder, copy the whole file, paste it in, press
-   **Run**. It should say *Success*.
+   **Run**. It should say *Success*. Re-run it any time — it is safe over a live database,
+   and that is how new columns reach an installation that already exists.
 6. Go to **Settings → API** and copy two things:
    - **Project URL** — looks like `https://abcdefgh.supabase.co`
    - **anon public** key — a long string starting `eyJ…`
@@ -95,23 +111,29 @@ never sent to the web server. Treat the link like a key: only send it to RCK peo
 By hand instead: open the app URL, **Add to Home Screen** (Share menu on iPhone, ⋮ on
 Android), then **Settings** → name, role, and the two values.
 
-**The two roles**
+**The three roles**
 
-| | Supervisor | Office |
-|---|---|---|
-| See the jobs and their documents | ✓ | ✓ |
-| Download documents | ✓ | ✓ |
-| Keep the job diary, add photos | ✓ | ✓ |
-| Start a job, mark it completed | ✓ | ✓ |
-| Print reports | ✓ | ✓ |
-| Add documents | ✓ | ✓ |
-| See **office-only** documents | | ✓ |
-| Create and edit jobs, archive them | | ✓ |
-| Reopen a completed job | | ✓ |
+| | Supervisor | Office | Director |
+|---|---|---|---|
+| See the jobs and their documents | ✓ | ✓ | ✓ |
+| Download documents | ✓ | ✓ | ✓ |
+| Keep the job diary, add photos | ✓ | ✓ | ✓ |
+| Start a job, mark it completed | ✓ | ✓ | ✓ |
+| Print reports | ✓ | ✓ | ✓ |
+| Add documents | ✓ | ✓ | ✓ |
+| See **office-only** documents | | ✓ | ✓ |
+| Create and edit jobs | | ✓ | ✓ |
+| Reopen a completed job | | ✓ | ✓ |
+| Enter a job's value and cost | | ✓ | ✓ |
+| **Overview across every job** | | | ✓ |
+| **Archive a job** | | | ✓ |
+
+A diary entry written from a director's phone reads *· Director* in the record. Supervisors
+stay unlabelled, since that is the default on site and the tag would be noise on every line.
 
 Set `officePin` in `config.js` if you want a code required before a device can switch
-itself to Office. It stops accidents; it is not a password, since the code sits in a
-file anyone can read.
+itself to Office or Director. It stops accidents; it is not a password, since the code
+sits in a file anyone can read.
 
 ### 4. The office screen
 
@@ -137,8 +159,12 @@ Workshop in the same repository and GitHub Pages serves it from
   anything you'd mind an RCK phone seeing into the app, and don't publish the link.
 - **Practice mode** in Settings lets someone try the whole app without touching the
   shared data. Nothing entered in practice mode is visible to anyone else.
-- **Nothing is deleted by accident.** Archiving a job hides it from the board and keeps
-  every record; a completed job can be reopened by the office.
+- **Nothing is deleted by accident.** Archiving a job hides it from the board and keeps every
+  record, and only a director can do it; a completed job can be reopened by the office. There
+  is no permanent delete anywhere in the app, on purpose.
+- **The money is not a secret from the database.** Value and cost are hidden from site phones
+  by the app, not by the database — same as the office-only documents. See the note on logins
+  below before deciding what to put in those boxes.
 - **Types of work aren't a fixed list.** Pick **+ Add a new type…** when creating a job
   and name it — "Chip seal", say — and from then on it's a type like any other, with
   its own filter on the board. Naming one that already exists in a different spelling
