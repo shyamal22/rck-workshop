@@ -269,6 +269,14 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 }
 .gear-card .loc svg { width: 12px; height: 12px; flex: none; stroke-width: 2; }
 
+/* Days since the fault was raised, tucked into the bottom corner. */
+.gear-card .days {
+  position: absolute; right: 11px; bottom: 10px;
+  font-size: 14px; font-weight: 700; color: var(--s);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.gear-card.has-days .loc:last-child { padding-right: 34px; }
+
 /* ------------------------------------------------------- work orders */
 .wo {
   position: relative; display: block; width: 100%; text-align: left;
@@ -514,7 +522,10 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   animation: riseIn var(--t-slow) var(--ease-soft) both;
   animation-delay: calc(160ms + var(--i, 0) * 30ms);
 }
-.k-chip .c { font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
+.k-chip .c { font-size: 17px; font-weight: 700; letter-spacing: -.02em;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.k-chip .c em { font-style: normal; font-size: 13px; font-weight: 620; color: var(--s);
+  font-variant-numeric: tabular-nums; }
 .k-chip .s { font-size: 11.5px; color: #a3adb9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .k-foot { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: #5f6975; }
@@ -546,6 +557,7 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   .k-wo .keta b { font-size: 22px; }
   .k-grid { grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); }
   .k-chip .c { font-size: 21px; }
+  .k-chip .c em { font-size: 16px; }
   .k-chip .s { font-size: 13px; }
 }
 

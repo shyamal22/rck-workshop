@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -425,6 +425,39 @@ function gearStatus(g) {
   if (open.length) return 'orange';
   return 'green';
 }
+/** When this machine stopped being green — its oldest still-open fault.
+    Deliberately measured from the first open fault rather than from the last
+    change of colour: a machine that worsens from yellow to red would otherwise
+    reset to zero and drop down a board that is sorted by neglect. */
+function downSince(g) {
+  const dates = openOrdersFor(g.id).map(o => o.reported_at).filter(Boolean).sort();
+  return dates[0] || null;
+}
+
+/** Whole calendar days since then — reported yesterday reads 1, not 0. */
+function daysDown(g) {
+  const since = downSince(g);
+  if (!since) return null;
+  const from = new Date(since);
+  if (isNaN(from)) return null;
+  const a = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const now = new Date();
+  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+/** Longest-standing problems first, then healthy gear in its tidy order. */
+function boardOrder(list) {
+  const tidy = sortedGear(list);
+  return tidy.slice().sort((a, b) => {
+    const da = downSince(a), db = downSince(b);
+    if (da && db) return da.localeCompare(db);
+    if (da) return -1;
+    if (db) return 1;
+    return tidy.indexOf(a) - tidy.indexOf(b);
+  });
+}
+
 /** Soonest promised back-in-service date across a gear item's open work. */
 function gearEta(g) {
   const dates = openOrdersFor(g.id).map(o => o.target_date).filter(Boolean).sort();
@@ -774,13 +807,15 @@ function renderBoard(view) {
       grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><b>Nothing matches</b>Try another filter.</div>`;
       return;
     }
-    grid.innerHTML = list.map((g, i) => {
+    grid.innerHTML = boardOrder(list).map((g, i) => {
       const st = gearStatus(g);
       const eta = gearEta(g);
       const open = openOrdersFor(g.id).length;
       const due = eta ? dueText(eta) : null;
+      const days = daysDown(g);
       return `
-        <button class="gear-card status-${st}" data-id="${g.id}" style="--i:${Math.min(i, 14)}">
+        <button class="gear-card status-${st}${days === null ? '' : ' has-days'}" data-id="${g.id}" style="--i:${Math.min(i, 14)}">
+          ${days === null ? '' : `<span class="days" title="${days} day${days === 1 ? '' : 's'} since the fault was reported">${days}d</span>`}
           <div class="code">${esc(g.code)}</div>
           <div class="name">${esc(g.name || catLabel(catOf(g)))}</div>
           <div class="meta"><span class="swatch"></span>${STATUS_TEXT[st]}</div>
@@ -1845,7 +1880,7 @@ function renderKiosk(view) {
     const now = new Date();
     const clock = `${now.getHours() % 12 || 12}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() < 12 ? 'am' : 'pm'}`;
 
-    const attention = gear.filter(g => gearStatus(g) !== 'green');
+    const attention = boardOrder(gear.filter(g => gearStatus(g) !== 'green'));
 
     view.innerHTML = `
       <div class="k">
@@ -1899,8 +1934,9 @@ function renderKiosk(view) {
               ${attention.map((g, i) => {
                 const st = gearStatus(g);
                 const eta = gearEta(g);
+                const days = daysDown(g);
                 return `<div class="k-chip status-${st}" style="--i:${i}">
-                  <div class="c">${esc(g.code)}</div>
+                  <div class="c">${esc(g.code)}${days === null ? '' : `<em>${days}d</em>`}</div>
                   <div class="s">${st === 'red' ? 'Out of action' : 'Usable'}${eta ? ' · ' + fmtShort(eta) : ''}</div>
                 </div>`;
               }).join('') || '<div class="muted">Whole fleet is green.</div>'}
