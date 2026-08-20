@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RCK Dispatch">
+  <rect width="512" height="512" rx="112" fill="#14171a"/>
+  <path d="M182 96 L138 416" stroke="#3f464e" stroke-width="26" stroke-linecap="round"/>
+  <path d="M330 96 L374 416" stroke="#3f464e" stroke-width="26" stroke-linecap="round"/>
+  <path d="M256 108 L256 172" stroke="#facc15" stroke-width="34" stroke-linecap="round"/>
+  <path d="M256 224 L256 288" stroke="#facc15" stroke-width="34" stroke-linecap="round"/>
+  <path d="M256 340 L256 404" stroke="#facc15" stroke-width="34" stroke-linecap="round"/>
+</svg>
