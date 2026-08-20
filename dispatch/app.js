@@ -38,6 +38,25 @@ const BUILTIN_WORK_TYPES = [
   { key: 'other',       label: 'Other' }
 ];
 
+/* ------------------------------------------------------------- roles */
+/* Two things a device can do beyond reading a job and keeping its diary:
+   plan jobs, and see the documents marked office-only. Both come together,
+   so one flag covers them, and adding a role is one line here rather than
+   a hunt through the screens. */
+const ROLES = [
+  { key: 'supervisor', label: 'Supervisor', blurb: 'On site, keeps the job diary',
+    hint: 'Reads the paperwork, keeps the diary, closes the job when it is finished.',
+    officeAccess: false },
+  { key: 'office',     label: 'Office',     blurb: 'Plans jobs and loads the paperwork',
+    hint: 'All of that, plus creating and editing jobs and the office-only documents.',
+    officeAccess: true },
+  { key: 'director',   label: 'Director',   blurb: 'Everything the office and the crew can do',
+    hint: 'The whole app: plan a job, load the paperwork, keep a diary on site, close it off.',
+    officeAccess: true }
+];
+function roleDef(key) { return ROLES.find(r => r.key === key) || ROLES[0]; }
+function roleLabel(key) { return roleDef(key).label; }
+
 /* ---------------------------------------------------------- documents */
 const DOC_KINDS = [
   { key: 'pmp',      label: 'PMP' },
@@ -325,7 +344,8 @@ const Settings = {
 };
 let S = Settings.read();
 
-const isOffice   = () => S.role === 'office';
+/** Can this device plan jobs and see the office-only documents? */
+const isOffice   = () => roleDef(S.role).officeAccess;
 const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 function whoami() { return S.name || 'Unnamed user'; }
 
@@ -1022,8 +1042,7 @@ function renderJoin(view) {
         <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>You are</span>
         <select id="jRole">
-          <option value="supervisor">Supervisor — on site, keeps the job diary</option>
-          <option value="office">Office — plans jobs and loads the paperwork</option>
+          ${ROLES.map(r => `<option value="${r.key}">${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
         </select></label>
       <button class="btn primary wide" id="jGo">Connect</button>
       <div id="jOut" class="small mt"></div>
@@ -1036,7 +1055,7 @@ function renderJoin(view) {
     const name = $('#jName', view).value.trim();
     const role = $('#jRole', view).value;
     if (!name) return toast('Enter your name');
-    if (role === 'office' && SITE.officePin) {
+    if (roleDef(role).officeAccess && SITE.officePin) {
       const pin = prompt('Office code:');
       if (pin !== SITE.officePin) return toast('Wrong code');
     }
@@ -1579,7 +1598,7 @@ function diaryItem(e, i) {
         ${photos.length ? `<div class="thumbs">${photos.map(f =>
           `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}</div>` : ''}
         ${others.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('clip')}${esc(f.name || 'Attachment')}</a>`).join('')}
-        <div class="dw">${esc(e.author || 'Unknown')}${e.role === 'office' ? ' · Office' : ''}${
+        <div class="dw">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
           pending ? ' · photos waiting for signal' : ''}</div>
       </div>
     </div>`;
@@ -1786,9 +1805,9 @@ function renderJobEdit(view) {
     view.innerHTML = `
       <div class="card">
         <h2>Office only</h2>
-        <p class="muted small">Jobs are planned and edited from an office device. This phone is set
-        to <strong>Supervisor</strong> — you can run any job that is dispatched to you, keep its diary
-        and read its paperwork.</p>
+        <p class="muted small">Jobs are planned and edited from an <strong>Office</strong> or
+        <strong>Director</strong> device. This phone is set to <strong>Supervisor</strong> — you can
+        run any job that is dispatched to you, keep its diary and read its paperwork.</p>
         <a class="btn wide mt" href="#/">Back to the jobs</a>
         <a class="btn wide mt" href="#/setup">Change this device's role</a>
       </div>`;
@@ -2350,12 +2369,10 @@ function renderSetup(view) {
         <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>This device is used by</span>
         <select id="sRole">
-          <option value="supervisor" ${S.role === 'supervisor' ? 'selected' : ''}>Supervisor — on site, keeps the job diary</option>
-          <option value="office" ${S.role === 'office' ? 'selected' : ''}>Office — plans jobs and loads the paperwork</option>
+          ${ROLES.map(r => `<option value="${r.key}" ${S.role === r.key ? 'selected' : ''}>${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
         </select></label>
-      <p class="muted tiny">A supervisor reads the job, downloads its paperwork, keeps the diary and
-      closes the job when it is finished. The office also creates and edits jobs, loads documents and
-      sees the office-only ones.</p>
+      <div class="tiny muted">${ROLES.map(r =>
+        `<p style="margin-bottom:6px"><strong>${esc(r.label)}</strong> — ${esc(r.hint)}</p>`).join('')}</div>
       <button class="btn primary wide" id="saveMe">Save</button>
     </div>
 
@@ -2402,6 +2419,7 @@ function renderSetup(view) {
     <div class="card">
       <h2>Status</h2>
       <table class="data">
+        <tr><th>This device</th><td>${esc(roleLabel(S.role))}${isOffice() ? '' : ' — office-only documents are hidden'}</td></tr>
         <tr><th>Connection</th><td>${S.localMode ? 'This device only' : connected() ? 'Shared database' : 'Not set up'}</td></tr>
         <tr><th>Jobs</th><td>${DB.projects.length}</td></tr>
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
@@ -2419,7 +2437,7 @@ function renderSetup(view) {
     const role = $('#sRole', view).value;
     const name = $('#sName', view).value.trim();
     if (!name) return toast('Enter your name');
-    if (role === 'office' && S.role !== 'office' && SITE.officePin) {
+    if (roleDef(role).officeAccess && !isOffice() && SITE.officePin) {
       const pin = prompt('Office code:');
       if (pin !== SITE.officePin) return toast('Wrong code');
     }

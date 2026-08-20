@@ -17,7 +17,7 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 
 ## What it does
 
-**For the office**
+**For the office (and directors, who can do everything)**
 - Create a job: name, client, site, type of work, the dates, and who's running it.
 - Load anything onto it — PMP, scope, job cards, TMP, drawings, permits, spreadsheets,
   photos. Several files at once is fine.
@@ -95,23 +95,28 @@ never sent to the web server. Treat the link like a key: only send it to RCK peo
 By hand instead: open the app URL, **Add to Home Screen** (Share menu on iPhone, ⋮ on
 Android), then **Settings** → name, role, and the two values.
 
-**The two roles**
+**The three roles**
 
-| | Supervisor | Office |
-|---|---|---|
-| See the jobs and their documents | ✓ | ✓ |
-| Download documents | ✓ | ✓ |
-| Keep the job diary, add photos | ✓ | ✓ |
-| Start a job, mark it completed | ✓ | ✓ |
-| Print reports | ✓ | ✓ |
-| Add documents | ✓ | ✓ |
-| See **office-only** documents | | ✓ |
-| Create and edit jobs, archive them | | ✓ |
-| Reopen a completed job | | ✓ |
+| | Supervisor | Office | Director |
+|---|---|---|---|
+| See the jobs and their documents | ✓ | ✓ | ✓ |
+| Download documents | ✓ | ✓ | ✓ |
+| Keep the job diary, add photos | ✓ | ✓ | ✓ |
+| Start a job, mark it completed | ✓ | ✓ | ✓ |
+| Print reports | ✓ | ✓ | ✓ |
+| Add documents | ✓ | ✓ | ✓ |
+| See **office-only** documents | | ✓ | ✓ |
+| Create and edit jobs, archive them | | ✓ | ✓ |
+| Reopen a completed job | | ✓ | ✓ |
+
+**Office and Director can do the same things.** The difference is what the record says:
+a diary entry written from a director's phone reads *· Director*, and the person holding
+it isn't picking a role that describes someone else's job. If something should be
+director-only later, this is where it goes.
 
 Set `officePin` in `config.js` if you want a code required before a device can switch
-itself to Office. It stops accidents; it is not a password, since the code sits in a
-file anyone can read.
+itself to Office or Director. It stops accidents; it is not a password, since the code
+sits in a file anyone can read.
 
 ### 4. The office screen
 

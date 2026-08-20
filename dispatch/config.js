@@ -15,8 +15,8 @@ window.RCKD_CONFIG = {
   supabaseUrl: '',
   supabaseKey: '',
 
-  // Optional. If set, switching a device into Office mode asks for this
-  // code first, so a site phone can't create or delete jobs by accident.
-  // It is a speed bump, not a password — the code is visible in this file.
+  // Optional. If set, switching a device into Office or Director mode asks
+  // for this code first, so a site phone can't create or delete jobs by
+  // accident. It is a speed bump, not a password — the code is in this file.
   officePin: ''
 };
