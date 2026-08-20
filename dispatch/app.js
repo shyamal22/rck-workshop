@@ -9,7 +9,12 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+
+/* A newer version has downloaded but can't take over until every tab of the
+   old one is gone. Rather than leave someone tapping a feature that isn't
+   there yet, Settings says so. */
+let updateReady = false;
 
 /* --------------------------------------------------------- job states */
 /* Three, and only three. A job is either coming up, happening, or done. */
@@ -2793,7 +2798,7 @@ function renderSetup(view) {
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
-        <tr><th>Version</th><td>${VERSION}</td></tr>
+        <tr><th>Version</th><td>${VERSION}${updateReady ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
       </table>
       <div class="btn-row mt">
         <button class="btn sm" id="refresh">Refresh now</button>
@@ -2952,6 +2957,21 @@ window.addEventListener('hashchange', render);
 window.addEventListener('online', () => refresh().then(render));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
+function watchForUpdate(reg) {
+  const seen = w => {
+    if (!w) return;
+    w.addEventListener('statechange', () => {
+      if (w.state === 'installed' && navigator.serviceWorker.controller) {
+        updateReady = true;
+        toast('Update ready — close and reopen the app');
+        if (route.path === '/setup') render();
+      }
+    });
+  };
+  seen(reg.installing);
+  reg.addEventListener('updatefound', () => seen(reg.installing));
+}
+
 (async function boot() {
   loadCache();
   paintSync();
@@ -2960,6 +2980,12 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
   render();
   startPolling();
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      watchForUpdate(reg);
+      // Coming back to the app is the moment to look for a new one.
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update().catch(() => {});
+      });
+    }).catch(() => {});
   }
 })();
