@@ -34,8 +34,18 @@ create table if not exists projects (
   completed_by   text not null default '',
   completion_notes text not null default '',
   archived       boolean not null default false, -- hidden from the board, history kept
+  -- What the job is worth and what it cost us. Entered by the office or a
+  -- director, never shown on a site phone. Left null until somebody knows.
+  contract_value numeric,
+  actual_cost    numeric,
   updated_at     timestamptz not null default now()
 );
+
+-- Columns added after the first release. "create table if not exists" above
+-- does nothing to a table that already exists, so they are added here too —
+-- which is what makes this file safe to re-run over a live database.
+alter table projects add column if not exists contract_value numeric;
+alter table projects add column if not exists actual_cost    numeric;
 
 create index if not exists projects_status_idx on projects (status);
 create index if not exists projects_dates_idx  on projects (start_date, end_date);
