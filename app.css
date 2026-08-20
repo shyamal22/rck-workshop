@@ -235,6 +235,10 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
   display: block; font-size: 26px; font-weight: 700; line-height: 1.05;
   color: var(--s); font-variant-numeric: tabular-nums; letter-spacing: -.02em;
 }
+.tally .n em {
+  font-style: normal; font-size: 12px; font-weight: 640;
+  margin-left: 5px; opacity: .72; letter-spacing: 0;
+}
 .tally .l { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
 
 .gear-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
@@ -466,6 +470,8 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .k-tally > div:nth-child(3) { animation-delay: 120ms; }
 .k-tally .n { font-size: 54px; font-weight: 700; line-height: 1; color: var(--s);
   font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.k-tally .n em { font-style: normal; font-size: 20px; font-weight: 620;
+  margin-left: 8px; opacity: .7; letter-spacing: 0; }
 .k-tally .l { font-size: 16px; color: #a3adb9; }
 
 .k-body { flex: 1; display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; min-height: 0; }
@@ -528,6 +534,7 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   .k-head h1 { font-size: 35px; }
   .k-clock { font-size: 44px; }
   .k-tally .n { font-size: 72px; }
+  .k-tally .n em { font-size: 26px; }
   .k-tally .l { font-size: 20px; }
   .k-col h2 { font-size: 14px; }
   .k-wo { grid-template-columns: 136px 1fr auto; padding: 18px 22px; }

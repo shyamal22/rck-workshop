@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -100,6 +100,21 @@ function dueText(dateStr) {
   if (n === 1) return { text: 'Due tomorrow', late: false };
   return { text: `Due in ${n} days`, late: false };
 }
+/** Whole percentages that always add up to exactly 100 (largest remainder),
+    so the three status boxes can never read 99% or 101% between them. */
+function sharePercents(counts) {
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (!total) return counts.map(() => 0);
+  const exact = counts.map(c => c * 100 / total);
+  const out = exact.map(Math.floor);
+  let spare = 100 - out.reduce((a, b) => a + b, 0);
+  exact
+    .map((v, i) => ({ rem: v - Math.floor(v), i }))
+    .sort((a, b) => b.rem - a.rem)
+    .forEach(x => { if (spare > 0 && x.rem > 0) { out[x.i]++; spare--; } });
+  return out;
+}
+
 function woNo(o) {
   return o.number ? `WO-${String(o.number).padStart(4, '0')}` : 'WO — not synced';
 }
@@ -710,14 +725,15 @@ function renderBoard(view) {
 
   const counts = { green: 0, orange: 0, red: 0 };
   gear.forEach(g => counts[gearStatus(g)]++);
+  const pct = sharePercents([counts.green, counts.orange, counts.red]);
 
   const cats = allCategoryKeys().filter(k => gear.some(g => catOf(g) === k));
 
   view.innerHTML = `
     <div class="tally">
-      ${['green', 'orange', 'red'].map(k => `
+      ${['green', 'orange', 'red'].map((k, i) => `
         <button class="status-${k}" data-status="${k}" aria-pressed="${boardFilter.status === k}">
-          <span class="n">${counts[k]}</span>
+          <span class="n">${counts[k]}<em>${pct[i]}%</em></span>
           <span class="l">${k === 'green' ? 'Working' : k === 'orange' ? 'Usable' : 'Out of action'}</span>
         </button>`).join('')}
     </div>
@@ -1824,6 +1840,7 @@ function renderKiosk(view) {
     const gear = sortedGear(activeGear());
     const counts = { green: 0, orange: 0, red: 0 };
     gear.forEach(g => counts[gearStatus(g)]++);
+    const pct = sharePercents([counts.green, counts.orange, counts.red]);
     const orders = activeOrders();
     const now = new Date();
     const clock = `${now.getHours() % 12 || 12}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() < 12 ? 'am' : 'pm'}`;
@@ -1839,9 +1856,9 @@ function renderKiosk(view) {
         </div>
 
         <div class="k-tally">
-          <div class="status-green"><div class="n">${counts.green}</div><div class="l">Working</div></div>
-          <div class="status-orange"><div class="n">${counts.orange}</div><div class="l">Damaged — usable</div></div>
-          <div class="status-red"><div class="n">${counts.red}</div><div class="l">Out of operation</div></div>
+          <div class="status-green"><div class="n">${counts.green}<em>${pct[0]}%</em></div><div class="l">Working</div></div>
+          <div class="status-orange"><div class="n">${counts.orange}<em>${pct[1]}%</em></div><div class="l">Damaged — usable</div></div>
+          <div class="status-red"><div class="n">${counts.red}<em>${pct[2]}%</em></div><div class="l">Out of operation</div></div>
         </div>
 
         <div class="k-body">
