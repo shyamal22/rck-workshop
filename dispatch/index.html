@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=1.3.1">
 </head>
 <body>
 
@@ -59,7 +59,10 @@
 <div id="printArea" aria-hidden="true"></div>
 <div id="toast" hidden></div>
 
-<script src="config.js"></script>
-<script src="app.js"></script>
+<!-- The ?v= must be bumped with VERSION in app.js. It is what makes a
+     deploy reach a phone: these URLs have never been cached before, so
+     no stale copy of the app can be served in their place. -->
+<script src="config.js?v=1.3.1"></script>
+<script src="app.js?v=1.3.1"></script>
 </body>
 </html>
