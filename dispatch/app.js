@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
