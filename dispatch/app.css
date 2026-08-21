@@ -718,7 +718,8 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
    ===================================================================== */
 #printArea { display: none; }
 
-@page { margin: 14mm; }
+/* A4 with room for the running brand bar at the top of every page. */
+@page { margin: 13mm 14mm 15mm; }
 
 @media print {
   body { background: #fff; padding: 0; }
@@ -726,19 +727,167 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   #printArea { display: block !important; }
 }
 
-#printArea, .doc { color: #000; font-size: 11.5pt; }
-.doc h1 { font-size: 19pt; margin-bottom: 2mm; }
-.doc .doc-head { border-bottom: 2.5pt solid #000; padding-bottom: 3mm; margin-bottom: 5mm; }
-.doc .doc-head .org { font-size: 10pt; letter-spacing: .16em; text-transform: uppercase; font-weight: 700; }
-.doc h2 { font-size: 12pt; margin: 6mm 0 2mm; padding-bottom: 1.2mm; border-bottom: .8pt solid #000; }
-.doc table { width: 100%; border-collapse: collapse; font-size: 10.5pt; margin-bottom: 3mm; }
-.doc th, .doc td { border: .6pt solid #999; padding: 2mm 2.4mm; text-align: left; vertical-align: top; }
-.doc th { background: #eee; font-size: 9.5pt; text-transform: uppercase; letter-spacing: .04em; }
-.doc .kv { width: 100%; border: 0; }
-.doc .kv td { border: 0; padding: 1.1mm 0; }
-.doc .kv td:first-child { width: 42mm; color: #444; font-size: 10pt; }
-.doc .sig { margin-top: 12mm; display: flex; gap: 14mm; }
-.doc .sig div { flex: 1; border-top: .8pt solid #000; padding-top: 2mm; font-size: 9.5pt; }
-.doc .badge { display: inline-block; padding: .8mm 2.4mm; border: 1.2pt solid #000; font-weight: 700; font-size: 9.5pt; }
+/* ---------------------------------------------------------------------
+   RCK document styling — the quote's masthead and voice, in a warmer
+   palette than the old black rules. Asphalt for the ink, safety yellow
+   for the accent, warm grey for every line: it reads as ours from across
+   the desk without a single decorative flourish.
+
+   Every colour is set once here. To match the brand exactly, change these
+   five values and nothing else.
+   --------------------------------------------------------------------- */
+.doc {
+  --d-ink:    #1b1e22;   /* asphalt — headings and body */
+  --d-ink-2:  #4c525a;   /* secondary text */
+  --d-ink-3:  #858c95;   /* labels, captions */
+  --d-accent: #c8971b;   /* safety yellow, deepened so it prints true */
+  --d-line:   #d9d5cd;   /* warm rule — never black */
+  --d-tint:   #faf8f4;   /* the faintest warmth behind table headers */
+  --d-green:  #2f6b46;
+  --d-red:    #9e3226;
+}
+
+#printArea, .doc {
+  color: var(--d-ink, #1b1e22);
+  font-size: 10.5pt;
+  line-height: 1.42;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* The sheet is a table so the brand bar in its thead repeats on every
+   printed page — the only reliable way a browser will do that. */
+.doc .sheet { width: 100%; border-collapse: collapse; border: 0; }
+.doc .sheet > thead > tr > td,
+.doc .sheet > tbody > tr > td { border: 0; padding: 0; }
+
+.doc .brandbar {
+  display: flex; align-items: baseline; gap: 3mm;
+  border-bottom: .7pt solid var(--d-line);
+  padding-bottom: 1.6mm; margin-bottom: 5mm;
+  font-size: 8pt; color: var(--d-ink-3);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.doc .brandbar b { color: var(--d-ink); font-weight: 700; letter-spacing: .1em; }
+.doc .brandbar .right { margin-left: auto; text-transform: none; letter-spacing: .02em; }
+
+/* ------------------------------------------------------------ masthead */
+.doc .doc-head { margin-bottom: 7mm; }
+.doc .doc-head .top { display: flex; align-items: flex-start; gap: 4mm; }
+.doc .doc-head .mark { width: 13mm; height: 13mm; flex: none; }
+.doc .doc-head .org { font-size: 15pt; font-weight: 700; letter-spacing: .01em; line-height: 1.1; }
+.doc .doc-head .trade {
+  font-size: 8.5pt; color: var(--d-ink-2); letter-spacing: .13em;
+  text-transform: uppercase; margin-top: .8mm;
+}
+.doc .doc-head .contact { font-size: 8.5pt; color: var(--d-ink-3); margin-top: 1.4mm; }
+.doc .doc-head .meta { margin-left: auto; text-align: right; }
+.doc .doc-head .kind {
+  font-size: 8.5pt; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--d-accent); font-weight: 700;
+}
+.doc h1 { font-size: 17pt; font-weight: 700; letter-spacing: -.01em; margin: 1mm 0 0; line-height: 1.15; }
+.doc .doc-head .sub { font-size: 10.5pt; color: var(--d-ink-2); margin-top: 1.2mm; }
+.doc .doc-head .when { font-size: 8.5pt; color: var(--d-ink-3); margin-top: .8mm; }
+/* The one piece of colour that carries the brand. */
+.doc .doc-head .rule { height: 1.6mm; background: var(--d-accent); margin-top: 4mm; border-radius: .8mm; }
+
+/* ------------------------------------------------------------ headings */
+.doc h2 {
+  font-size: 9pt; font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--d-ink-3);
+  margin: 7mm 0 2.5mm; padding-bottom: 1.4mm;
+  border-bottom: .7pt solid var(--d-line);
+  break-after: avoid; page-break-after: avoid;
+}
+
+/* -------------------------------------------------------------- tables */
+.doc table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 3mm; }
+.doc th, .doc td {
+  border: 0; border-bottom: .6pt solid var(--d-line);
+  padding: 2mm 2.6mm 2mm 0; text-align: left; vertical-align: top;
+}
+.doc th {
+  background: none; color: var(--d-ink-3);
+  font-size: 7.5pt; text-transform: uppercase; letter-spacing: .09em; font-weight: 700;
+  border-bottom: .7pt solid var(--d-ink-3); padding-bottom: 1.4mm;
+}
+.doc thead { display: table-header-group; }      /* repeat headings over a page break */
+/* Data rows stay whole — but never the sheet's own row, which wraps the
+   entire document. Telling the browser not to break inside something taller
+   than a page turns a two-page diary into twenty. */
+.doc table:not(.sheet) tbody tr { break-inside: avoid; page-break-inside: avoid; }
+
+.doc .kv { width: 100%; }
+.doc .kv td { border: 0; padding: 1.3mm 0; }
+.doc .kv td:first-child {
+  width: 44mm; color: var(--d-ink-3); font-size: 8.5pt;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+
+/* -------------------------------------------------------- the day diary */
+/* One entry is one block that never splits: the time, what happened, and
+   whatever the supervisor wrote about it stay together or move together. */
+.doc .day { margin-bottom: 2mm; }
+.doc .day-head {
+  display: flex; align-items: baseline; gap: 3mm;
+  margin: 7mm 0 3mm; padding-bottom: 1.6mm;
+  border-bottom: .7pt solid var(--d-line);
+  break-after: avoid; page-break-after: avoid;
+}
+.doc .day-head h3 { font-size: 12pt; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+.doc .day-head .span { font-size: 8.5pt; color: var(--d-ink-3); margin-left: auto; }
+
+.doc .entry {
+  display: flex; gap: 4mm; align-items: flex-start;
+  padding: 2.2mm 0;
+  border-bottom: .5pt solid var(--d-line);
+  break-inside: avoid; page-break-inside: avoid;
+}
+.doc .entry:last-child { border-bottom: 0; }
+.doc .entry .e-time {
+  width: 15mm; flex: none; font-size: 10pt; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em; padding-top: .2mm;
+}
+.doc .entry .e-body { flex: 1; min-width: 0; }
+.doc .entry .e-kind { font-size: 10pt; font-weight: 650; }
+.doc .entry .e-note { font-size: 9.5pt; color: var(--d-ink-2); margin-top: .8mm; white-space: pre-wrap; }
+.doc .entry .e-who { font-size: 8pt; color: var(--d-ink-3); margin-top: 1mm; }
+/* Issues and delays are the lines a client reads first. */
+.doc .entry.flag { border-left: 1.2pt solid var(--d-red); padding-left: 3mm; }
+.doc .entry.flag .e-kind, .doc .entry.flag .e-time { color: var(--d-red); }
+
+/* --------------------------------------------------------- photo sheet */
+/* Two across, two down — four to a page. The cell height is what holds
+   that: a third row cannot fit, so a page never carries more than four. */
+.doc .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm 6mm; margin-bottom: 3mm; }
+.doc .photo { break-inside: avoid; page-break-inside: avoid; }
+.doc .photo img {
+  width: 100%; height: 88mm; object-fit: cover; display: block;
+  border: .6pt solid var(--d-line); border-radius: 1mm;
+}
+.doc .photo .cap { font-size: 8pt; color: var(--d-ink-2); margin-top: 1.4mm; line-height: 1.35; }
+.doc .photo .cap b { color: var(--d-ink); font-weight: 650; }
+
+/* ----------------------------------------------------------- oddments */
+.doc .sig { margin-top: 12mm; display: flex; gap: 14mm; break-inside: avoid; }
+.doc .sig div { flex: 1; border-top: .7pt solid var(--d-ink-3); padding-top: 2mm; font-size: 8.5pt; color: var(--d-ink-3); }
+.doc .badge {
+  display: inline-block; padding: 1mm 3mm; border-radius: 1mm;
+  background: var(--d-tint); border: .7pt solid var(--d-line);
+  font-weight: 700; font-size: 8.5pt; letter-spacing: .08em; text-transform: uppercase;
+}
+.doc .badge.on   { border-color: var(--d-green); color: var(--d-green); }
+.doc .badge.done { border-color: var(--d-ink-3); color: var(--d-ink-2); }
 .doc .avoid-break { break-inside: avoid; page-break-inside: avoid; }
 .doc .note { white-space: pre-wrap; }
+.doc .lede { font-size: 10pt; color: var(--d-ink-2); margin-bottom: 3mm; }
+.doc .pos { color: var(--d-green); font-weight: 650; }
+.doc .neg { color: var(--d-red); font-weight: 650; }
+/* A block of numbers worth seeing before the detail. */
+.doc .figures { display: flex; gap: 4mm; margin-bottom: 4mm; break-inside: avoid; }
+.doc .figures > div {
+  flex: 1; background: var(--d-tint); border: .6pt solid var(--d-line);
+  border-radius: 1.4mm; padding: 3mm 3.4mm;
+}
+.doc .figures .n { font-size: 15pt; font-weight: 700; line-height: 1.05; letter-spacing: -.02em; }
+.doc .figures .l { font-size: 7.5pt; color: var(--d-ink-3); text-transform: uppercase; letter-spacing: .08em; margin-top: 1mm; }

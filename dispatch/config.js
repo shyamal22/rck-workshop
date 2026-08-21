@@ -15,6 +15,15 @@ window.RCKD_CONFIG = {
   supabaseUrl: '',
   supabaseKey: '',
 
+  // What appears on the letterhead of every printed report. Taken from the
+  // RCK quote; change a number here and it changes on every document.
+  brand: {
+    name:  'RCK NZ',
+    trade: 'Asphalt & Civil Contracting',
+    email: 'office@rcknz.co.nz',
+    phone: ''
+  },
+
   // Optional. If set, switching a device into Office or Director mode asks
   // for this code first, so a site phone can't create or delete jobs by
   // accident. It is a speed bump, not a password — the code is in this file.
