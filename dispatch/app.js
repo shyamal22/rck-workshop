@@ -9,7 +9,12 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.3.0';
+
+/* A newer version has downloaded but can't take over until every tab of the
+   old one is gone. Rather than leave someone tapping a feature that isn't
+   there yet, Settings says so. */
+let updateReady = false;
 
 /* --------------------------------------------------------- job states */
 /* Three, and only three. A job is either coming up, happening, or done. */
@@ -445,6 +450,36 @@ async function rest(path, opts) {
 /* ================================================================
    Store — one interface, two backings (Supabase or this device only)
    ================================================================ */
+/* Work written on this device that the server has not taken yet — held in
+   the outbox until it can be sent. A pull must fold these back in, or the
+   server's answer silently deletes a job somebody is standing on site
+   writing into: it vanishes off the screen and out of the cache while the
+   only copy sits in a queue nobody was told about. */
+function reconcile(table, fromServer) {
+  const ops = Outbox.all().filter(op => op.table === table);
+  if (!ops.length) return fromServer;
+
+  const list = (fromServer || []).slice();
+  const byId = new Map(list.map((r, i) => [r.id, i]));
+
+  ops.forEach(op => {
+    if (op.kind === 'insert') {
+      // Not on the server yet — keep ours, and mark it so the app can say so.
+      if (!byId.has(op.row.id)) {
+        byId.set(op.row.id, list.length);
+        list.push(Object.assign({}, op.row, { _unsent: true }));
+      }
+    } else if (op.kind === 'patch') {
+      const i = byId.get(op.id);
+      if (i != null) list[i] = Object.assign({}, list[i], op.patch, { _unsent: true });
+    } else if (op.kind === 'delete') {
+      const i = byId.get(op.id);
+      if (i != null) { list.splice(i, 1); byId.clear(); list.forEach((r, j) => byId.set(r.id, j)); }
+    }
+  });
+  return list;
+}
+
 const Store = {
   async pull() {
     if (!connected()) return;
@@ -453,9 +488,9 @@ const Store = {
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
       rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() })
     ]);
-    DB.projects = projects || [];
-    DB.project_docs = docs || [];
-    DB.diary_entries = entries || [];
+    DB.projects = reconcile('projects', projects || []);
+    DB.project_docs = reconcile('project_docs', docs || []);
+    DB.diary_entries = reconcile('diary_entries', entries || []);
     saveCache();
   },
 
@@ -558,11 +593,24 @@ const Outbox = {
     paintSync();
   },
   count() { return Outbox.all().length; },
+
+  /* Why the queue isn't draining. A dropped connection is normal on site and
+     fixes itself; a refusal from the database never does, and has to be put
+     in front of somebody. */
+  problem() {
+    try { return JSON.parse(localStorage.getItem('rckd.outbox.problem') || 'null'); } catch (e) { return null; }
+  },
+  setProblem(p) {
+    if (p) localStorage.setItem('rckd.outbox.problem', JSON.stringify(p));
+    else localStorage.removeItem('rckd.outbox.problem');
+  },
+
   async flush() {
     if (!connected()) return;
     const list = Outbox.all();
-    if (!list.length) return;
+    if (!list.length) { Outbox.setProblem(null); return; }
     const left = [];
+    let refused = null;
     for (const op of list) {
       try {
         if (op.kind === 'insert') {
@@ -585,9 +633,15 @@ const Outbox = {
         }
       } catch (err) {
         left.push(op);
+        // A 4xx is the database saying no. Retrying forever won't help and
+        // whoever is using the app needs to know, in words, what it said.
+        if (/^\s*4\d\d/.test(err.message || '')) refused = err.message;
       }
     }
     Outbox.save(left);
+    Outbox.setProblem(left.length && refused
+      ? { message: refused, at: new Date().toISOString(), count: left.length }
+      : null);
     paintSync();
   }
 };
@@ -1018,7 +1072,29 @@ function render() {
 
   if (needsSetup() && route.path !== '/setup' && route.path !== '/join') { renderWelcome(view); return; }
   screen.render(view);
+  if (route.path !== '/screen') paintUnsent(view);
   restoreScroll(route.path);
+}
+
+/* Nothing on this device should ever be lost quietly. While anything is
+   still waiting to reach the database, say so on every screen — and if the
+   database refused it, say what it said, because that never fixes itself. */
+function paintUnsent(view) {
+  const n = Outbox.count();
+  if (!n) return;
+  const problem = Outbox.problem();
+  // Screens build themselves with innerHTML, so this goes in after them —
+  // at the top, where it is read before anything else on the page.
+  const box = document.createElement('div');
+  box.className = 'banner' + (problem ? ' bad' : '');
+  box.innerHTML = problem
+    ? `<strong>${n} change${n > 1 ? 's have' : ' has'} not saved.</strong>
+       The database refused them, so waiting will not help:
+       <em>${esc(problem.message)}</em>
+       <a href="#/setup" style="display:inline-block;margin-top:8px;font-weight:640">What to do →</a>`
+    : `<strong>${n} change${n > 1 ? 's are' : ' is'} waiting to send.</strong>
+       They are safe on this phone and will go as soon as there is signal.`;
+  view.insertBefore(box, view.firstChild);
 }
 
 function needsSetup() {
@@ -1228,6 +1304,7 @@ function jobCard(p, i) {
       ${p.supervisor ? `<div class="line">${icon('person')}${esc(p.supervisor)}</div>` : ''}
       <div class="foot">
         <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+        ${p._unsent ? '<span class="pill plain">Not sent yet</span>' : ''}
         <span class="pill plain">${esc(typeLabel(typeOf(p)))}</span>
         ${issues ? `<span class="pill plain">${issues} issue${issues > 1 ? 's' : ''}</span>` : ''}
       </div>
@@ -2331,19 +2408,66 @@ function exportDiaryCsv() {
 /* ================================================================
    Printable documents
    ================================================================ */
-function docHead(title, subtitle) {
+/* Who the document is from. Taken from the letterhead on an RCK quote, and
+   kept here so it changes in one place when a number does. */
+const BRAND = Object.assign({
+  name:    'RCK NZ',
+  trade:   'Asphalt & Civil Contracting',
+  email:   'office@rcknz.co.nz',
+  phone:   ''
+}, SITE.brand || {});
+
+/* The mark from the app icon, drawn inline so it needs no network and
+   prints at any size: a lane between two edges. */
+const MARK = `
+  <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
+    <rect width="512" height="512" rx="112" fill="#1b1e22"/>
+    <path d="M182 96 L138 416" stroke="#4c525a" stroke-width="26" stroke-linecap="round" fill="none"/>
+    <path d="M330 96 L374 416" stroke="#4c525a" stroke-width="26" stroke-linecap="round" fill="none"/>
+    <path d="M256 108 L256 172" stroke="#c8971b" stroke-width="34" stroke-linecap="round" fill="none"/>
+    <path d="M256 224 L256 288" stroke="#c8971b" stroke-width="34" stroke-linecap="round" fill="none"/>
+    <path d="M256 340 L256 404" stroke="#c8971b" stroke-width="34" stroke-linecap="round" fill="none"/>
+  </svg>`;
+
+/** The letterhead: who we are on the left, what this is on the right. */
+function docHead(kind, title, subtitle) {
+  const contact = [BRAND.email, BRAND.phone].filter(Boolean).join(' · ');
   return `
     <div class="doc-head">
-      <div class="org">RCK</div>
+      <div class="top">
+        ${MARK}
+        <div>
+          <div class="org">${esc(BRAND.name)}</div>
+          <div class="trade">${esc(BRAND.trade)}</div>
+          ${contact ? `<div class="contact">${esc(contact)}</div>` : ''}
+        </div>
+        <div class="meta">
+          <div class="kind">${esc(kind)}</div>
+          <div class="when">${fmtDate(new Date().toISOString())}${S.name ? '<br>Prepared by ' + esc(S.name) : ''}</div>
+        </div>
+      </div>
       <h1>${esc(title)}</h1>
-      <div>${esc(subtitle || '')}</div>
-      <div style="font-size:9.5pt;color:#555">Generated ${fmtDateTime(new Date().toISOString())}${S.name ? ' by ' + esc(S.name) : ''}</div>
+      ${subtitle ? `<div class="sub">${esc(subtitle)}</div>` : ''}
+      <div class="rule"></div>
     </div>`;
 }
-/** Render, wait for any photos to load (so they aren't blank on the PDF), then print. */
-async function printDoc(html) {
+
+/** Render, wait for any photos to load (so they aren't blank on the PDF), then print.
+    The sheet is a table because a browser will repeat a thead on every printed
+    page and will not repeat anything else — that is what puts the RCK line at
+    the top of page four. */
+async function printDoc(html, running) {
   const area = $('#printArea');
-  area.innerHTML = `<div class="doc">${html}</div>`;
+  area.innerHTML = `
+    <div class="doc">
+      <table class="sheet">
+        <thead><tr><td>
+          <div class="brandbar"><b>${esc(BRAND.name)}</b> ${esc(BRAND.trade)}
+            <span class="right">${esc(running || '')}</span></div>
+        </td></tr></thead>
+        <tbody><tr><td>${html}</td></tr></tbody>
+      </table>
+    </div>`;
   const imgs = $$('img', area);
   if (imgs.length) {
     toast('Preparing document…');
@@ -2357,13 +2481,14 @@ async function printDoc(html) {
 }
 
 function jobFacts(p) {
+  const tone = p.status === 'ongoing' ? 'on' : p.status === 'completed' ? 'done' : '';
   return `
     <table class="kv">
       <tr><td>Job number</td><td><strong>${jobNo(p)}</strong></td></tr>
       <tr><td>Client</td><td>${esc(p.client || '—')}</td></tr>
       <tr><td>Site</td><td>${esc(p.site || '—')}</td></tr>
       <tr><td>Type of work</td><td>${esc(typeLabel(typeOf(p)))}</td></tr>
-      <tr><td>Status</td><td><span class="badge">${esc(statusLabel(p.status).toUpperCase())}</span></td></tr>
+      <tr><td>Status</td><td><span class="badge ${tone}">${esc(statusLabel(p.status))}</span></td></tr>
       <tr><td>Planned dates</td><td>${p.start_date ? fmtDate(p.start_date) : 'not set'}${
         p.end_date && p.end_date !== p.start_date ? ' to ' + fmtDate(p.end_date) : ''}</td></tr>
       <tr><td>Supervisor</td><td>${esc(p.supervisor || '—')}</td></tr>
@@ -2375,7 +2500,9 @@ function jobFacts(p) {
     ${p.description ? `<p class="note">${esc(p.description)}</p>` : ''}`;
 }
 
-/** One day of the diary, laid out as a table with the photos underneath. */
+/** One shift, in the order it happened. Each entry is a block that cannot
+    be split across a page: a time with no comment under it, or a comment
+    orphaned from its time, is worse than a little white space. */
 function daySection(p, day, withPhotos) {
   const list = entriesFor(p.id, day);
   if (!list.length) return '';
@@ -2387,26 +2514,52 @@ function daySection(p, day, withPhotos) {
   }));
 
   return `
-    <h2>${esc(fmtDayDate(day))}${span ? ` <span style="font-weight:400;font-size:10pt">— ${esc(fmtTime(first.at))} to ${esc(fmtTime(last.at))}, ${esc(span)} on site</span>` : ''}</h2>
-    <table>
-      <tr><th style="width:18mm">Time</th><th style="width:42mm">Entry</th><th>Comment</th><th style="width:28mm">By</th></tr>
-      ${list.map(e => `<tr class="avoid-break">
-        <td>${esc(fmtTime(e.at))}</td>
-        <td><strong>${esc(entryLabel(e))}</strong></td>
-        <td class="note">${esc(e.body || '')}${(e.files || []).length
-          ? `<br><em>${(e.files || []).length} photo(s) attached</em>` : ''}</td>
-        <td>${esc(e.author || '')}</td>
-      </tr>`).join('')}
-    </table>
-    ${withPhotos && photos.length ? `
-      <div style="display:flex;flex-wrap:wrap;gap:4mm;margin-bottom:4mm">
-        ${photos.map(({ f, e }) => `
-          <div class="avoid-break" style="width:80mm">
-            <img src="${esc(f.url)}" style="width:100%;border:.6pt solid #999">
-            <div style="font-size:9pt;color:#444">${esc(fmtTime(e.at))} ${esc(entryLabel(e))}${
-              e.body ? ' — ' + esc(e.body.slice(0, 90)) : ''}</div>
-          </div>`).join('')}
-      </div>` : ''}`;
+    <div class="day">
+      <div class="day-head">
+        <h3>${esc(fmtDayDate(day))}</h3>
+        ${span ? `<span class="span">${esc(fmtTime(first.at))} – ${esc(fmtTime(last.at))} · ${esc(span)} on site</span>` : ''}
+      </div>
+      ${list.map(e => {
+        const flag = e.kind === 'issue' || e.kind === 'delay';
+        const shots = (e.files || []).filter(f => /^image\//.test(f.type || '')).length;
+        return `
+          <div class="entry${flag ? ' flag' : ''}">
+            <div class="e-time">${esc(fmtTime(e.at))}</div>
+            <div class="e-body">
+              <div class="e-kind">${esc(entryLabel(e))}</div>
+              ${e.body ? `<div class="e-note">${esc(e.body)}</div>` : ''}
+              <div class="e-who">${esc(e.author || '')}${
+                shots ? ` · ${shots} photo${shots > 1 ? 's' : ''}` : ''}</div>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>
+    ${withPhotos ? photoSheet(photos, fmtDayDate(day)) : ''}`;
+}
+
+/** Cut a caption at a word, not mid-syllable. */
+function clip(text, max) {
+  const t = String(text || '').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '') + '…';
+}
+
+/** Photos two across and two down, so a page carries four and a job with
+    thirty of them is still a document somebody will open. */
+function photoSheet(photos, heading) {
+  if (!photos.length) return '';
+  return `
+    <h2>Photos — ${esc(heading)}</h2>
+    <div class="photos">
+      ${photos.map(({ f, e }) => `
+        <div class="photo">
+          <img src="${esc(f.url)}" alt="">
+          <div class="cap"><b>${esc(fmtTime(e.at))} ${esc(entryLabel(e))}</b>${
+            e.body ? ' — ' + esc(clip(e.body, 105)) : ''}</div>
+        </div>`).join('')}
+    </div>`;
 }
 
 function docsTable(p, all) {
@@ -2431,20 +2584,20 @@ function printJobReport(p) {
   const issues = entries.filter(e => e.kind === 'issue' || e.kind === 'delay');
 
   printDoc(`
-    ${docHead('Job report — ' + jobNo(p), p.name)}
+    ${docHead(p.status === 'completed' ? 'Job report' : 'Progress report', p.name, jobNo(p) + (p.client ? ' · ' + p.client : ''))}
+
+    <div class="figures">
+      <div><div class="n">${days.length}</div><div class="l">Days on site</div></div>
+      <div><div class="n">${entries.length}</div><div class="l">Diary entries</div></div>
+      <div><div class="n"${issues.length ? ' class="neg"' : ''}>${issues.length}</div><div class="l">Issues &amp; delays</div></div>
+      <div><div class="n">${(isOffice() ? allDocsFor(p.id) : docsFor(p.id)).length}</div><div class="l">Documents</div></div>
+    </div>
 
     <h2>The job</h2>
     ${jobFacts(p)}
-
-    <h2>Summary</h2>
-    <table class="kv">
-      <tr><td>Days on site</td><td>${days.length}</td></tr>
-      <tr><td>Diary entries</td><td>${entries.length}</td></tr>
-      <tr><td>Issues and delays</td><td>${issues.length}</td></tr>
-      <tr><td>Documents on file</td><td>${(isOffice() ? allDocsFor(p.id) : docsFor(p.id)).length}</td></tr>
-      ${p.started_at && p.completed_at
-        ? `<tr><td>Elapsed</td><td>${(daysBetween(p.started_at, p.completed_at) || 0) + 1} day(s)</td></tr>` : ''}
-    </table>
+    ${p.started_at && p.completed_at
+      ? `<p class="lede">On site ${fmtDate(p.started_at)} to ${fmtDate(p.completed_at)} — ${
+          (daysBetween(p.started_at, p.completed_at) || 0) + 1} day(s) elapsed.</p>` : ''}
     ${p.completion_notes ? `<p class="note"><strong>On completion:</strong> ${esc(p.completion_notes)}</p>` : ''}
 
     ${issues.length ? `
@@ -2460,35 +2613,50 @@ function printJobReport(p) {
     <h2>Documents on file</h2>
     ${docsTable(p, isOffice())}
 
+    <h2>The job diary</h2>
     ${days.length
       ? days.map(d => daySection(p, d, true)).join('')
-      : '<h2>Job diary</h2><p>No diary entries were recorded.</p>'}
+      : '<p>No diary entries were recorded.</p>'}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
       <div>Office sign-off &amp; date</div>
-    </div>`);
+    </div>`, `${p.status === 'completed' ? 'Job report' : 'Progress report'} · ${jobNo(p)}`);
 }
 
 function printDayReport(p, day) {
+  const list = entriesFor(p.id, day);
+  const issues = list.filter(e => e.kind === 'issue' || e.kind === 'delay');
+  const shots = list.reduce((n, e) => n + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
+
   printDoc(`
-    ${docHead('Daily job diary — ' + jobNo(p), `${p.name} · ${fmtDayDate(day)}`)}
+    ${docHead('Daily job diary', p.name, `${jobNo(p)}${p.client ? ' · ' + p.client : ''} · ${fmtDayDate(day)}`)}
+
+    <div class="figures">
+      <div><div class="n">${esc(shiftSpan(list) || '—')}</div><div class="l">On site</div></div>
+      <div><div class="n">${list.length}</div><div class="l">Entries</div></div>
+      <div><div class="n"${issues.length ? ' class="neg"' : ''}>${issues.length}</div><div class="l">Issues &amp; delays</div></div>
+      <div><div class="n">${shots}</div><div class="l">Photos</div></div>
+    </div>
+
     <h2>The job</h2>
     ${jobFacts(p)}
+
     ${daySection(p, day, true) || '<p>No entries on this day.</p>'}
+
     <div class="sig">
       <div>Supervisor &amp; date</div>
       <div>Office sign-off &amp; date</div>
-    </div>`);
+    </div>`, `Daily job diary · ${jobNo(p)} · ${fmtShort(day)}`);
 }
 
 function printDocRegister(p) {
   printDoc(`
-    ${docHead('Document register — ' + jobNo(p), p.name)}
+    ${docHead('Document register', p.name, jobNo(p) + (p.client ? ' · ' + p.client : ''))}
     <h2>The job</h2>
     ${jobFacts(p)}
     <h2>Documents on file</h2>
-    ${docsTable(p, isOffice())}`);
+    ${docsTable(p, isOffice())}`, `Document register · ${jobNo(p)}`);
 }
 
 /** The director's report: the period's numbers, every job in it, and every
@@ -2507,7 +2675,15 @@ function printDirectorReport(from, to) {
   troubles.sort((a, b) => (a.e.entry_date || '').localeCompare(b.e.entry_date || ''));
 
   printDoc(`
-    ${docHead('Director\'s report', periodLabel(overview.period, from, to))}
+    ${docHead('Director\'s report', 'Jobs, days and margin', periodLabel(overview.period, from, to))}
+
+    <div class="figures">
+      <div><div class="n">${t.jobs}</div><div class="l">Jobs</div></div>
+      <div><div class="n">${t.days}</div><div class="l">Days on site</div></div>
+      <div><div class="n"${t.issues ? ' class="neg"' : ''}>${t.issues}</div><div class="l">Issues</div></div>
+      <div><div class="n"${t.margin != null && t.margin < 0 ? ' class="neg"' : ' class="pos"'}>${
+        t.margin == null ? '—' : esc(fmtMoney(t.margin))}</div><div class="l">Margin</div></div>
+    </div>
 
     <h2>The period</h2>
     <table class="kv">
@@ -2565,7 +2741,7 @@ function printDirectorReport(from, to) {
     <div class="sig">
       <div>Director &amp; date</div>
       <div>Reviewed &amp; date</div>
-    </div>`);
+    </div>`, `Director's report · ${periodLabel(overview.period, from, to)}`);
 }
 
 function printJobsSummary(from, to) {
@@ -2581,7 +2757,7 @@ function printJobsSummary(from, to) {
     : 'all jobs';
 
   printDoc(`
-    ${docHead('Jobs summary', span)}
+    ${docHead('Jobs summary', 'Every job in the period', span)}
     <table>
       <tr><th style="width:22mm">Job</th><th>Name and site</th><th style="width:28mm">Type</th>
         <th style="width:24mm">Dates</th><th style="width:24mm">Status</th>
@@ -2600,7 +2776,7 @@ function printJobsSummary(from, to) {
     <p style="font-size:10pt;color:#444">${list.length} job(s).
     ${list.filter(p => p.status === 'ongoing').length} on site,
     ${list.filter(p => p.status === 'planned').length} planned,
-    ${list.filter(p => p.status === 'completed').length} completed.</p>`);
+    ${list.filter(p => p.status === 'completed').length} completed.</p>`, `Jobs summary · ${span}`);
 }
 
 /* ================================================================
@@ -2784,6 +2960,27 @@ function renderSetup(view) {
       <button class="btn wide" id="saveMode">Switch mode</button>
     </div>
 
+    ${Outbox.count() ? `
+    <div class="card">
+      <h2>${Outbox.count()} change${Outbox.count() > 1 ? 's' : ''} waiting to send</h2>
+      ${Outbox.problem() ? `
+        <div class="banner bad">The database refused them, so they will not go on their own.
+          <em>${esc(Outbox.problem().message)}</em></div>
+        ${/column|schema cache|PGRST204/i.test(Outbox.problem().message) ? `
+          <p class="muted small"><strong>This one has a known cause.</strong> The database was set up
+          from an older copy of <code>supabase-schema.sql</code> and is missing a column the app now
+          sends. Open Supabase → SQL Editor, paste the current <code>supabase-schema.sql</code> and
+          press Run — it is safe over a live database and adds what is missing. Then come back here
+          and press <strong>Try again</strong>. Nothing is lost in the meantime.</p>` : ''}
+      ` : '<p class="muted small">They are safe on this phone and go as soon as there is signal.</p>'}
+      <div class="btn-row">
+        <button class="btn primary" id="retry">Try again now</button>
+        <button class="btn" id="backup">${icon('download')}Download a backup</button>
+      </div>
+      <p class="muted tiny mt" style="margin-bottom:0">The backup is a file holding everything on this
+      device, sent or not. Keep it before changing anything here.</p>
+    </div>` : ''}
+
     <div class="card">
       <h2>Status</h2>
       <table class="data">
@@ -2793,10 +2990,11 @@ function renderSetup(view) {
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
-        <tr><th>Version</th><td>${VERSION}</td></tr>
+        <tr><th>Version</th><td>${VERSION}${updateReady ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
       </table>
       <div class="btn-row mt">
         <button class="btn sm" id="refresh">Refresh now</button>
+        <button class="btn sm" id="backupAll">Download a backup</button>
         <button class="btn sm" id="clear">Clear this device</button>
       </div>
     </div>`;
@@ -2875,13 +3073,52 @@ function renderSetup(view) {
     render();
   };
 
+  /* Everything this device holds, in one file. The last resort that means
+     no amount of going wrong can put the work beyond reach. */
+  function downloadBackup() {
+    const dump = {
+      app: 'RCK Dispatch', version: VERSION, taken: new Date().toISOString(),
+      device: { name: S.name, role: S.role, localMode: S.localMode },
+      waitingToSend: Outbox.all(),
+      problem: Outbox.problem(),
+      projects: DB.projects, project_docs: DB.project_docs, diary_entries: DB.diary_entries
+    };
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    saveAs(href, `rck-dispatch-backup-${today()}.json`);
+    setTimeout(() => URL.revokeObjectURL(href), 20000);
+    toast('Backup saved');
+  }
+
+  const retry = $('#retry', view);
+  if (retry) retry.onclick = async function () {
+    this.disabled = true;
+    this.textContent = 'Sending…';
+    await Outbox.flush();
+    await refresh();
+    const left = Outbox.count();
+    toast(left ? `${left} still waiting — see the message above` : 'All sent');
+    render();
+  };
+  const b1 = $('#backup', view);    if (b1) b1.onclick = downloadBackup;
+  const b2 = $('#backupAll', view); if (b2) b2.onclick = downloadBackup;
+
   $('#refresh', view).onclick = async () => { await refresh(); toast('Up to date'); render(); };
 
   $('#clear', view).onclick = () => {
-    if (Outbox.count() && !confirm(`${Outbox.count()} change(s) have not reached Supabase yet and will be lost. Clear anyway?`)) return;
-    if (!confirm('Clear the copy held on this device? Shared data in Supabase is not touched.')) return;
+    const waiting = Outbox.count();
+    if (waiting) {
+      // This is the one button that can destroy work. Make it take a backup first.
+      if (!confirm(`${waiting} change(s) have not reached the database yet.\n\n` +
+                   'Clearing now would destroy them for good. A backup file will be saved first.')) return;
+      downloadBackup();
+      if (!confirm('Backup saved. Clear this device now?')) return;
+    } else if (!confirm('Clear the copy held on this device? Shared data in Supabase is not touched.')) {
+      return;
+    }
     localStorage.removeItem(cacheKey());
     localStorage.removeItem('rckd.outbox');
+    localStorage.removeItem('rckd.outbox.problem');
     DB.projects = []; DB.project_docs = []; DB.diary_entries = [];
     refresh().then(render);
   };
@@ -2952,6 +3189,21 @@ window.addEventListener('hashchange', render);
 window.addEventListener('online', () => refresh().then(render));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
+function watchForUpdate(reg) {
+  const seen = w => {
+    if (!w) return;
+    w.addEventListener('statechange', () => {
+      if (w.state === 'installed' && navigator.serviceWorker.controller) {
+        updateReady = true;
+        toast('Update ready — close and reopen the app');
+        if (route.path === '/setup') render();
+      }
+    });
+  };
+  seen(reg.installing);
+  reg.addEventListener('updatefound', () => seen(reg.installing));
+}
+
 (async function boot() {
   loadCache();
   paintSync();
@@ -2960,6 +3212,12 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
   render();
   startPolling();
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      watchForUpdate(reg);
+      // Coming back to the app is the moment to look for a new one.
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update().catch(() => {});
+      });
+    }).catch(() => {});
   }
 })();
