@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -450,6 +450,36 @@ async function rest(path, opts) {
 /* ================================================================
    Store — one interface, two backings (Supabase or this device only)
    ================================================================ */
+/* Work written on this device that the server has not taken yet — held in
+   the outbox until it can be sent. A pull must fold these back in, or the
+   server's answer silently deletes a job somebody is standing on site
+   writing into: it vanishes off the screen and out of the cache while the
+   only copy sits in a queue nobody was told about. */
+function reconcile(table, fromServer) {
+  const ops = Outbox.all().filter(op => op.table === table);
+  if (!ops.length) return fromServer;
+
+  const list = (fromServer || []).slice();
+  const byId = new Map(list.map((r, i) => [r.id, i]));
+
+  ops.forEach(op => {
+    if (op.kind === 'insert') {
+      // Not on the server yet — keep ours, and mark it so the app can say so.
+      if (!byId.has(op.row.id)) {
+        byId.set(op.row.id, list.length);
+        list.push(Object.assign({}, op.row, { _unsent: true }));
+      }
+    } else if (op.kind === 'patch') {
+      const i = byId.get(op.id);
+      if (i != null) list[i] = Object.assign({}, list[i], op.patch, { _unsent: true });
+    } else if (op.kind === 'delete') {
+      const i = byId.get(op.id);
+      if (i != null) { list.splice(i, 1); byId.clear(); list.forEach((r, j) => byId.set(r.id, j)); }
+    }
+  });
+  return list;
+}
+
 const Store = {
   async pull() {
     if (!connected()) return;
@@ -458,9 +488,9 @@ const Store = {
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
       rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() })
     ]);
-    DB.projects = projects || [];
-    DB.project_docs = docs || [];
-    DB.diary_entries = entries || [];
+    DB.projects = reconcile('projects', projects || []);
+    DB.project_docs = reconcile('project_docs', docs || []);
+    DB.diary_entries = reconcile('diary_entries', entries || []);
     saveCache();
   },
 
@@ -563,11 +593,24 @@ const Outbox = {
     paintSync();
   },
   count() { return Outbox.all().length; },
+
+  /* Why the queue isn't draining. A dropped connection is normal on site and
+     fixes itself; a refusal from the database never does, and has to be put
+     in front of somebody. */
+  problem() {
+    try { return JSON.parse(localStorage.getItem('rckd.outbox.problem') || 'null'); } catch (e) { return null; }
+  },
+  setProblem(p) {
+    if (p) localStorage.setItem('rckd.outbox.problem', JSON.stringify(p));
+    else localStorage.removeItem('rckd.outbox.problem');
+  },
+
   async flush() {
     if (!connected()) return;
     const list = Outbox.all();
-    if (!list.length) return;
+    if (!list.length) { Outbox.setProblem(null); return; }
     const left = [];
+    let refused = null;
     for (const op of list) {
       try {
         if (op.kind === 'insert') {
@@ -590,9 +633,15 @@ const Outbox = {
         }
       } catch (err) {
         left.push(op);
+        // A 4xx is the database saying no. Retrying forever won't help and
+        // whoever is using the app needs to know, in words, what it said.
+        if (/^\s*4\d\d/.test(err.message || '')) refused = err.message;
       }
     }
     Outbox.save(left);
+    Outbox.setProblem(left.length && refused
+      ? { message: refused, at: new Date().toISOString(), count: left.length }
+      : null);
     paintSync();
   }
 };
@@ -1023,7 +1072,29 @@ function render() {
 
   if (needsSetup() && route.path !== '/setup' && route.path !== '/join') { renderWelcome(view); return; }
   screen.render(view);
+  if (route.path !== '/screen') paintUnsent(view);
   restoreScroll(route.path);
+}
+
+/* Nothing on this device should ever be lost quietly. While anything is
+   still waiting to reach the database, say so on every screen — and if the
+   database refused it, say what it said, because that never fixes itself. */
+function paintUnsent(view) {
+  const n = Outbox.count();
+  if (!n) return;
+  const problem = Outbox.problem();
+  // Screens build themselves with innerHTML, so this goes in after them —
+  // at the top, where it is read before anything else on the page.
+  const box = document.createElement('div');
+  box.className = 'banner' + (problem ? ' bad' : '');
+  box.innerHTML = problem
+    ? `<strong>${n} change${n > 1 ? 's have' : ' has'} not saved.</strong>
+       The database refused them, so waiting will not help:
+       <em>${esc(problem.message)}</em>
+       <a href="#/setup" style="display:inline-block;margin-top:8px;font-weight:640">What to do →</a>`
+    : `<strong>${n} change${n > 1 ? 's are' : ' is'} waiting to send.</strong>
+       They are safe on this phone and will go as soon as there is signal.`;
+  view.insertBefore(box, view.firstChild);
 }
 
 function needsSetup() {
@@ -1233,6 +1304,7 @@ function jobCard(p, i) {
       ${p.supervisor ? `<div class="line">${icon('person')}${esc(p.supervisor)}</div>` : ''}
       <div class="foot">
         <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+        ${p._unsent ? '<span class="pill plain">Not sent yet</span>' : ''}
         <span class="pill plain">${esc(typeLabel(typeOf(p)))}</span>
         ${issues ? `<span class="pill plain">${issues} issue${issues > 1 ? 's' : ''}</span>` : ''}
       </div>
@@ -2789,6 +2861,27 @@ function renderSetup(view) {
       <button class="btn wide" id="saveMode">Switch mode</button>
     </div>
 
+    ${Outbox.count() ? `
+    <div class="card">
+      <h2>${Outbox.count()} change${Outbox.count() > 1 ? 's' : ''} waiting to send</h2>
+      ${Outbox.problem() ? `
+        <div class="banner bad">The database refused them, so they will not go on their own.
+          <em>${esc(Outbox.problem().message)}</em></div>
+        ${/column|schema cache|PGRST204/i.test(Outbox.problem().message) ? `
+          <p class="muted small"><strong>This one has a known cause.</strong> The database was set up
+          from an older copy of <code>supabase-schema.sql</code> and is missing a column the app now
+          sends. Open Supabase → SQL Editor, paste the current <code>supabase-schema.sql</code> and
+          press Run — it is safe over a live database and adds what is missing. Then come back here
+          and press <strong>Try again</strong>. Nothing is lost in the meantime.</p>` : ''}
+      ` : '<p class="muted small">They are safe on this phone and go as soon as there is signal.</p>'}
+      <div class="btn-row">
+        <button class="btn primary" id="retry">Try again now</button>
+        <button class="btn" id="backup">${icon('download')}Download a backup</button>
+      </div>
+      <p class="muted tiny mt" style="margin-bottom:0">The backup is a file holding everything on this
+      device, sent or not. Keep it before changing anything here.</p>
+    </div>` : ''}
+
     <div class="card">
       <h2>Status</h2>
       <table class="data">
@@ -2802,6 +2895,7 @@ function renderSetup(view) {
       </table>
       <div class="btn-row mt">
         <button class="btn sm" id="refresh">Refresh now</button>
+        <button class="btn sm" id="backupAll">Download a backup</button>
         <button class="btn sm" id="clear">Clear this device</button>
       </div>
     </div>`;
@@ -2880,13 +2974,52 @@ function renderSetup(view) {
     render();
   };
 
+  /* Everything this device holds, in one file. The last resort that means
+     no amount of going wrong can put the work beyond reach. */
+  function downloadBackup() {
+    const dump = {
+      app: 'RCK Dispatch', version: VERSION, taken: new Date().toISOString(),
+      device: { name: S.name, role: S.role, localMode: S.localMode },
+      waitingToSend: Outbox.all(),
+      problem: Outbox.problem(),
+      projects: DB.projects, project_docs: DB.project_docs, diary_entries: DB.diary_entries
+    };
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    saveAs(href, `rck-dispatch-backup-${today()}.json`);
+    setTimeout(() => URL.revokeObjectURL(href), 20000);
+    toast('Backup saved');
+  }
+
+  const retry = $('#retry', view);
+  if (retry) retry.onclick = async function () {
+    this.disabled = true;
+    this.textContent = 'Sending…';
+    await Outbox.flush();
+    await refresh();
+    const left = Outbox.count();
+    toast(left ? `${left} still waiting — see the message above` : 'All sent');
+    render();
+  };
+  const b1 = $('#backup', view);    if (b1) b1.onclick = downloadBackup;
+  const b2 = $('#backupAll', view); if (b2) b2.onclick = downloadBackup;
+
   $('#refresh', view).onclick = async () => { await refresh(); toast('Up to date'); render(); };
 
   $('#clear', view).onclick = () => {
-    if (Outbox.count() && !confirm(`${Outbox.count()} change(s) have not reached Supabase yet and will be lost. Clear anyway?`)) return;
-    if (!confirm('Clear the copy held on this device? Shared data in Supabase is not touched.')) return;
+    const waiting = Outbox.count();
+    if (waiting) {
+      // This is the one button that can destroy work. Make it take a backup first.
+      if (!confirm(`${waiting} change(s) have not reached the database yet.\n\n` +
+                   'Clearing now would destroy them for good. A backup file will be saved first.')) return;
+      downloadBackup();
+      if (!confirm('Backup saved. Clear this device now?')) return;
+    } else if (!confirm('Clear the copy held on this device? Shared data in Supabase is not touched.')) {
+      return;
+    }
     localStorage.removeItem(cacheKey());
     localStorage.removeItem('rckd.outbox');
+    localStorage.removeItem('rckd.outbox.problem');
     DB.projects = []; DB.project_docs = []; DB.diary_entries = [];
     refresh().then(render);
   };

@@ -70,7 +70,16 @@ files it against last night's shift, and says so, so you can change it if it's w
 **Bad signal is fine.** The app opens from its own cache and shows the last data it
 had. Diary entries and photos written with no coverage are held on the phone and sent
 as soon as there's signal — the dot next to the title turns orange while anything is
-waiting.
+waiting, and a line at the top of the screen says how many changes are queued.
+
+**Nothing goes quietly.** Work that hasn't reached the database yet is marked **Not sent
+yet**, and is never overwritten by what the server has. Anything the database *refuses*
+is said out loud, in words, with what to do about it — a refusal never fixes itself by
+waiting, and the commonest cause (a database set up from an older copy of
+`supabase-schema.sql` and missing a column the app now sends) is named on the spot, with
+the fix: re-run that file, press **Try again**. **Settings → Download a backup** writes
+everything on the device to one file, and clearing the device takes that backup first
+whether you ask for it or not.
 
 ---
 
