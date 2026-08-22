@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="robots" content="noindex, nofollow">
+<title>RCK Costing</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css?v=1.0.0">
+</head>
+<body>
+
+<header id="topbar" hidden>
+  <button id="backBtn" class="icon-btn" hidden aria-label="Back">
+    <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+  </button>
+  <div class="brand">
+    <strong id="title">Jobs</strong>
+    <span id="syncDot" class="dot" title="Connection"></span>
+  </div>
+  <button id="menuBtn" class="icon-btn" aria-label="Menu">
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/>
+    </svg>
+  </button>
+</header>
+
+<nav id="menu" hidden>
+  <button data-go="#/">Jobs</button>
+  <button data-go="#/new">New job</button>
+  <button data-go="#/reports">Reports</button>
+  <hr>
+  <button data-go="#/settings">Settings</button>
+  <hr>
+  <button id="lockBtn">Lock now</button>
+</nav>
+
+<main id="view"></main>
+
+<nav id="tabbar" hidden>
+  <a href="#/" data-tab="board">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="4.5" height="8" rx="1.6"/><rect x="9.75" y="8.5" width="4.5" height="12" rx="1.6"/><rect x="16" y="3.5" width="4.5" height="17" rx="1.6"/></svg>
+    <span>Jobs</span>
+  </a>
+  <a href="#/reports" data-tab="reports">
+    <svg viewBox="0 0 24 24"><path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5V8.5h5"/><path d="M8.75 13h6.5M8.75 16.5h4"/></svg>
+    <span>Reports</span>
+  </a>
+  <a href="#/new" data-tab="new" class="tab-primary">
+    <span class="fab"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
+    <span>New job</span>
+  </a>
+</nav>
+
+<div id="printArea" aria-hidden="true"></div>
+<div id="toast" hidden></div>
+
+<!-- The ?v= must be bumped with VERSION in app.js. It is what makes a
+     deploy reach a phone: these URLs have never been cached before, so
+     no stale copy of the app can be served in their place. -->
+<script src="config.js?v=1.0.0"></script>
+<script src="app.js?v=1.0.0"></script>
+</body>
+</html>
