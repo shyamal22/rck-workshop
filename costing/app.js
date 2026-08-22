@@ -3,11 +3,12 @@
    claimed, and what it made.
    Plain JavaScript, no build step, no frameworks.
 
-   Two people use this: the owner and the director. So the same rule that
-   shapes RCK HR shapes this file — margins are never written to the
-   device. There is no offline cache. Everything lives in memory for as
-   long as the screen is unlocked and is thrown away on lock, sign-out or
-   reload.
+   Two people use this: you and the director. It is set up like RCK
+   Dispatch — no logins, one shared key entered once per device, a copy
+   kept on the device so it opens instantly and still works with no
+   signal, and anything written offline queued until it can be sent. It
+   also runs with no database at all, holding the figures on the one
+   device, for whoever only wants to print the sheets to PDF.
 
    The shape of a job, in the order it is filled in:
 
@@ -24,6 +25,11 @@
 
 const VERSION = '1.0.0';
 const SITE = window.RCKC_CONFIG || {};
+
+/* A newer version has downloaded but can't take over until every tab of the
+   old one is gone. Rather than leave someone tapping a feature that isn't
+   there yet, Settings says so. */
+let updateReady = false;
 
 /* --------------------------------------------------------- job states */
 /* Three, and only three. A job is priced, being done, or finished. */
@@ -244,166 +250,85 @@ function toast(msg) {
 }
 
 /* ================================================================
-   Connection details
+   Settings and identity — kept per device
    ================================================================ */
-const Conn = {
+const Settings = {
   read() {
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem('rckc.conn') || '{}'); } catch (e) {}
-    return {
-      url: (SITE.supabaseUrl || saved.url || '').replace(/\/+$/, ''),
-      key: SITE.supabaseKey || saved.key || ''
-    };
+    try { saved = JSON.parse(localStorage.getItem('rckc.settings') || '{}'); } catch (e) {}
+    return Object.assign({
+      supabaseUrl: SITE.supabaseUrl || '',
+      supabaseKey: SITE.supabaseKey || '',
+      name: '',
+      localMode: false
+    }, saved);
   },
-  write(url, key) {
-    localStorage.setItem('rckc.conn', JSON.stringify({
-      url: (url || '').replace(/\/+$/, ''), key: key || ''
-    }));
-    C = Conn.read();
+  write(patch) {
+    const next = Object.assign(Settings.read(), patch);
+    localStorage.setItem('rckc.settings', JSON.stringify(next));
+    S = next;
+    return next;
   }
 };
-let C = Conn.read();
-const configured = () => !!C.url && !!C.key;
+let S = Settings.read();
+
+const connected = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
+function whoami() { return S.name || 'Unnamed user'; }
 
 /* ================================================================
-   Sign-in
-
-   Tokens are the only thing kept between visits. No job figure is ever
-   written to the device.
+   Local copy — the app opens instantly and still works with no signal
    ================================================================ */
-const Auth = {
-  session: null,          // { access_token, refresh_token, expires_at, email }
-  me: null,               // the row from cost_users
+const DB = { jobs: [], variations: [], comments: [], localSeq: 0 };
 
-  load() {
-    try { Auth.session = JSON.parse(localStorage.getItem('rckc.session') || 'null'); }
-    catch (e) { Auth.session = null; }
-  },
-  save() {
-    if (Auth.session) localStorage.setItem('rckc.session', JSON.stringify(Auth.session));
-    else localStorage.removeItem('rckc.session');
-  },
-  lastEmail() { return localStorage.getItem('rckc.lastEmail') || ''; },
+function cacheKey() { return 'rckc.cache.' + (S.localMode ? 'local' : 'remote'); }
 
-  async call(path, body, useToken) {
-    const headers = { apikey: C.key, 'Content-Type': 'application/json' };
-    if (useToken && Auth.session) headers.Authorization = 'Bearer ' + Auth.session.access_token;
-    const res = await fetch(`${C.url}/auth/v1/${path}`, {
-      method: 'POST', headers, body: JSON.stringify(body || {})
-    });
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch (e) {}
-    if (!res.ok) {
-      const msg = (data && (data.error_description || data.msg || data.message || data.error)) || res.statusText;
-      throw new Error(msg);
+function loadCache() {
+  DB.jobs = []; DB.variations = []; DB.comments = []; DB.localSeq = 0;
+  try {
+    const raw = JSON.parse(localStorage.getItem(cacheKey()) || 'null');
+    if (raw) {
+      DB.jobs = raw.jobs || [];
+      DB.variations = raw.variations || [];
+      DB.comments = raw.comments || [];
+      DB.localSeq = raw.localSeq || 0;
     }
-    return data;
-  },
-
-  async signIn(email, password) {
-    const d = await Auth.call('token?grant_type=password', { email: email.trim(), password });
-    Auth.session = {
-      access_token: d.access_token,
-      refresh_token: d.refresh_token,
-      expires_at: Date.now() + (d.expires_in || 3600) * 1000,
-      email: (d.user && d.user.email) || email.trim(),
-      user_id: d.user && d.user.id
-    };
-    Auth.save();
-    localStorage.setItem('rckc.lastEmail', Auth.session.email);
-  },
-
-  async refresh() {
-    if (!Auth.session || !Auth.session.refresh_token) throw new Error('No session');
-    const d = await Auth.call('token?grant_type=refresh_token', { refresh_token: Auth.session.refresh_token });
-    Auth.session = Object.assign({}, Auth.session, {
-      access_token: d.access_token,
-      refresh_token: d.refresh_token,
-      expires_at: Date.now() + (d.expires_in || 3600) * 1000
-    });
-    Auth.save();
-  },
-
-  /** A valid token, refreshed if it is close to running out. */
-  async token() {
-    if (!Auth.session) throw new Error('Not signed in');
-    if (Date.now() > Auth.session.expires_at - 60000) await Auth.refresh();
-    return Auth.session.access_token;
-  },
-
-  /** Confirms this account is on the cost_users guest list. */
-  async loadMe() {
-    const id = Auth.session && Auth.session.user_id;
-    if (!id) throw new Error('No session');
-    const rows = await rest(`cost_users?select=*&id=eq.${encodeURIComponent(id)}`);
-    if (!rows || !rows.length) {
-      const e = new Error('not-a-member');
-      e.notMember = true;
-      throw e;
-    }
-    Auth.me = rows[0];
-    return Auth.me;
-  },
-
-  async resetPassword(email) {
-    await Auth.call('recover', { email: email.trim() });
-  },
-
-  async changePassword(password) {
-    const t = await Auth.token();
-    const res = await fetch(`${C.url}/auth/v1/user`, {
-      method: 'PUT',
-      headers: { apikey: C.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    if (!res.ok) {
-      let m = res.statusText;
-      try { m = (await res.json()).msg || m; } catch (e) {}
-      throw new Error(m);
-    }
-  },
-
-  /** Clear everything held in memory and on the device. */
-  wipe() {
-    Auth.session = null;
-    Auth.me = null;
-    Auth.save();
-    DB.jobs = []; DB.variations = []; DB.comments = [];
-    loaded = false;
-  },
-
-  async signOut() {
-    try {
-      const t = Auth.session && Auth.session.access_token;
-      if (t) await fetch(`${C.url}/auth/v1/logout`, {
-        method: 'POST', headers: { apikey: C.key, Authorization: 'Bearer ' + t }
-      });
-    } catch (e) { /* signing out locally matters more than telling the server */ }
-    Auth.wipe();
+  } catch (e) {}
+}
+function saveCache() {
+  try {
+    localStorage.setItem(cacheKey(), JSON.stringify(DB));
+  } catch (e) {
+    toast('Device storage is full.');
   }
-};
-
-const signedIn = () => !!(Auth.session && Auth.me);
-function whoami() {
-  return (Auth.me && (Auth.me.name || Auth.me.email)) || (Auth.session && Auth.session.email) || '';
 }
 
-/* ================================================================
-   Data, held in memory only
-   ================================================================ */
-const DB = { jobs: [], variations: [], comments: [] };
-let loaded = false;
-let lastError = '';
+function upsert(table, row) {
+  const list = DB[table];
+  const i = list.findIndex(r => r.id === row.id);
+  if (i >= 0) list[i] = Object.assign({}, list[i], row);
+  else list.push(row);
+}
+function drop(table, id) {
+  const list = DB[table];
+  const i = list.findIndex(r => r.id === id);
+  if (i >= 0) list.splice(i, 1);
+}
 
+/* The table each list is held in, so one name does for both ends. */
+const TABLES = { jobs: 'cost_jobs', variations: 'cost_variations', comments: 'cost_comments' };
+
+/* ================================================================
+   Supabase REST access
+   ================================================================ */
+function restHeaders(extra) {
+  return Object.assign({
+    apikey: S.supabaseKey,
+    Authorization: 'Bearer ' + S.supabaseKey
+  }, extra || {});
+}
 async function rest(path, opts) {
-  const o = opts || {};
-  const t = await Auth.token();
-  const headers = Object.assign({
-    apikey: C.key,
-    Authorization: 'Bearer ' + t
-  }, o.headers || {});
-  const res = await fetch(`${C.url}/rest/v1/${path}`, Object.assign({}, o, { headers }));
+  const base = S.supabaseUrl.replace(/\/+$/, '');
+  const res = await fetch(`${base}/rest/v1/${path}`, opts);
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.json()).message || ''; } catch (e) {}
@@ -414,58 +339,176 @@ async function rest(path, opts) {
   return text ? JSON.parse(text) : null;
 }
 
+/* ================================================================
+   Store — one interface, two backings (Supabase, or this device only)
+   ================================================================ */
+/* Work written on this device that the server has not taken yet — held in
+   the outbox until it can be sent. A pull must fold these back in, or the
+   server's answer silently deletes a job somebody has just entered: it
+   vanishes off the screen and out of the local copy while the only copy of
+   it sits in a queue nobody was told about. */
+function reconcile(list, fromServer) {
+  const table = TABLES[list];
+  const ops = Outbox.all().filter(op => op.table === table);
+  if (!ops.length) return fromServer;
+
+  const out = (fromServer || []).slice();
+  const byId = new Map(out.map((r, i) => [r.id, i]));
+
+  ops.forEach(op => {
+    if (op.kind === 'insert') {
+      // Not on the server yet — keep ours, and mark it so the app can say so.
+      if (!byId.has(op.row.id)) {
+        byId.set(op.row.id, out.length);
+        out.push(Object.assign({}, op.row, { _unsent: true }));
+      }
+    } else if (op.kind === 'patch') {
+      const i = byId.get(op.id);
+      if (i != null) out[i] = Object.assign({}, out[i], op.patch, { _unsent: true });
+    } else if (op.kind === 'delete') {
+      const i = byId.get(op.id);
+      if (i != null) { out.splice(i, 1); byId.clear(); out.forEach((r, j) => byId.set(r.id, j)); }
+    }
+  });
+  return out;
+}
+
 const Store = {
   async pull() {
+    if (!connected()) return;
     const [jobs, variations, comments] = await Promise.all([
-      rest('cost_jobs?select=*&order=number.desc&limit=3000'),
-      rest('cost_variations?select=*&order=created_at.asc&limit=10000'),
-      rest('cost_comments?select=*&order=at.asc&limit=10000')
+      rest('cost_jobs?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
+      rest('cost_variations?select=*&order=created_at.asc&limit=10000', { headers: restHeaders() }),
+      rest('cost_comments?select=*&order=at.asc&limit=10000', { headers: restHeaders() })
     ]);
-    DB.jobs = jobs || [];
-    DB.variations = variations || [];
-    DB.comments = comments || [];
-    loaded = true;
+    DB.jobs = reconcile('jobs', jobs || []);
+    DB.variations = reconcile('variations', variations || []);
+    DB.comments = reconcile('comments', comments || []);
+    saveCache();
   },
 
-  async insert(table, row) {
-    const out = await rest(table, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
-      body: JSON.stringify(row)
-    });
-    return Array.isArray(out) ? out[0] : out;
+  async insert(list, row) {
+    const table = TABLES[list];
+    if (!row.id) row.id = uid();
+    if (!row.created_at) row.created_at = new Date().toISOString();
+    if (!connected()) {
+      if (list === 'jobs' && !row.number) row.number = ++DB.localSeq;
+      upsert(list, row);
+      saveCache();
+      return row;
+    }
+    upsert(list, row);              // show it straight away
+    saveCache();
+    try {
+      const out = await rest(table, {
+        method: 'POST',
+        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
+        body: JSON.stringify(row)
+      });
+      const saved = Array.isArray(out) ? out[0] : out;
+      if (saved) { upsert(list, saved); saveCache(); }
+      return saved || row;
+    } catch (err) {
+      Outbox.add({ kind: 'insert', table, row });
+      return row;
+    }
   },
 
-  async patch(table, id, patch) {
-    const out = await rest(`${table}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
-      body: JSON.stringify(patch)
-    });
-    return Array.isArray(out) ? out[0] : out;
+  async patch(list, id, patch) {
+    upsert(list, Object.assign({ id }, patch));
+    saveCache();
+    if (!connected()) return;
+    try {
+      await rest(`${TABLES[list]}?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify(patch)
+      });
+    } catch (err) {
+      Outbox.add({ kind: 'patch', table: TABLES[list], id, patch });
+    }
   },
 
-  async remove(table, id) {
-    await rest(`${table}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: { Prefer: 'return=minimal' }
-    });
+  async remove(list, id) {
+    drop(list, id);
+    saveCache();
+    if (!connected()) return;
+    try {
+      await rest(`${TABLES[list]}?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: restHeaders({ Prefer: 'return=minimal' })
+      });
+    } catch (err) {
+      Outbox.add({ kind: 'delete', table: TABLES[list], id });
+    }
   }
 };
 
-/** Put a saved row back into the list held in memory, so the screen can
-    repaint without another round trip. */
-function keep(list, row) {
-  if (!row) return row;
-  const i = list.findIndex(r => r.id === row.id);
-  if (i >= 0) list[i] = row; else list.push(row);
-  return row;
-}
-function forget(list, id) {
-  const i = list.findIndex(r => r.id === id);
-  if (i >= 0) list.splice(i, 1);
-}
+/* ------------- outbox: writes made with no signal, replayed later ---- */
+const Outbox = {
+  all() {
+    try { return JSON.parse(localStorage.getItem('rckc.outbox') || '[]'); } catch (e) { return []; }
+  },
+  save(list) { localStorage.setItem('rckc.outbox', JSON.stringify(list)); },
+  add(op) {
+    const list = Outbox.all();
+    list.push(Object.assign({ opId: uid() }, op));
+    Outbox.save(list);
+    paintSync();
+  },
+  count() { return Outbox.all().length; },
 
+  /* Why the queue isn't draining. A dropped connection is normal and fixes
+     itself; a refusal from the database never does, and has to be put in
+     front of somebody. */
+  problem() {
+    try { return JSON.parse(localStorage.getItem('rckc.outbox.problem') || 'null'); } catch (e) { return null; }
+  },
+  setProblem(p) {
+    if (p) localStorage.setItem('rckc.outbox.problem', JSON.stringify(p));
+    else localStorage.removeItem('rckc.outbox.problem');
+  },
+
+  async flush() {
+    if (!connected()) return;
+    const list = Outbox.all();
+    if (!list.length) { Outbox.setProblem(null); return; }
+    const left = [];
+    let refused = null;
+    for (const op of list) {
+      try {
+        if (op.kind === 'insert') {
+          await rest(op.table, {
+            method: 'POST',
+            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
+            body: JSON.stringify(op.row)
+          });
+        } else if (op.kind === 'delete') {
+          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+            method: 'DELETE',
+            headers: restHeaders({ Prefer: 'return=minimal' })
+          });
+        } else {
+          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+            method: 'PATCH',
+            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+            body: JSON.stringify(op.patch)
+          });
+        }
+      } catch (err) {
+        left.push(op);
+        // A 4xx is the database saying no. Retrying forever won't help and
+        // whoever is using the app needs to know, in words, what it said.
+        if (/^\s*4\d\d/.test(err.message || '')) refused = err.message;
+      }
+    }
+    Outbox.save(left);
+    Outbox.setProblem(left.length && refused
+      ? { message: refused, at: new Date().toISOString(), count: left.length }
+      : null);
+    paintSync();
+  }
+};
 /* ================================================================
    Reading the data — every figure on every screen comes from here,
    and from nowhere else
@@ -671,25 +714,20 @@ const SCREENS = {
   'costs':     { title: 'Costs & claim', render: renderCosts,   back: true },
   'variation': { title: 'Variation',   render: renderVariation, back: true },
   'reports':   { title: 'Reports',     render: renderReports,   back: '#/', tab: 'reports' },
-  'settings':  { title: 'Settings',    render: renderSettings,  back: '#/' }
+  'settings':  { title: 'Settings',    render: renderSettings,  back: '#/' },
+  'join':      { title: 'Set up',      render: renderJoin }
 };
 
 const scrollMemory = {};
 let currentKey = null;
+let route = { path: '', args: [] };
 
 function render() {
-  const { path, args } = parseHash();
+  route = parseHash();
+  const { path, args } = route;
   const view = $('#view');
 
   if (currentKey !== null) scrollMemory[currentKey] = window.scrollY;
-
-  // Nothing private is drawn until both of these are true.
-  if (!configured()) return renderNeedsConfig(view);
-  if (!signedIn())   return renderGate(view);
-
-  $('#topbar').hidden = false;
-  $('#tabbar').hidden = false;
-  document.body.classList.remove('no-tabs');
 
   const screen = SCREENS[path] || SCREENS[''];
   $('#title').textContent = screen.title;
@@ -708,13 +746,15 @@ function render() {
   void view.offsetWidth;
   view.classList.add('enter');
 
-  if (!loaded) {
-    view.innerHTML = `<div class="empty"><b>Loading</b>One moment.</div>`;
-    boot();
+  // Until there is a name and somewhere to keep the figures, there is only
+  // one thing worth showing.
+  if (needsSetup() && path !== 'settings' && path !== 'join') {
+    renderWelcome(view);
     return;
   }
 
   screen.render(view, args);
+  paintUnsent(view);
 
   currentKey = path + '/' + args.join('/');
   const y = scrollMemory[currentKey];
@@ -722,148 +762,87 @@ function render() {
 }
 
 /* ================================================================
-   Before anyone is let in
+   Screen — the first time the app is opened
    ================================================================ */
-function renderNeedsConfig(view) {
-  $('#topbar').hidden = true;
-  $('#tabbar').hidden = true;
-  document.body.classList.add('no-tabs');
-  view.innerHTML = `
-    <div class="gate"><div class="gate-card">
-      <div class="gate-mark">${icon('lock')}</div>
-      <h1>Not connected yet</h1>
-      <p class="lede">This app needs the Supabase project details before anyone can sign in.
-        Put them in <b>config.js</b>, or enter them here for this device.</p>
-      <label class="field"><span>Project URL</span>
-        <input type="text" id="cfgUrl" placeholder="https://abcdefgh.supabase.co" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>Anon public key</span>
-        <input type="text" id="cfgKey" placeholder="eyJhbGciOi…" autocapitalize="off" spellcheck="false"></label>
-      <button class="btn primary wide" id="cfgSave">Save and continue</button>
-      <p class="foot">Use the <b>anon public</b> key from Supabase → Settings → API.
-        Never the service_role key.</p>
-    </div></div>`;
-
-  $('#cfgSave').onclick = () => {
-    const url = $('#cfgUrl').value.trim(), key = $('#cfgKey').value.trim();
-    if (!url || !key) return toast('Both the URL and the key are needed.');
-    Conn.write(url, key);
-    render();
-  };
+function needsSetup() {
+  return !S.name || (!connected() && !S.localMode);
 }
 
-let gateMode = 'signin';   // signin | reset
-
-function renderGate(view) {
-  $('#topbar').hidden = true;
-  $('#tabbar').hidden = true;
-  $('#menu').hidden = true;
-  document.body.classList.add('no-tabs');
-
-  const email = Auth.lastEmail();
-  const reset = gateMode === 'reset';
-
+function renderWelcome(view) {
   view.innerHTML = `
-    <div class="gate"><div class="gate-card">
-      <div class="gate-mark">${icon('chart')}</div>
-      <h1>RCK Costing</h1>
-      <p class="lede">${reset
-        ? 'Enter your email and we will send you a link to set a new password.'
-        : 'What each job was priced at, what it cost, and what it made. Sign in to see it.'}</p>
-
-      <label class="field"><span>Email</span>
-        <input type="email" id="gEmail" value="${esc(email)}" autocomplete="username"
-               autocapitalize="off" spellcheck="false" placeholder="you@rcknz.co.nz"></label>
-
-      ${reset ? '' : `
-      <label class="field"><span>Password</span>
-        <input type="password" id="gPass" autocomplete="current-password" placeholder="••••••••"></label>`}
-
-      <button class="btn primary wide" id="gGo">${reset ? 'Send reset link' : 'Sign in'}</button>
-      <div id="gErr"></div>
-
-      <div class="center" style="margin-top:14px">
-        <button class="linkbtn" id="gSwap">${reset ? 'Back to sign in' : 'Forgotten your password?'}</button>
-      </div>
-
-      <p class="foot">Only the accounts on the costing list can open anything here —
-        two of them, by design. Accounts are added in Supabase by whoever set this up.</p>
-    </div></div>`;
-
-  const err = m => { $('#gErr').innerHTML = `<div class="banner bad" style="margin-top:12px">${esc(m)}</div>`; };
-
-  $('#gSwap').onclick = () => { gateMode = reset ? 'signin' : 'reset'; render(); };
-
-  const submit = async () => {
-    const btn = $('#gGo');
-    const emailV = $('#gEmail').value.trim();
-    if (!emailV) return err('Enter your email address.');
-
-    btn.disabled = true;
-    btn.textContent = reset ? 'Sending…' : 'Signing in…';
-    try {
-      if (reset) {
-        await Auth.resetPassword(emailV);
-        $('#gErr').innerHTML = `<div class="banner good" style="margin-top:12px">
-          If that address has an account, a reset link is on its way.</div>`;
-        btn.textContent = 'Send reset link';
-        btn.disabled = false;
-        return;
-      }
-      const pass = $('#gPass').value;
-      if (!pass) { btn.disabled = false; btn.textContent = 'Sign in'; return err('Enter your password.'); }
-
-      await Auth.signIn(emailV, pass);
-      await Auth.loadMe();
-      Idle.touch();
-      loaded = false;
-      go('#/');
-      render();
-    } catch (e) {
-      Auth.wipe();
-      btn.disabled = false;
-      btn.textContent = reset ? 'Send reset link' : 'Sign in';
-      if (e.notMember) {
-        err('That account exists but is not on the costing list. Ask whoever set this up to add you.');
-      } else if (/invalid login/i.test(e.message)) {
-        err('Wrong email or password.');
-      } else if (/email not confirmed/i.test(e.message)) {
-        err('That account has not been confirmed yet. Check your email for the invitation.');
-      } else {
-        err(e.message || 'Could not sign in.');
-      }
-    }
-  };
-
-  $('#gGo').onclick = submit;
-  view.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
-  setTimeout(() => { const f = email ? $('#gPass') : $('#gEmail'); if (f) f.focus(); }, 60);
+    <div class="card">
+      <h2>RCK Costing</h2>
+      <p class="muted small">What a job was priced at, what it cost, what was claimed,
+        and what it made. Two things to set before it can be used: your name, and where
+        the figures are kept.</p>
+      <a class="btn primary wide mt" href="#/settings">Set it up</a>
+    </div>`;
 }
 
 /* ================================================================
-   Idle lock — an open laptop should not leave the margins on screen
+   Screen — one-tap setup from a shared link
+   The connection details ride in the URL's hash, which browsers never
+   send to the web server, so the key stays off the public site.
    ================================================================ */
-const Idle = {
-  last: Date.now(),
-  timer: null,
-  touch() { Idle.last = Date.now(); },
-  start() {
-    clearInterval(Idle.timer);
-    Idle.timer = setInterval(() => {
-      const mins = Number(SITE.idleLockMinutes);
-      if (!Number.isFinite(mins) || mins <= 0) return;
-      if (!signedIn()) return;
-      if (Date.now() - Idle.last > mins * 60000) lock('Locked after ' + plural(mins, 'minute') + ' idle.');
-    }, 20000);
-  }
-};
-
-function lock(why) {
-  Auth.wipe();
-  gateMode = 'signin';
-  render();
-  if (why) toast(why);
+function setupLink() {
+  return location.origin + location.pathname +
+    '#/join/' + encodeURIComponent(S.supabaseUrl) +
+    '/' + encodeURIComponent(S.supabaseKey);
 }
 
+function renderJoin(view, args) {
+  const url = args[0] || '';
+  const key = args[1] || '';
+  if (!url || !key) {
+    view.innerHTML = `<div class="empty"><b>That link is incomplete</b>
+      Ask for it again, or enter the details in Settings.</div>
+      <a class="btn wide" href="#/settings">Settings</a>`;
+    return;
+  }
+  view.innerHTML = `
+    <div class="card">
+      <h2>Connect this device</h2>
+      <p class="muted small">This link carries the RCK Costing database details.
+        Enter your name and you are in.</p>
+      <label class="field"><span>Your name</span>
+        <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Shyamal"></label>
+      <button class="btn primary wide" id="jGo">Connect</button>
+      <p class="tiny muted mt mb0">Project <code>${esc(url.replace(/^https?:\/\//, ''))}</code></p>
+    </div>`;
+
+  $('#jGo', view).onclick = async function () {
+    const name = $('#jName', view).value.trim();
+    if (!name) return toast('Enter your name');
+    this.disabled = true;
+    this.textContent = 'Connecting…';
+    Settings.write({ name, supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, localMode: false });
+    loadCache();
+    await refresh();
+    toast('Connected');
+    go('#/');
+  };
+}
+
+/* Nothing on this device should ever be lost quietly. While anything is
+   still waiting to reach the database, say so on every screen — and if the
+   database refused it, say what it said, because that never fixes itself. */
+function paintUnsent(view) {
+  const n = Outbox.count();
+  if (!n) return;
+  const problem = Outbox.problem();
+  // Screens build themselves with innerHTML, so this goes in after them —
+  // at the top, where it is read before anything else on the page.
+  const box = document.createElement('div');
+  box.className = 'banner' + (problem ? ' bad' : '');
+  box.innerHTML = problem
+    ? `<strong>${n} change${n > 1 ? 's have' : ' has'} not saved.</strong>
+       The database refused them, so waiting will not help:
+       <em>${esc(problem.message)}</em>
+       <a href="#/settings" style="display:inline-block;margin-top:8px;font-weight:640">What to do →</a>`
+    : `<strong>${n} change${n > 1 ? 's are' : ' is'} waiting to send.</strong>
+       They are safe on this device and will go as soon as there is a connection.`;
+  view.insertBefore(box, view.firstChild);
+}
 /* ================================================================
    Pieces of interface used on more than one screen
    ================================================================ */
@@ -1264,7 +1243,7 @@ function renderJob(view, args) {
     const before = j.status;
     this.disabled = true;
     try {
-      keep(DB.jobs, await Store.patch('cost_jobs', j.id, { status: this.value }));
+      await Store.patch('jobs', j.id, { status: this.value });
       toast('Marked ' + statusLabel(this.value).toLowerCase());
       render();
     } catch (e) {
@@ -1282,9 +1261,9 @@ function renderJob(view, args) {
     this.disabled = true;
     this.textContent = 'Posting…';
     try {
-      keep(DB.comments, await Store.insert('cost_comments', {
+      await Store.insert('comments', {
         job_id: j.id, body, author: whoami(), at: new Date().toISOString()
-      }));
+      });
       render();
     } catch (e) {
       this.disabled = false;
@@ -1297,8 +1276,7 @@ function renderJob(view, args) {
     e.stopPropagation();
     if (!confirm('Delete this comment? It cannot be brought back.')) return;
     try {
-      await Store.remove('cost_comments', b.dataset.del);
-      forget(DB.comments, b.dataset.del);
+      await Store.remove('comments', b.dataset.del);
       render();
     } catch (err) { toast('Could not delete: ' + err.message); }
   });
@@ -1310,10 +1288,11 @@ function renderJob(view, args) {
                  'This cannot be undone.')) return;
     if (!confirm('Really delete it? Print the costing sheet first if you want a copy.')) return;
     try {
-      await Store.remove('cost_jobs', j.id);
-      forget(DB.jobs, j.id);
-      DB.variations = DB.variations.filter(v => v.job_id !== j.id);
-      DB.comments = DB.comments.filter(c => c.job_id !== j.id);
+      // The database removes the job's variations and comments with it;
+      // the copy on this device has to be told.
+      varsFor(j.id).forEach(v => drop('variations', v.id));
+      commentsFor(j.id).forEach(c => drop('comments', c.id));
+      await Store.remove('jobs', j.id);
       toast('Deleted');
       go('#/');
     } catch (e) { toast('Could not delete: ' + e.message); }
@@ -1418,13 +1397,12 @@ function renderJobEdit(view, args) {
     this.textContent = 'Saving…';
     try {
       if (editing) {
-        keep(DB.jobs, await Store.patch('cost_jobs', editing.id, data));
+        await Store.patch('jobs', editing.id, data);
         toast('Saved');
         go('#/job/' + editing.id);
       } else {
-        const saved = keep(DB.jobs, await Store.insert('cost_jobs',
-          Object.assign({ created_by: whoami() }, data)));
-        toast('Job created — now price it');
+        const saved = await Store.insert('jobs', Object.assign({ created_by: whoami() }, data));
+        toast(connected() ? 'Job created — now price it' : 'Saved on this device');
         go('#/costs/' + saved.id);
       }
     } catch (e) {
@@ -1514,7 +1492,7 @@ function renderCosts(view, args) {
     this.disabled = true;
     this.textContent = 'Saving…';
     try {
-      keep(DB.jobs, await Store.patch('cost_jobs', j.id, data));
+      await Store.patch('jobs', j.id, data);
       toast('Saved');
       go('#/job/' + j.id);
     } catch (e) {
@@ -1608,10 +1586,9 @@ function renderVariation(view, args) {
     this.textContent = 'Saving…';
     try {
       if (editing) {
-        keep(DB.variations, await Store.patch('cost_variations', editing.id, data));
+        await Store.patch('variations', editing.id, data);
       } else {
-        keep(DB.variations, await Store.insert('cost_variations',
-          Object.assign({ job_id: j.id, created_by: whoami() }, data)));
+        await Store.insert('variations', Object.assign({ job_id: j.id, created_by: whoami() }, data));
       }
       toast('Saved');
       go('#/job/' + j.id);
@@ -1627,8 +1604,7 @@ function renderVariation(view, args) {
     if (!confirm('Delete this variation? If the client turned it down, set it to Declined ' +
                  'instead — that keeps it on the record and out of the totals.')) return;
     try {
-      await Store.remove('cost_variations', editing.id);
-      forget(DB.variations, editing.id);
+      await Store.remove('variations', editing.id);
       toast('Deleted');
       go('#/job/' + j.id);
     } catch (e) { toast('Could not delete: ' + e.message); }
@@ -1773,104 +1749,216 @@ function renderReports(view) {
    Screen — settings
    ================================================================ */
 function renderSettings(view) {
-  const inConfig = !!(SITE.supabaseUrl && SITE.supabaseKey);
   view.innerHTML = `
     <div class="card">
       <h2>You</h2>
-      <table class="data kvtable">
-        <tr><th>Signed in as</th><td class="r">${esc(whoami())}</td></tr>
-        <tr><th>Email</th><td class="r">${esc((Auth.session && Auth.session.email) || '')}</td></tr>
-        <tr><th>On the list as</th><td class="r">${esc(humanise((Auth.me && Auth.me.role) || 'owner'))}</td></tr>
-      </table>
-      <div class="btn-row mt">
-        <button class="btn" id="pw">Change my password</button>
-        <button class="btn" id="lockNow">${icon('lock')}Lock now</button>
-        <button class="btn" id="out">Sign out</button>
+      <p class="muted small">Your name goes on the comments you write and on the sheets you print.</p>
+      <label class="field"><span>Your name</span>
+        <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Shyamal"></label>
+      <button class="btn primary wide" id="saveMe">Save</button>
+    </div>
+
+    <div class="card">
+      <h2>Where the figures are kept</h2>
+      <p class="muted small">Two values from Supabase → Settings → API. Both devices that enter the
+        same two see the same jobs. Leave them blank and use <strong>this device only</strong> below
+        instead — the app works either way.</p>
+      <label class="field"><span>Project URL</span>
+        <input type="text" id="sUrl" value="${esc(S.supabaseUrl)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Anon public key</span>
+        <input type="text" id="sKey" value="${esc(S.supabaseKey)}" placeholder="eyJhbGciOi…" autocapitalize="off" spellcheck="false"></label>
+      <div class="btn-row">
+        <button class="btn" id="test">Test connection</button>
+        <button class="btn primary" id="saveDb">Save &amp; connect</button>
       </div>
+      <div id="testOut" class="small mt"></div>
     </div>
 
+    ${connected() ? `
     <div class="card">
-      <h2>What is on this device</h2>
-      <p class="muted small">Nothing but the sign-in token. No job, no cost and no margin is ever
-        written to this phone or laptop — everything on screen is held in memory and thrown away
-        when you lock, sign out or reload.</p>
-      <ul class="plain small">
-        <li>The screen locks itself after ${SITE.idleLockMinutes || 20} minutes with nothing happening.</li>
-        <li>Only accounts on the <code>cost_users</code> list can open anything, so the app link is
-          safe to send to the two of you.</li>
-      </ul>
-    </div>
+      <h2>Set up the other device</h2>
+      <p class="muted small">Send this link to the director. One tap connects their phone —
+        they never type the key. Treat it like a key: it opens the figures for anyone who has it.</p>
+      <label class="field"><span>Setup link</span>
+        <input type="text" id="sLink" value="${esc(setupLink())}" readonly onclick="this.select()"></label>
+      <div class="btn-row">
+        <button class="btn primary" id="shareLink">Share link</button>
+        <button class="btn" id="copyLink">Copy link</button>
+      </div>
+    </div>` : ''}
 
     <div class="card">
-      <h2>Connection</h2>
-      ${inConfig ? `
-        <p class="muted small mb0">Set in <code>config.js</code>, so every device that opens the app
-        is connected already. Project <code>${esc(C.url.replace(/^https?:\/\//, ''))}</code>.</p>`
-      : `
-        <p class="muted small">Held on this device only. Put them in <code>config.js</code> instead
-        and nobody has to type them again.</p>
-        <label class="field"><span>Project URL</span>
-          <input type="text" id="sUrl" value="${esc(C.url)}" autocapitalize="off" spellcheck="false"></label>
-        <label class="field"><span>Anon public key</span>
-          <input type="text" id="sKey" value="${esc(C.key)}" autocapitalize="off" spellcheck="false"></label>
-        <button class="btn wide" id="saveConn">Save the connection</button>`}
+      <h2>Use it without a database</h2>
+      <p class="muted small">Everything works, but the figures stay on this device only —
+        nothing is shared and nothing is backed up anywhere. Fine if you are the only one
+        entering jobs and you print the sheets to PDF.</p>
+      <label class="field"><span>Mode</span>
+        <select id="sLocal">
+          <option value="0" ${!S.localMode ? 'selected' : ''}>Shared (Supabase)</option>
+          <option value="1" ${S.localMode ? 'selected' : ''}>This device only</option>
+        </select></label>
+      <button class="btn wide" id="saveMode">Switch mode</button>
+      ${S.localMode ? `<p class="tiny muted mt mb0">Take a backup now and then — the button is
+        further down. It is the only copy there is.</p>` : ''}
     </div>
+
+    ${Outbox.count() ? `
+    <div class="card">
+      <h2>${Outbox.count()} change${Outbox.count() > 1 ? 's' : ''} waiting to send</h2>
+      ${Outbox.problem() ? `
+        <div class="banner bad">The database refused them, so they will not go on their own.
+          <em>${esc(Outbox.problem().message)}</em></div>
+        ${/column|schema cache|PGRST204/i.test(Outbox.problem().message) ? `
+          <p class="muted small"><strong>This one has a known cause.</strong> The database was set up
+          from an older copy of <code>supabase-schema.sql</code> and is missing a column the app now
+          sends. Open Supabase → SQL Editor, paste the current <code>supabase-schema.sql</code> and
+          press Run — it is safe over a live database and adds what is missing. Then come back here
+          and press <strong>Try again</strong>. Nothing is lost in the meantime.</p>` : ''}
+      ` : '<p class="muted small">They are safe on this device and go as soon as there is a connection.</p>'}
+      <div class="btn-row">
+        <button class="btn primary" id="retry">Try again now</button>
+        <button class="btn" id="backup">${icon('download')}Download a backup</button>
+      </div>
+    </div>` : ''}
 
     <div class="card">
       <h2>Status</h2>
       <table class="data kvtable">
+        <tr><th>Figures kept</th><td class="r">${S.localMode ? 'On this device only'
+          : connected() ? 'Shared database' : 'Not set up'}</td></tr>
         <tr><th>Jobs</th><td class="r">${DB.jobs.length}</td></tr>
         <tr><th>Variations</th><td class="r">${DB.variations.length}</td></tr>
         <tr><th>Comments</th><td class="r">${DB.comments.length}</td></tr>
-        <tr><th>Loaded</th><td class="r">${lastError ? esc(lastError) : 'Up to date'}</td></tr>
-        <tr><th>Version</th><td class="r">${VERSION}</td></tr>
+        <tr><th>Waiting to send</th><td class="r">${Outbox.count()}</td></tr>
+        <tr><th>Version</th><td class="r">${VERSION}${updateReady
+          ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
       </table>
       <div class="btn-row mt">
         <button class="btn sm" id="refresh">Refresh now</button>
-        <button class="btn sm" id="backup">${icon('download')}Download a backup</button>
+        <button class="btn sm" id="backupAll">Download a backup</button>
+        <button class="btn sm" id="clear">Clear this device</button>
       </div>
-      <p class="tiny muted mt mb0">The backup is one file holding every job, variation and comment,
-        for the accountant or for peace of mind. It leaves the database untouched.</p>
+      <p class="tiny muted mt mb0">The backup is one file holding every job, variation and comment
+        this device knows about — for the accountant, or for peace of mind.</p>
     </div>`;
 
-  $('#pw', view).onclick = async () => {
-    const p1 = prompt('New password (at least 8 characters):');
-    if (!p1) return;
-    if (p1.length < 8) return toast('Too short — use at least 8 characters');
-    if (prompt('Type it again to be sure:') !== p1) return toast('They did not match');
-    try {
-      await Auth.changePassword(p1);
-      toast('Password changed');
-    } catch (e) { toast('Could not change it: ' + e.message); }
-  };
-  $('#lockNow', view).onclick = () => lock('Locked.');
-  $('#out', view).onclick = async () => {
-    await Auth.signOut();
-    gateMode = 'signin';
-    render();
-  };
-
-  const sc = $('#saveConn', view);
-  if (sc) sc.onclick = () => {
-    Conn.write($('#sUrl', view).value.trim(), $('#sKey', view).value.trim());
+  $('#saveMe', view).onclick = () => {
+    const name = $('#sName', view).value.trim();
+    if (!name) return toast('Enter your name');
+    Settings.write({ name });
     toast('Saved');
     render();
   };
 
-  $('#refresh', view).onclick = async () => {
-    loaded = false;
+  $('#test', view).onclick = async function () {
+    const out = $('#testOut', view);
+    const url = $('#sUrl', view).value.trim().replace(/\/+$/, '');
+    const key = $('#sKey', view).value.trim();
+    if (!url || !key) { out.textContent = 'Fill in both fields first.'; return; }
+    out.textContent = 'Checking…';
+    try {
+      const res = await fetch(`${url}/rest/v1/cost_jobs?select=id&limit=1`, {
+        headers: { apikey: key, Authorization: 'Bearer ' + key }
+      });
+      if (res.ok) out.innerHTML = '<span style="color:var(--green)">Connected. The database is ready.</span>';
+      else if (res.status === 404) out.innerHTML = '<span style="color:var(--red)">Reached Supabase, but the tables are missing. Run supabase-schema.sql first.</span>';
+      else out.innerHTML = `<span style="color:var(--red)">Supabase said ${res.status}. Check the key is the <em>anon public</em> one.</span>`;
+    } catch (e) {
+      out.innerHTML = '<span style="color:var(--red)">Could not reach that URL.</span>';
+    }
+  };
+
+  $('#saveDb', view).onclick = async () => {
+    Settings.write({
+      supabaseUrl: $('#sUrl', view).value.trim().replace(/\/+$/, ''),
+      supabaseKey: $('#sKey', view).value.trim(),
+      localMode: false
+    });
+    loadCache();
+    await refresh();
+    toast('Connected');
     render();
   };
 
-  $('#backup', view).onclick = () => {
+  const share = $('#shareLink', view);
+  if (share) {
+    const link = setupLink();
+    const copy = async () => {
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('Link copied — paste it into a text or email');
+      } catch (e) {
+        $('#sLink', view).select();
+        toast('Press and hold the link above to copy it');
+      }
+    };
+    share.onclick = async () => {
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'RCK Costing setup', text: 'Tap this to set up RCK Costing', url: link });
+          return;
+        } catch (e) { /* cancelled, or not allowed — fall back to copying */ }
+      }
+      copy();
+    };
+    $('#copyLink', view).onclick = copy;
+  }
+
+  $('#saveMode', view).onclick = async () => {
+    Settings.write({ localMode: $('#sLocal', view).value === '1' });
+    loadCache();
+    await refresh();
+    render();
+  };
+
+  /* Everything this device holds, in one file. The last resort that means
+     no amount of going wrong can put the work beyond reach. */
+  function downloadBackup() {
     const dump = {
       app: 'RCK Costing', version: VERSION, taken: new Date().toISOString(),
-      by: whoami(),
+      device: { name: S.name, localMode: S.localMode },
+      waitingToSend: Outbox.all(),
+      problem: Outbox.problem(),
       jobs: DB.jobs, variations: DB.variations, comments: DB.comments
     };
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
     saveAs(URL.createObjectURL(blob), `rck-costing-backup-${today()}.json`);
     toast('Backup saved');
+  }
+
+  const retry = $('#retry', view);
+  if (retry) retry.onclick = async function () {
+    this.disabled = true;
+    this.textContent = 'Sending…';
+    await Outbox.flush();
+    await refresh();
+    const left = Outbox.count();
+    toast(left ? `${left} still waiting — see the message above` : 'All sent');
+    render();
+  };
+  const b1 = $('#backup', view);    if (b1) b1.onclick = downloadBackup;
+  const b2 = $('#backupAll', view); if (b2) b2.onclick = downloadBackup;
+
+  $('#refresh', view).onclick = async () => { await refresh(); toast('Up to date'); render(); };
+
+  $('#clear', view).onclick = () => {
+    const waiting = Outbox.count();
+    if (waiting) {
+      // This is the one button that can destroy work. Make it take a backup first.
+      if (!confirm(`${waiting} change(s) have not reached the database yet.\n\n` +
+                   'Clearing now would destroy them for good. A backup file will be saved first.')) return;
+      downloadBackup();
+      if (!confirm('Backup saved. Clear this device now?')) return;
+    } else if (!confirm(S.localMode
+      ? 'This device holds the only copy of these figures. Clearing wipes them for good. Carry on?'
+      : 'Clear the copy held on this device? The shared database is not touched.')) {
+      return;
+    }
+    localStorage.removeItem(cacheKey());
+    localStorage.removeItem('rckc.outbox');
+    localStorage.removeItem('rckc.outbox.problem');
+    DB.jobs = []; DB.variations = []; DB.comments = []; DB.localSeq = 0;
+    refresh().then(render);
   };
 }
 
@@ -1885,7 +1973,6 @@ function saveAs(href, name) {
   a.remove();
   setTimeout(() => { try { URL.revokeObjectURL(href); } catch (e) {} }, 20000);
 }
-
 /* ================================================================
    CSV — the same figures, for a spreadsheet
    ================================================================ */
@@ -2193,90 +2280,101 @@ function printSummary(list, from, to) {
 }
 
 /* ================================================================
-   Starting up
+   Sync loop
    ================================================================ */
-function paintDot() {
-  const d = $('#syncDot');
-  if (!d) return;
-  d.className = 'dot ' + (lastError ? 'bad' : loaded ? 'ok' : 'warn');
-  d.title = lastError || (loaded ? 'Connected' : 'Loading');
+let syncState = 'idle';
+
+function paintSync() {
+  const dot = $('#syncDot');
+  if (!dot) return;
+  const pending = Outbox.count();
+  dot.className = 'dot ' + (syncState === 'bad' ? 'bad' : pending ? 'warn'
+    : connected() || S.localMode ? 'ok' : '');
+  dot.title = S.localMode ? 'This device only'
+    : !connected() ? 'Not set up'
+    : pending ? `${pending} change(s) waiting to send`
+    : syncState === 'bad' ? 'No connection — showing the last copy'
+    : 'Connected';
 }
 
-async function boot() {
+async function refresh() {
+  if (!connected()) { syncState = 'idle'; paintSync(); return; }
   try {
+    await Outbox.flush();
     await Store.pull();
-    lastError = '';
+    syncState = 'ok';
   } catch (e) {
-    lastError = e.message || 'Connection problem';
-    loaded = true;   // let the interface render, so the error is visible
-    toast('Could not load: ' + lastError);
+    syncState = 'bad';
   }
-  paintDot();
-  render();
+  paintSync();
 }
 
-async function start() {
-  Auth.load();
-
-  if (configured() && Auth.session) {
-    try {
-      await Auth.token();     // refreshes if it has gone stale
-      await Auth.loadMe();
-    } catch (e) {
-      Auth.wipe();            // expired, revoked, or taken off the list
-    }
-  }
-
-  render();
-  if (signedIn() && !loaded) boot();
-
-  Idle.start();
-  ['click', 'keydown', 'touchstart', 'scroll'].forEach(ev =>
-    window.addEventListener(ev, Idle.touch, { passive: true }));
-
-  // Coming back to the tab is the moment to check the session is still good.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && signedIn()) {
-      Idle.touch();
-      Auth.token().catch(() => lock('Session expired. Please sign in again.'));
-    }
-  });
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (document.hidden || !connected()) return;
+    const before = JSON.stringify([DB.jobs.length, DB.variations.length, DB.comments.length]);
+    await refresh();
+    const after = JSON.stringify([DB.jobs.length, DB.variations.length, DB.comments.length]);
+    if (before !== after && route.path === '') render();
+  }, 30000);
 }
 
-/* ---------------------------------------------------------- chrome --- */
-window.addEventListener('hashchange', render);
-
-// The header only grows a shadow once there is content behind it.
-window.addEventListener('scroll', () => {
-  const bar = $('#topbar');
-  if (bar) bar.classList.toggle('lifted', window.scrollY > 4);
-}, { passive: true });
-
-document.addEventListener('DOMContentLoaded', () => {
-  $('#menuBtn').onclick = e => {
-    e.stopPropagation();
-    const m = $('#menu');
-    m.hidden = !m.hidden;
-  };
-  document.addEventListener('click', e => {
-    const m = $('#menu');
-    if (!m.hidden && !m.contains(e.target) && !e.target.closest('#menuBtn')) m.hidden = true;
-  });
-  $$('#menu [data-go]').forEach(b => {
-    b.onclick = () => { $('#menu').hidden = true; go(b.dataset.go); };
-  });
-  $('#lockBtn').onclick = () => { $('#menu').hidden = true; lock('Locked.'); };
-
-  start();
+/* ================================================================
+   Boot
+   ================================================================ */
+$('#menuBtn').onclick = e => { e.stopPropagation(); $('#menu').hidden = !$('#menu').hidden; };
+$('#backBtn').onclick = () => history.back();
+$$('#menu [data-go]').forEach(b => b.onclick = () => { $('#menu').hidden = true; go(b.dataset.go); });
+document.addEventListener('click', e => {
+  if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('#menuBtn')) $('#menu').hidden = true;
 });
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
+// The header only grows a shadow once there is content behind it.
+let scrollTick = false;
+window.addEventListener('scroll', () => {
+  if (scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => {
+    $('#topbar').classList.toggle('lifted', window.scrollY > 4);
+    scrollTick = false;
+  });
+}, { passive: true });
+
+window.addEventListener('hashchange', render);
+window.addEventListener('online', () => refresh().then(render));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+function watchForUpdate(reg) {
+  const seen = w => {
+    if (!w) return;
+    w.addEventListener('statechange', () => {
+      if (w.state === 'installed' && navigator.serviceWorker.controller) {
+        updateReady = true;
+        toast('Update ready — close and reopen the app');
+        if (route.path === 'settings') render();
+      }
+    });
+  };
+  seen(reg.installing);
+  reg.addEventListener('updatefound', () => seen(reg.installing));
+}
+
+(async function boot() {
+  loadCache();
+  paintSync();
+  render();
+  await refresh();
+  render();
+  startPolling();
+  if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then(reg => {
+      watchForUpdate(reg);
       // Coming back to the app is the moment to look for a new one.
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) reg.update().catch(() => {});
       });
     }).catch(() => {});
-  });
-}
+  }
+})();

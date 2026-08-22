@@ -1,8 +1,7 @@
 /* RCK Costing service worker.
-
-   The app shell is cached so it opens instantly. NOTHING else is — no job
-   figures, no margins, no sign-in tokens ever touch this cache. Every
-   request that isn't one of our own files goes straight to the network. */
+   The app shell is cached so it opens instantly and still works with no
+   connection. Supabase calls are never cached — the figures must always be
+   live, and the app keeps its own copy of them for when they aren't. */
 const CACHE = 'rck-costing-v1';
 const ASSETS = [
   './', './index.html', './app.css', './app.js', './config.js',
@@ -30,7 +29,7 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
 
-  // Supabase — the figures and the sign-in — is never cached, never stored.
+  // Anything that isn't our own app shell — Supabase — goes to the network.
   if (url.origin !== location.origin) return;
 
   // Network-first for the app itself, so a deploy reaches everyone next open.

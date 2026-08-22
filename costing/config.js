@@ -1,16 +1,14 @@
 /* ---------------------------------------------------------------------
    RCK Costing — site configuration.
 
-   Unlike the workshop and dispatch apps, it is SAFE to fill both of these
-   in and commit them, even though this repository is public.
+   WARNING: this repository and the published site are PUBLIC. Anything
+   written below is readable by anyone who finds the page. The Supabase key
+   is therefore deliberately left blank — the two devices that use this are
+   given the Project URL and anon key once, in the app's Settings screen
+   (or by tapping a setup link), so the key never appears on a public page.
 
-   Why: the anon key below opens nothing on its own. Every table requires a
-   signed-in account that is also on the cost_users list. A stranger with
-   this key and the app URL gets a sign-in screen and no more.
-
-   That is the point of building it this way — the link can be handed to
-   the director and it just works, with no key to type in and no margin
-   sitting in a public file.
+   That matters more here than in the other apps: this one holds what every
+   job made.
 
      Supabase → Settings → API
        supabaseUrl = "Project URL"
@@ -19,10 +17,6 @@
 window.RCKC_CONFIG = {
   supabaseUrl: '',
   supabaseKey: '',
-
-  // Lock the screen after this many minutes with no activity, so an open
-  // laptop doesn't leave the margins on display. Set to 0 to never lock.
-  idleLockMinutes: 20,
 
   // What appears on the letterhead of every printed sheet.
   brand: {

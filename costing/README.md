@@ -1,8 +1,9 @@
 # RCK Costing
 
 What each job was priced at, what it actually cost, what was claimed from the client,
-and what it made. Built for two people — you and the director — and nobody else can
-open it.
+and what it made. Built for two people — you and the director — and set up the same
+way as RCK Dispatch: no logins, one key entered once per device, or no database at
+all if the figures only ever need to live on yours.
 
 **Green** = money made · **Red** = money lost · **an em dash** = nobody has entered
 that number yet, which is never the same as a zero.
@@ -55,72 +56,52 @@ All figures exclude GST.
 
 ## Setting it up
 
-Three jobs, about twenty minutes, done once.
+Two ways, and the app works the same either way. Pick the first if the director
+wants to see the jobs on his own phone; pick the second if you are the only one
+entering them and all you do is print the sheet to PDF and send it on.
 
-### 1. The database
+### Either: this device only, in about a minute
+
+1. Open the app URL in the browser, **Add to Home Screen**.
+2. **Settings** → enter your name → **Save**.
+3. **Use it without a database** → *This device only* → **Switch mode**.
+
+That's it. The figures live on that one device. Nothing is shared, and nothing is
+backed up anywhere — so take a backup now and then from **Settings → Download a
+backup**, because it is the only copy there is.
+
+### Or: shared between the two of you, in about fifteen
+
+**The database, once:**
 
 1. Go to [supabase.com](https://supabase.com) and create a free account.
-2. **New project** — any name, pick the Sydney region, set a database password.
-   (It can be the same project as RCK Workshop, Dispatch and HR: no names clash.)
-3. Open **SQL Editor** → **New query**, paste the whole of `supabase-schema.sql`
-   from this folder, press **Run**. It should say *Success*.
-4. Go to **Settings → API** and copy the **Project URL** and the **anon public** key.
-   (The *anon public* one. Never `service_role`.)
+2. **New project** — any name, pick the Sydney region, set a database password
+   (you won't need it again, but save it somewhere).
+   It can be the same project as RCK Workshop, Dispatch and HR — no names clash.
+3. Wait about two minutes for the project to build.
+4. **SQL Editor → New query**, paste the whole of `supabase-schema.sql` from this
+   folder, press **Run**. It should say *Success*.
+5. **Settings → API** and copy two things:
+   - **Project URL** — looks like `https://abcdefgh.supabase.co`
+   - **anon public** key — a long string starting `eyJ…`
+     (The *anon public* one. Never `service_role`.)
 
-### 2. The two accounts
+The free tier is far more than this app will ever need.
 
-There are no shared logins here. Each of you gets a real account.
+**Your device:** open the app, go to **Settings → Where the figures are kept**, paste
+the two values in, press **Test connection** — it says in words if anything is wrong —
+then **Save & connect**.
 
-1. **Authentication → Users → Add user**, for each of you: email address, a password,
-   and tick **Auto Confirm User**.
-2. Back in **SQL Editor**, put each of them on the costing list:
+**The director's device:** on your phone, **Settings → Set up the other device →
+Share link**, and send him that link. One tap connects him: he enters his name and
+he's in, never typing the key. Because the details ride in the URL's `#` fragment
+they are never sent to the web server.
 
-   ```sql
-   select cost_grant('office@rcknz.co.nz', 'Your name', 'owner');
-   select cost_grant('director@rcknz.co.nz', 'The director', 'director');
-   ```
-
-   It answers `… can now use RCK Costing as …`. If it says no account was found,
-   create the user in step 1 first and run it again.
-
-Both roles see and do exactly the same things. The role is only there so the list
-says who is who.
-
-To take someone off later, and keep every job they entered:
-
-```sql
-update cost_users set active = false where email = 'someone@rcknz.co.nz';
-```
-
-### 3. The app
-
-Put the two values into `config.js`:
-
-```js
-window.RCKC_CONFIG = {
-  supabaseUrl: 'https://abcdefgh.supabase.co',
-  supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…',
-  idleLockMinutes: 20,
-  brand: { name: 'RCK NZ', trade: 'Asphalt & Civil Contracting', email: 'office@rcknz.co.nz', phone: '' }
-};
-```
-
-**Unlike the workshop and dispatch apps, it is safe to commit these**, even though this
-repository is public. The key opens nothing on its own: every table needs a signed-in
-account that is also on the `cost_users` list, so a stranger with the key and the app
-URL gets a sign-in screen and no more. That is the point of building it this way — the
-link can be sent to the director and it just works, with nothing to type in.
-
-Commit the change and the site redeploys itself.
-
-### 4. On each device
-
-1. Open the app URL in the browser.
-2. **Add to Home Screen** (Share menu on iPhone, ⋮ on Android). It installs like a
-   normal app.
-3. Sign in with your email and password. It stays signed in between visits.
-
----
+`config.js` is deliberately left **blank**. This repository and the published site
+are public, so putting the key in that file would publish it — and this app holds
+what every job made. Entering it once per device keeps it off the public page.
+Treat the setup link the same way: anyone who has it can read and write the figures,
+so it only ever goes to the two of you.
 
 ## Using it
 
@@ -145,17 +126,21 @@ Plain HTML, CSS and JavaScript — no build step, no server. GitHub Pages serves
 this repository along with the other apps, so it is live at
 `https://shyamal22.github.io/rck-workshop/costing/` and updates on every push to `main`.
 
+Nothing links to it from anywhere. Bookmark it, or install it to the home screen, and
+that is the whole of the distribution — what leaves the app is a printed PDF.
+
 ---
 
 ## Things worth knowing
 
-- **Nothing is kept on the device.** No job, no cost, no margin is ever written to the
-  phone or the laptop. Everything on screen is held in memory and thrown away when you
-  lock, sign out or reload — only the sign-in token is kept. That is the trade for not
-  leaving the company's margins in a browser cache: the app needs a connection.
-- **It locks itself** after 20 minutes with nothing happening, so an open laptop doesn't
-  leave the profit on a job on display. Change `idleLockMinutes` in `config.js`, or set
-  it to `0` to never lock.
+- **No logins.** Both devices share one key, so anyone holding that key can read and
+  write. That's the same bargain as the workshop and dispatch apps — nothing to
+  remember, nothing to lose — but it is a bargain, and this app holds the margins.
+  Don't publish the app link with the key, and don't hand the setup link on.
+- **A bad connection is fine.** The app opens from its own copy and shows the last
+  figures it had. Anything entered with no signal is kept on the device and sent as
+  soon as there is a connection — the dot next to the title turns orange while
+  something is waiting, and every screen says so until it has gone.
 - **Cost lines aren't fixed.** Add one to `COST_LINES` in `app.js` and both forms, the
   comparison table, the printed sheet and the CSV all grow the line by themselves — the
   database needs no change, because the breakdown is stored as a map.
@@ -167,6 +152,8 @@ this repository along with the other apps, so it is live at
   in April, where the accountant will look for it.
 - **Deleting a job** takes its variations and comments with it and cannot be undone. It
   asks twice. Print the costing sheet first if there's any doubt.
+- **Switching between shared and this-device-only** doesn't merge anything: each mode
+  keeps its own copy, and switching back finds what was there before.
 - **Reports print** through the browser's print dialog — choose *Save as PDF* to email
   or file one.
 
@@ -177,9 +164,9 @@ this repository along with the other apps, so it is live at
 | `index.html` | Page shell |
 | `app.js` | The whole application |
 | `app.css` | Styling, including the printed sheets |
-| `config.js` | Your Supabase URL and key, the lock timeout, and the letterhead |
+| `config.js` | The letterhead (the Supabase key is left blank on purpose) |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
-| `sw.js` | Caches the app shell only — never any data |
+| `sw.js` | Offline caching of the app itself |
 
 ## The other RCK apps in this repository
 

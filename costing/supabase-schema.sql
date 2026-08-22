@@ -5,68 +5,10 @@
 --  running it again over live data only adds what is missing.
 --
 --  It can share a Supabase project with RCK Workshop, Dispatch and HR —
---  none of the table or function names clash.
---
---  This database holds what every job made. So, like RCK HR and unlike
---  the workshop and dispatch apps:
---
---    · The anonymous key can read NOTHING. Every policy below requires a
---      signed-in user.
---    · Being signed in is not enough either — the account must also be
---      listed in cost_users. That table is the whole guest list, and it is
---      meant to be two rows long: you and the director.
---
---  Because of that, publishing the app's URL and its anon key is harmless:
---  without an account in cost_users they open a sign-in screen and nothing
---  else.
+--  none of the table names clash.
 -- =====================================================================
 
 create extension if not exists pgcrypto;
-
--- =====================================================================
---  Who is allowed in
--- =====================================================================
--- One row per person who may use the app. `id` matches the user's id in
--- Supabase Auth. See the README for the one line that adds someone.
-create table if not exists cost_users (
-  id         uuid primary key references auth.users(id) on delete cascade,
-  email      text not null,
-  name       text not null default '',
-  role       text not null default 'owner' check (role in ('owner', 'director')),
-  active     boolean not null default true,
-  created_at timestamptz not null default now()
-);
-
--- Every policy in this file calls this. It is SECURITY DEFINER so that
--- checking the guest list does not itself go through the guest-list policy
--- (which would recurse forever).
-create or replace function cost_member() returns boolean
-language sql stable security definer set search_path = public, auth as $$
-  select exists (
-    select 1 from cost_users u
-    where u.id = auth.uid() and u.active
-  );
-$$;
-
--- Convenience: adds an account to the guest list by email, after that
--- person has been created in Supabase → Authentication → Users.
---   select cost_grant('director@rcknz.co.nz', 'The Director', 'director');
-create or replace function cost_grant(p_email text, p_name text default '', p_role text default 'owner')
-returns text language plpgsql security definer set search_path = public, auth as $$
-declare uid uuid;
-begin
-  select id into uid from auth.users where lower(email) = lower(p_email);
-  if uid is null then
-    return 'No account found for ' || p_email ||
-           '. Create it first in Authentication → Users, then run this again.';
-  end if;
-  insert into cost_users (id, email, name, role)
-  values (uid, lower(p_email), coalesce(nullif(p_name, ''), p_email), p_role)
-  on conflict (id) do update
-    set name = excluded.name, role = excluded.role, active = true;
-  return p_email || ' can now use RCK Costing as ' || p_role || '.';
-end;
-$$;
 
 -- =====================================================================
 --  Jobs
@@ -161,30 +103,25 @@ create trigger cost_variations_touch before update on cost_variations
   for each row execute function cost_touch();
 
 -- =====================================================================
---  Access — signed in AND on the guest list, or nothing
+--  Access
+--
+--  Like RCK Workshop and RCK Dispatch, and unlike RCK HR, this is an
+--  internal tool with no logins: both devices use the same public "anon"
+--  key, so anyone who has the app URL and that key can read and write.
+--
+--  This database holds what every job made, so guard the key accordingly:
+--  it is deliberately left out of config.js, entered once per device in
+--  Settings instead, and the setup link that carries it should only ever
+--  go to the two of you.
 -- =====================================================================
-alter table cost_users      enable row level security;
 alter table cost_jobs       enable row level security;
 alter table cost_variations enable row level security;
 alter table cost_comments   enable row level security;
 
-drop policy if exists cost_users_self  on cost_users;
 drop policy if exists cost_jobs_rw     on cost_jobs;
 drop policy if exists cost_var_rw      on cost_variations;
 drop policy if exists cost_comments_rw on cost_comments;
 
--- A signed-in user may read their own guest-list row (that is how the app
--- knows whether to let them in). Nobody edits the guest list from the app;
--- that is done in the SQL editor on purpose.
-create policy cost_users_self on cost_users
-  for select to authenticated
-  using (id = auth.uid());
-
-create policy cost_jobs_rw on cost_jobs
-  for all to authenticated using (cost_member()) with check (cost_member());
-
-create policy cost_var_rw on cost_variations
-  for all to authenticated using (cost_member()) with check (cost_member());
-
-create policy cost_comments_rw on cost_comments
-  for all to authenticated using (cost_member()) with check (cost_member());
+create policy cost_jobs_rw     on cost_jobs      for all to anon, authenticated using (true) with check (true);
+create policy cost_var_rw      on cost_variations for all to anon, authenticated using (true) with check (true);
+create policy cost_comments_rw on cost_comments   for all to anon, authenticated using (true) with check (true);
