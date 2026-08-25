@@ -200,3 +200,14 @@ push to `main` updates it automatically.
 | `config.js` | Your Supabase URL and key |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
 | `sw.js` | Offline caching |
+
+## The other RCK apps in this repository
+
+Each is a separate app with its own database tables, and each installs to a phone on
+its own. They share nothing but the look, so a phone that knows one knows the others.
+
+| Folder | What it is |
+|---|---|
+| [`hr/`](hr/) | **RCK HR** — staff records, licences and compliance |
+| [`dispatch/`](dispatch/) | **RCK Dispatch** — jobs, site paperwork and the daily job diary |
+| [`costing/`](costing/) | **RCK Costing** — what a job was priced at, what it cost, and what it made (no database — it lives on the phone) |

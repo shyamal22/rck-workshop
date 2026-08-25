@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RCK Costing">
+  <rect width="512" height="512" rx="112" fill="#14171a"/>
+  <rect x="118" y="276" width="68" height="120" rx="26" fill="#3f464e"/>
+  <rect x="222" y="210" width="68" height="186" rx="26" fill="#3f464e"/>
+  <rect x="326" y="134" width="68" height="262" rx="26" fill="#facc15"/>
+</svg>
