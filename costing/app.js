@@ -248,20 +248,14 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
 }
-
 /* ================================================================
-   Settings and identity — kept per device
+   Settings — kept on this device, because everything is
    ================================================================ */
 const Settings = {
   read() {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem('rckc.settings') || '{}'); } catch (e) {}
-    return Object.assign({
-      supabaseUrl: SITE.supabaseUrl || '',
-      supabaseKey: SITE.supabaseKey || '',
-      name: '',
-      localMode: false
-    }, saved);
+    return Object.assign({ name: '', lastBackup: '' }, saved);
   },
   write(patch) {
     const next = Object.assign(Settings.read(), patch);
@@ -272,243 +266,158 @@ const Settings = {
 };
 let S = Settings.read();
 
-const connected = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 function whoami() { return S.name || 'Unnamed user'; }
 
 /* ================================================================
-   Local copy — the app opens instantly and still works with no signal
+   The data — held on this device and nowhere else
+
+   There is no server. The jobs, the variations and the comments live in
+   this browser's storage, which is what makes the app a single folder of
+   files on GitHub Pages with nothing behind it.
+
+   Two things follow, and the app is built around both:
+
+     · Every write is saved the moment it is made. There is nothing to
+       sync, nothing to queue, and nothing that can be in flight when the
+       phone loses signal — the app works the same with no connection at
+       all, because it never had one.
+
+     · This is the only copy. So the backup file is not a nicety here, it
+       is the safety net: Settings writes every job to one file, reads one
+       back, and the app says so when it has been a while.
    ================================================================ */
-const DB = { jobs: [], variations: [], comments: [], localSeq: 0 };
+const DB = { jobs: [], variations: [], comments: [], seq: 0 };
 
-function cacheKey() { return 'rckc.cache.' + (S.localMode ? 'local' : 'remote'); }
+const CACHE_KEY = 'rckc.data';
 
-function loadCache() {
-  DB.jobs = []; DB.variations = []; DB.comments = []; DB.localSeq = 0;
+function loadData() {
+  DB.jobs = []; DB.variations = []; DB.comments = []; DB.seq = 0;
   try {
-    const raw = JSON.parse(localStorage.getItem(cacheKey()) || 'null');
+    const raw = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
     if (raw) {
       DB.jobs = raw.jobs || [];
       DB.variations = raw.variations || [];
       DB.comments = raw.comments || [];
-      DB.localSeq = raw.localSeq || 0;
+      DB.seq = raw.seq || 0;
     }
   } catch (e) {}
+  // An older copy of the app, or a restored backup, may not carry the
+  // counter. Take it from the highest job number rather than start again
+  // at one and hand out a number that is already on a printed sheet.
+  const highest = DB.jobs.reduce((n, j) => Math.max(n, Number(j.number) || 0), 0);
+  if (DB.seq < highest) DB.seq = highest;
 }
-function saveCache() {
+
+/** Every write goes through here, so nothing can be entered and lost. */
+function saveData() {
   try {
-    localStorage.setItem(cacheKey(), JSON.stringify(DB));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      jobs: DB.jobs, variations: DB.variations, comments: DB.comments, seq: DB.seq
+    }));
+    return true;
   } catch (e) {
-    toast('Device storage is full.');
+    // The one failure that matters. Say it plainly rather than let somebody
+    // carry on typing into a form that is no longer keeping anything.
+    alert('This device is out of storage, so that change was NOT saved.\n\n' +
+          'Take a backup from Settings and clear some space on the phone.');
+    return false;
   }
-}
-
-function upsert(table, row) {
-  const list = DB[table];
-  const i = list.findIndex(r => r.id === row.id);
-  if (i >= 0) list[i] = Object.assign({}, list[i], row);
-  else list.push(row);
-}
-function drop(table, id) {
-  const list = DB[table];
-  const i = list.findIndex(r => r.id === id);
-  if (i >= 0) list.splice(i, 1);
-}
-
-/* The table each list is held in, so one name does for both ends. */
-const TABLES = { jobs: 'cost_jobs', variations: 'cost_variations', comments: 'cost_comments' };
-
-/* ================================================================
-   Supabase REST access
-   ================================================================ */
-function restHeaders(extra) {
-  return Object.assign({
-    apikey: S.supabaseKey,
-    Authorization: 'Bearer ' + S.supabaseKey
-  }, extra || {});
-}
-async function rest(path, opts) {
-  const base = S.supabaseUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/rest/v1/${path}`, opts);
-  if (!res.ok) {
-    let detail = '';
-    try { detail = (await res.json()).message || ''; } catch (e) {}
-    throw new Error(`${res.status} ${detail || res.statusText}`);
-  }
-  if (res.status === 204) return null;
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
-}
-
-/* ================================================================
-   Store — one interface, two backings (Supabase, or this device only)
-   ================================================================ */
-/* Work written on this device that the server has not taken yet — held in
-   the outbox until it can be sent. A pull must fold these back in, or the
-   server's answer silently deletes a job somebody has just entered: it
-   vanishes off the screen and out of the local copy while the only copy of
-   it sits in a queue nobody was told about. */
-function reconcile(list, fromServer) {
-  const table = TABLES[list];
-  const ops = Outbox.all().filter(op => op.table === table);
-  if (!ops.length) return fromServer;
-
-  const out = (fromServer || []).slice();
-  const byId = new Map(out.map((r, i) => [r.id, i]));
-
-  ops.forEach(op => {
-    if (op.kind === 'insert') {
-      // Not on the server yet — keep ours, and mark it so the app can say so.
-      if (!byId.has(op.row.id)) {
-        byId.set(op.row.id, out.length);
-        out.push(Object.assign({}, op.row, { _unsent: true }));
-      }
-    } else if (op.kind === 'patch') {
-      const i = byId.get(op.id);
-      if (i != null) out[i] = Object.assign({}, out[i], op.patch, { _unsent: true });
-    } else if (op.kind === 'delete') {
-      const i = byId.get(op.id);
-      if (i != null) { out.splice(i, 1); byId.clear(); out.forEach((r, j) => byId.set(r.id, j)); }
-    }
-  });
-  return out;
 }
 
 const Store = {
-  async pull() {
-    if (!connected()) return;
-    const [jobs, variations, comments] = await Promise.all([
-      rest('cost_jobs?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
-      rest('cost_variations?select=*&order=created_at.asc&limit=10000', { headers: restHeaders() }),
-      rest('cost_comments?select=*&order=at.asc&limit=10000', { headers: restHeaders() })
-    ]);
-    DB.jobs = reconcile('jobs', jobs || []);
-    DB.variations = reconcile('variations', variations || []);
-    DB.comments = reconcile('comments', comments || []);
-    saveCache();
-  },
-
-  async insert(list, row) {
-    const table = TABLES[list];
+  insert(list, row) {
     if (!row.id) row.id = uid();
     if (!row.created_at) row.created_at = new Date().toISOString();
-    if (!connected()) {
-      if (list === 'jobs' && !row.number) row.number = ++DB.localSeq;
-      upsert(list, row);
-      saveCache();
-      return row;
-    }
-    upsert(list, row);              // show it straight away
-    saveCache();
-    try {
-      const out = await rest(table, {
-        method: 'POST',
-        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
-        body: JSON.stringify(row)
-      });
-      const saved = Array.isArray(out) ? out[0] : out;
-      if (saved) { upsert(list, saved); saveCache(); }
-      return saved || row;
-    } catch (err) {
-      Outbox.add({ kind: 'insert', table, row });
-      return row;
-    }
+    if (list === 'jobs' && !row.number) row.number = ++DB.seq;
+    DB[list].push(row);
+    saveData();
+    return row;
   },
 
-  async patch(list, id, patch) {
-    upsert(list, Object.assign({ id }, patch));
-    saveCache();
-    if (!connected()) return;
-    try {
-      await rest(`${TABLES[list]}?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
-        body: JSON.stringify(patch)
-      });
-    } catch (err) {
-      Outbox.add({ kind: 'patch', table: TABLES[list], id, patch });
-    }
+  patch(list, id, patch) {
+    const arr = DB[list];
+    const i = arr.findIndex(r => r.id === id);
+    if (i < 0) return null;
+    arr[i] = Object.assign({}, arr[i], patch, { updated_at: new Date().toISOString() });
+    saveData();
+    return arr[i];
   },
 
-  async remove(list, id) {
-    drop(list, id);
-    saveCache();
-    if (!connected()) return;
-    try {
-      await rest(`${TABLES[list]}?id=eq.${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: restHeaders({ Prefer: 'return=minimal' })
-      });
-    } catch (err) {
-      Outbox.add({ kind: 'delete', table: TABLES[list], id });
-    }
+  remove(list, id) {
+    const arr = DB[list];
+    const i = arr.findIndex(r => r.id === id);
+    if (i >= 0) arr.splice(i, 1);
+    saveData();
+  },
+
+  /** A job takes its variations and its comments with it. */
+  removeJob(id) {
+    DB.variations = DB.variations.filter(v => v.job_id !== id);
+    DB.comments = DB.comments.filter(c => c.job_id !== id);
+    DB.jobs = DB.jobs.filter(j => j.id !== id);
+    saveData();
   }
 };
 
-/* ------------- outbox: writes made with no signal, replayed later ---- */
-const Outbox = {
-  all() {
-    try { return JSON.parse(localStorage.getItem('rckc.outbox') || '[]'); } catch (e) { return []; }
-  },
-  save(list) { localStorage.setItem('rckc.outbox', JSON.stringify(list)); },
-  add(op) {
-    const list = Outbox.all();
-    list.push(Object.assign({ opId: uid() }, op));
-    Outbox.save(list);
-    paintSync();
-  },
-  count() { return Outbox.all().length; },
-
-  /* Why the queue isn't draining. A dropped connection is normal and fixes
-     itself; a refusal from the database never does, and has to be put in
-     front of somebody. */
-  problem() {
-    try { return JSON.parse(localStorage.getItem('rckc.outbox.problem') || 'null'); } catch (e) { return null; }
-  },
-  setProblem(p) {
-    if (p) localStorage.setItem('rckc.outbox.problem', JSON.stringify(p));
-    else localStorage.removeItem('rckc.outbox.problem');
+/* ------------------------------------------------------------ backups */
+const Backup = {
+  /** Everything this device holds, in one file. */
+  make() {
+    return {
+      app: 'RCK Costing', version: VERSION, taken: new Date().toISOString(),
+      device: { name: S.name },
+      jobs: DB.jobs, variations: DB.variations, comments: DB.comments, seq: DB.seq
+    };
   },
 
-  async flush() {
-    if (!connected()) return;
-    const list = Outbox.all();
-    if (!list.length) { Outbox.setProblem(null); return; }
-    const left = [];
-    let refused = null;
-    for (const op of list) {
-      try {
-        if (op.kind === 'insert') {
-          await rest(op.table, {
-            method: 'POST',
-            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
-            body: JSON.stringify(op.row)
-          });
-        } else if (op.kind === 'delete') {
-          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
-            method: 'DELETE',
-            headers: restHeaders({ Prefer: 'return=minimal' })
-          });
-        } else {
-          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
-            method: 'PATCH',
-            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
-            body: JSON.stringify(op.patch)
-          });
-        }
-      } catch (err) {
-        left.push(op);
-        // A 4xx is the database saying no. Retrying forever won't help and
-        // whoever is using the app needs to know, in words, what it said.
-        if (/^\s*4\d\d/.test(err.message || '')) refused = err.message;
-      }
+  download() {
+    const blob = new Blob([JSON.stringify(Backup.make(), null, 2)], { type: 'application/json' });
+    saveAs(URL.createObjectURL(blob), `rck-costing-${today()}.json`);
+    Settings.write({ lastBackup: new Date().toISOString() });
+  },
+
+  /** Hand the file to whoever asks for it — the phone's share sheet, so it
+      can go straight into email, Files, or a message to the director. */
+  async share() {
+    const file = new File([JSON.stringify(Backup.make(), null, 2)],
+      `rck-costing-${today()}.json`, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'RCK Costing backup' });
+      Settings.write({ lastBackup: new Date().toISOString() });
+      return true;
     }
-    Outbox.save(left);
-    Outbox.setProblem(left.length && refused
-      ? { message: refused, at: new Date().toISOString(), count: left.length }
-      : null);
-    paintSync();
+    return false;
+  },
+
+  /** Read one back. Replaces everything, because a half-merged set of job
+      numbers is worse than either copy on its own. */
+  restore(text) {
+    const data = JSON.parse(text);
+    if (!data || !Array.isArray(data.jobs)) throw new Error('That is not an RCK Costing backup.');
+    DB.jobs = data.jobs || [];
+    DB.variations = data.variations || [];
+    DB.comments = data.comments || [];
+    DB.seq = Number(data.seq) || 0;
+    const highest = DB.jobs.reduce((n, j) => Math.max(n, Number(j.number) || 0), 0);
+    if (DB.seq < highest) DB.seq = highest;
+    saveData();
+    return DB.jobs.length;
+  },
+
+  /** Days since the last one was taken, or null if there has never been one. */
+  age() {
+    if (!S.lastBackup) return null;
+    const d = new Date(S.lastBackup);
+    if (isNaN(d)) return null;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
   }
 };
+
+/** Roughly how much of the browser's storage this is using, so the one
+    real limit of a device-only app isn't invisible until it bites. */
+function storageUsed() {
+  try { return (localStorage.getItem(CACHE_KEY) || '').length; } catch (e) { return 0; }
+}
 /* ================================================================
    Reading the data — every figure on every screen comes from here,
    and from nowhere else
@@ -714,8 +623,7 @@ const SCREENS = {
   'costs':     { title: 'Costs & claim', render: renderCosts,   back: true },
   'variation': { title: 'Variation',   render: renderVariation, back: true },
   'reports':   { title: 'Reports',     render: renderReports,   back: '#/', tab: 'reports' },
-  'settings':  { title: 'Settings',    render: renderSettings,  back: '#/' },
-  'join':      { title: 'Set up',      render: renderJoin }
+  'settings':  { title: 'Settings',    render: renderSettings,  back: '#/' }
 };
 
 const scrollMemory = {};
@@ -746,101 +654,99 @@ function render() {
   void view.offsetWidth;
   view.classList.add('enter');
 
-  // Until there is a name and somewhere to keep the figures, there is only
-  // one thing worth showing.
-  if (needsSetup() && path !== 'settings' && path !== 'join') {
+  // Until there is a name to put on the work, there is one thing worth showing.
+  if (needsSetup()) {
     renderWelcome(view);
     return;
   }
 
   screen.render(view, args);
-  paintUnsent(view);
+  if (path === '') paintBackupNudge(view);
 
   currentKey = path + '/' + args.join('/');
   const y = scrollMemory[currentKey];
   requestAnimationFrame(() => window.scrollTo(0, y || 0));
 }
-
 /* ================================================================
    Screen — the first time the app is opened
    ================================================================ */
-function needsSetup() {
-  return !S.name || (!connected() && !S.localMode);
-}
+function needsSetup() { return !S.name; }
 
 function renderWelcome(view) {
   view.innerHTML = `
     <div class="card">
       <h2>RCK Costing</h2>
       <p class="muted small">What a job was priced at, what it cost, what was claimed,
-        and what it made. Two things to set before it can be used: your name, and where
-        the figures are kept.</p>
-      <a class="btn primary wide mt" href="#/settings">Set it up</a>
-    </div>`;
-}
-
-/* ================================================================
-   Screen — one-tap setup from a shared link
-   The connection details ride in the URL's hash, which browsers never
-   send to the web server, so the key stays off the public site.
-   ================================================================ */
-function setupLink() {
-  return location.origin + location.pathname +
-    '#/join/' + encodeURIComponent(S.supabaseUrl) +
-    '/' + encodeURIComponent(S.supabaseKey);
-}
-
-function renderJoin(view, args) {
-  const url = args[0] || '';
-  const key = args[1] || '';
-  if (!url || !key) {
-    view.innerHTML = `<div class="empty"><b>That link is incomplete</b>
-      Ask for it again, or enter the details in Settings.</div>
-      <a class="btn wide" href="#/settings">Settings</a>`;
-    return;
-  }
-  view.innerHTML = `
-    <div class="card">
-      <h2>Connect this device</h2>
-      <p class="muted small">This link carries the RCK Costing database details.
-        Enter your name and you are in.</p>
+        and what it made. It keeps everything on this device — there is no account and
+        nothing to connect. One thing to enter first.</p>
       <label class="field"><span>Your name</span>
-        <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Shyamal"></label>
-      <button class="btn primary wide" id="jGo">Connect</button>
-      <p class="tiny muted mt mb0">Project <code>${esc(url.replace(/^https?:\/\//, ''))}</code></p>
+        <input type="text" id="wName" placeholder="e.g. Shyamal"></label>
+      <button class="btn primary wide" id="wGo">Start</button>
+      <p class="tiny muted mt mb0">It goes on the comments you write and on the sheets you print,
+        and can be changed in Settings.</p>
+    </div>
+
+    <div class="card">
+      <h2>Coming back to a phone you've used before?</h2>
+      <p class="muted small">If you have a backup file from another device, load it here and
+        every job comes with it.</p>
+      <button class="btn wide" id="wRestore">Restore from a backup</button>
     </div>`;
 
-  $('#jGo', view).onclick = async function () {
-    const name = $('#jName', view).value.trim();
+  const start = () => {
+    const name = $('#wName', view).value.trim();
     if (!name) return toast('Enter your name');
-    this.disabled = true;
-    this.textContent = 'Connecting…';
-    Settings.write({ name, supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, localMode: false });
-    loadCache();
-    await refresh();
-    toast('Connected');
-    go('#/');
+    Settings.write({ name });
+    render();
   };
+  $('#wGo', view).onclick = start;
+  $('#wName', view).onkeydown = e => { if (e.key === 'Enter') start(); };
+  $('#wRestore', view).onclick = () => pickBackup(() => {
+    if (!S.name) Settings.write({ name: 'Unnamed user' });
+    render();
+  });
 }
 
-/* Nothing on this device should ever be lost quietly. While anything is
-   still waiting to reach the database, say so on every screen — and if the
-   database refused it, say what it said, because that never fixes itself. */
-function paintUnsent(view) {
-  const n = Outbox.count();
-  if (!n) return;
-  const problem = Outbox.problem();
-  // Screens build themselves with innerHTML, so this goes in after them —
-  // at the top, where it is read before anything else on the page.
+/** The file picker for a backup, shared by the welcome screen and Settings. */
+function pickBackup(done) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const n = Backup.restore(String(reader.result));
+        toast(n ? `Restored ${plural(n, 'job')}` : 'Restored — the backup held no jobs');
+        if (done) done();
+      } catch (e) {
+        toast('Could not read that file: ' + e.message);
+      }
+    };
+    reader.onerror = () => toast('Could not read that file');
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+/* Nothing here is anywhere else. If it has been a while since the last
+   backup — or there has never been one — say so on the board, once there
+   is something worth losing. */
+function paintBackupNudge(view) {
+  if (!DB.jobs.length) return;
+  const age = Backup.age();
+  if (age != null && age < 30) return;
   const box = document.createElement('div');
-  box.className = 'banner' + (problem ? ' bad' : '');
-  box.innerHTML = problem
-    ? `<strong>${n} change${n > 1 ? 's have' : ' has'} not saved.</strong>
-       The database refused them, so waiting will not help:
-       <em>${esc(problem.message)}</em>
-       <a href="#/settings" style="display:inline-block;margin-top:8px;font-weight:640">What to do →</a>`
-    : `<strong>${n} change${n > 1 ? 's are' : ' is'} waiting to send.</strong>
-       They are safe on this device and will go as soon as there is a connection.`;
+  box.className = 'banner';
+  box.innerHTML = age == null
+    ? `<strong>These ${plural(DB.jobs.length, 'job')} are only on this device.</strong>
+       Nothing is stored anywhere else, so take a backup — it is one tap and one file.
+       <a href="#/settings" style="display:inline-block;margin-top:8px;font-weight:640">Back it up →</a>`
+    : `<strong>Last backup was ${plural(age, 'day')} ago.</strong>
+       This device holds the only copy of the figures.
+       <a href="#/settings" style="display:inline-block;margin-top:8px;font-weight:640">Back it up →</a>`;
   view.insertBefore(box, view.firstChild);
 }
 /* ================================================================
@@ -1239,63 +1145,37 @@ function renderJob(view, args) {
     </div>`;
 
   /* Status is changed here because this is where it is noticed. */
-  $('#st', view).onchange = async function () {
-    const before = j.status;
-    this.disabled = true;
-    try {
-      await Store.patch('jobs', j.id, { status: this.value });
-      toast('Marked ' + statusLabel(this.value).toLowerCase());
-      render();
-    } catch (e) {
-      this.value = before;
-      this.disabled = false;
-      toast('Could not save: ' + e.message);
-    }
+  $('#st', view).onchange = function () {
+    Store.patch('jobs', j.id, { status: this.value });
+    toast('Marked ' + statusLabel(this.value).toLowerCase());
+    render();
   };
 
   $$('.varrow', view).forEach(b => b.onclick = () => go('#/variation/' + j.id + '/' + b.dataset.id));
 
-  $('#cAdd', view).onclick = async function () {
+  $('#cAdd', view).onclick = function () {
     const body = $('#cNew', view).value.trim();
     if (!body) return toast('Write something first');
-    this.disabled = true;
-    this.textContent = 'Posting…';
-    try {
-      await Store.insert('comments', {
-        job_id: j.id, body, author: whoami(), at: new Date().toISOString()
-      });
-      render();
-    } catch (e) {
-      this.disabled = false;
-      this.textContent = 'Post comment';
-      toast('Could not post: ' + e.message);
-    }
+    Store.insert('comments', { job_id: j.id, body, author: whoami(), at: new Date().toISOString() });
+    render();
   };
 
-  $$('[data-del]', view).forEach(b => b.onclick = async e => {
+  $$('[data-del]', view).forEach(b => b.onclick = e => {
     e.stopPropagation();
     if (!confirm('Delete this comment? It cannot be brought back.')) return;
-    try {
-      await Store.remove('comments', b.dataset.del);
-      render();
-    } catch (err) { toast('Could not delete: ' + err.message); }
+    Store.remove('comments', b.dataset.del);
+    render();
   });
 
   $('#print', view).onclick = () => printJobSheet(j);
 
-  $('#del', view).onclick = async () => {
+  $('#del', view).onclick = () => {
     if (!confirm(`Delete ${jobNo(j)} — ${j.name}?\n\nIts variations and comments go with it. ` +
-                 'This cannot be undone.')) return;
-    if (!confirm('Really delete it? Print the costing sheet first if you want a copy.')) return;
-    try {
-      // The database removes the job's variations and comments with it;
-      // the copy on this device has to be told.
-      varsFor(j.id).forEach(v => drop('variations', v.id));
-      commentsFor(j.id).forEach(c => drop('comments', c.id));
-      await Store.remove('jobs', j.id);
-      toast('Deleted');
-      go('#/');
-    } catch (e) { toast('Could not delete: ' + e.message); }
+                 'This cannot be undone, and there is no copy anywhere else.')) return;
+    if (!confirm('Really delete it? Print the costing sheet first if you want a record.')) return;
+    Store.removeJob(j.id);
+    toast('Deleted');
+    go('#/');
   };
 }
 
@@ -1372,7 +1252,7 @@ function renderJobEdit(view, args) {
     typeSel.value = key;
   };
 
-  $('#save', view).onclick = async function () {
+  $('#save', view).onclick = function () {
     const name = $('#name', view).value.trim();
     if (!name) return toast('Give the job a name');
     if (typeSel.value === '__new') return toast('Pick the type of work');
@@ -1393,22 +1273,14 @@ function renderJobEdit(view, args) {
       status: $('#status', view).value
     };
 
-    this.disabled = true;
-    this.textContent = 'Saving…';
-    try {
-      if (editing) {
-        await Store.patch('jobs', editing.id, data);
-        toast('Saved');
-        go('#/job/' + editing.id);
-      } else {
-        const saved = await Store.insert('jobs', Object.assign({ created_by: whoami() }, data));
-        toast(connected() ? 'Job created — now price it' : 'Saved on this device');
-        go('#/costs/' + saved.id);
-      }
-    } catch (e) {
-      this.disabled = false;
-      this.textContent = editing ? 'Save details' : 'Create the job';
-      toast('Could not save: ' + e.message);
+    if (editing) {
+      Store.patch('jobs', editing.id, data);
+      toast('Saved');
+      go('#/job/' + editing.id);
+    } else {
+      const saved = Store.insert('jobs', Object.assign({ created_by: whoami() }, data));
+      toast('Job created — now price it');
+      go('#/costs/' + saved.id);
     }
   };
 }
@@ -1480,26 +1352,17 @@ function renderCosts(view, args) {
   wireSum('ex', view);
   wireSum('ac', view);
 
-  $('#save', view).onclick = async function () {
-    const data = {
+  $('#save', view).onclick = () => {
+    Store.patch('jobs', j.id, {
       contract_value: readMoney($('#agreed', view).value),
       expected_costs: readCosts('ex', view),
       actual_costs: readCosts('ac', view),
       claim_value: readMoney($('#claim', view).value),
       invoice_ref: $('#inv', view).value.trim(),
       claimed_on: $('#claimed', view).value || null
-    };
-    this.disabled = true;
-    this.textContent = 'Saving…';
-    try {
-      await Store.patch('jobs', j.id, data);
-      toast('Saved');
-      go('#/job/' + j.id);
-    } catch (e) {
-      this.disabled = false;
-      this.textContent = 'Save the figures';
-      toast('Could not save: ' + e.message);
-    }
+    });
+    toast('Saved');
+    go('#/job/' + j.id);
   };
 }
 
@@ -1571,7 +1434,7 @@ function renderVariation(view, args) {
   $('#vk', view).oninput = paint;
   paint();
 
-  $('#save', view).onclick = async function () {
+  $('#save', view).onclick = () => {
     const title = $('#vt', view).value.trim();
     if (!title) return toast('Say what the variation is');
     const data = {
@@ -1582,32 +1445,19 @@ function renderVariation(view, args) {
       claim_value: readMoney($('#vk', view).value),
       dated: $('#vdate', view).value || null
     };
-    this.disabled = true;
-    this.textContent = 'Saving…';
-    try {
-      if (editing) {
-        await Store.patch('variations', editing.id, data);
-      } else {
-        await Store.insert('variations', Object.assign({ job_id: j.id, created_by: whoami() }, data));
-      }
-      toast('Saved');
-      go('#/job/' + j.id);
-    } catch (e) {
-      this.disabled = false;
-      this.textContent = editing ? 'Save the variation' : 'Add the variation';
-      toast('Could not save: ' + e.message);
-    }
+    if (editing) Store.patch('variations', editing.id, data);
+    else Store.insert('variations', Object.assign({ job_id: j.id, created_by: whoami() }, data));
+    toast('Saved');
+    go('#/job/' + j.id);
   };
 
   const del = $('#del', view);
-  if (del) del.onclick = async () => {
+  if (del) del.onclick = () => {
     if (!confirm('Delete this variation? If the client turned it down, set it to Declined ' +
                  'instead — that keeps it on the record and out of the totals.')) return;
-    try {
-      await Store.remove('variations', editing.id);
-      toast('Deleted');
-      go('#/job/' + j.id);
-    } catch (e) { toast('Could not delete: ' + e.message); }
+    Store.remove('variations', editing.id);
+    toast('Deleted');
+    go('#/job/' + j.id);
   };
 }
 
@@ -1744,11 +1594,13 @@ function renderReports(view) {
   $('#cJobs', view).onclick = () => exportJobsCsv(list);
   $('#cVars', view).onclick = () => exportVarsCsv(list);
 }
-
 /* ================================================================
    Screen — settings
    ================================================================ */
 function renderSettings(view) {
+  const age = Backup.age();
+  const kb = Math.max(1, Math.round(storageUsed() / 1024));
+
   view.innerHTML = `
     <div class="card">
       <h2>You</h2>
@@ -1759,87 +1611,54 @@ function renderSettings(view) {
     </div>
 
     <div class="card">
-      <h2>Where the figures are kept</h2>
-      <p class="muted small">Two values from Supabase → Settings → API. Both devices that enter the
-        same two see the same jobs. Leave them blank and use <strong>this device only</strong> below
-        instead — the app works either way.</p>
-      <label class="field"><span>Project URL</span>
-        <input type="text" id="sUrl" value="${esc(S.supabaseUrl)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" spellcheck="false"></label>
-      <label class="field"><span>Anon public key</span>
-        <input type="text" id="sKey" value="${esc(S.supabaseKey)}" placeholder="eyJhbGciOi…" autocapitalize="off" spellcheck="false"></label>
-      <div class="btn-row">
-        <button class="btn" id="test">Test connection</button>
-        <button class="btn primary" id="saveDb">Save &amp; connect</button>
+      <h2>Backups</h2>
+      <p class="muted small">This device holds the only copy of the figures. A backup is one file
+        with every job, variation and comment in it — keep it in email or in Files, and it can be
+        loaded back onto this phone or a new one.</p>
+      <table class="data kvtable">
+        <tr><th>Last backup</th><td class="r">${
+          age == null ? '<span class="neg">never</span>'
+          : age === 0 ? 'today'
+          : age < 30 ? plural(age, 'day') + ' ago'
+          : `<span class="neg">${plural(age, 'day')} ago</span>`}</td></tr>
+        <tr><th>Jobs held</th><td class="r">${DB.jobs.length}</td></tr>
+      </table>
+      <div class="btn-row mt">
+        <button class="btn primary" id="send">Send a backup</button>
+        <button class="btn" id="save">${icon('download')}Save the file</button>
       </div>
-      <div id="testOut" class="small mt"></div>
+      <button class="btn wide mt" id="restore">Restore from a backup</button>
+      <p class="tiny muted mt mb0"><strong>Send</strong> opens the phone's share sheet — email it to
+        yourself, or to the director so he has a copy. <strong>Restore</strong> replaces everything
+        on this device with what is in the file.</p>
     </div>
 
-    ${connected() ? `
     <div class="card">
-      <h2>Set up the other device</h2>
-      <p class="muted small">Send this link to the director. One tap connects their phone —
-        they never type the key. Treat it like a key: it opens the figures for anyone who has it.</p>
-      <label class="field"><span>Setup link</span>
-        <input type="text" id="sLink" value="${esc(setupLink())}" readonly onclick="this.select()"></label>
-      <div class="btn-row">
-        <button class="btn primary" id="shareLink">Share link</button>
-        <button class="btn" id="copyLink">Copy link</button>
-      </div>
-    </div>` : ''}
-
-    <div class="card">
-      <h2>Use it without a database</h2>
-      <p class="muted small">Everything works, but the figures stay on this device only —
-        nothing is shared and nothing is backed up anywhere. Fine if you are the only one
-        entering jobs and you print the sheets to PDF.</p>
-      <label class="field"><span>Mode</span>
-        <select id="sLocal">
-          <option value="0" ${!S.localMode ? 'selected' : ''}>Shared (Supabase)</option>
-          <option value="1" ${S.localMode ? 'selected' : ''}>This device only</option>
-        </select></label>
-      <button class="btn wide" id="saveMode">Switch mode</button>
-      ${S.localMode ? `<p class="tiny muted mt mb0">Take a backup now and then — the button is
-        further down. It is the only copy there is.</p>` : ''}
+      <h2>Where it all lives</h2>
+      <p class="muted small">There is no account, no server and no database. The app is a handful of
+        files on GitHub Pages, and the figures are in this browser's own storage.</p>
+      <ul class="plain small">
+        <li><strong>Install it to the home screen</strong> and keep it there. On an iPhone a site
+          that is only ever visited in Safari can have its storage cleared after a few weeks of not
+          being opened; an installed app is not treated that way.</li>
+        <li>Clearing the browser's website data, deleting the installed app, or a new phone all take
+          the figures with them. The backup file is what survives any of that.</li>
+        <li>The director sees the figures when you send him a printed sheet or a backup file —
+          nothing syncs between phones by itself.</li>
+      </ul>
     </div>
-
-    ${Outbox.count() ? `
-    <div class="card">
-      <h2>${Outbox.count()} change${Outbox.count() > 1 ? 's' : ''} waiting to send</h2>
-      ${Outbox.problem() ? `
-        <div class="banner bad">The database refused them, so they will not go on their own.
-          <em>${esc(Outbox.problem().message)}</em></div>
-        ${/column|schema cache|PGRST204/i.test(Outbox.problem().message) ? `
-          <p class="muted small"><strong>This one has a known cause.</strong> The database was set up
-          from an older copy of <code>supabase-schema.sql</code> and is missing a column the app now
-          sends. Open Supabase → SQL Editor, paste the current <code>supabase-schema.sql</code> and
-          press Run — it is safe over a live database and adds what is missing. Then come back here
-          and press <strong>Try again</strong>. Nothing is lost in the meantime.</p>` : ''}
-      ` : '<p class="muted small">They are safe on this device and go as soon as there is a connection.</p>'}
-      <div class="btn-row">
-        <button class="btn primary" id="retry">Try again now</button>
-        <button class="btn" id="backup">${icon('download')}Download a backup</button>
-      </div>
-    </div>` : ''}
 
     <div class="card">
       <h2>Status</h2>
       <table class="data kvtable">
-        <tr><th>Figures kept</th><td class="r">${S.localMode ? 'On this device only'
-          : connected() ? 'Shared database' : 'Not set up'}</td></tr>
         <tr><th>Jobs</th><td class="r">${DB.jobs.length}</td></tr>
         <tr><th>Variations</th><td class="r">${DB.variations.length}</td></tr>
         <tr><th>Comments</th><td class="r">${DB.comments.length}</td></tr>
-        <tr><th>Waiting to send</th><td class="r">${Outbox.count()}</td></tr>
+        <tr><th>Storage used</th><td class="r">${kb} KB</td></tr>
         <tr><th>Version</th><td class="r">${VERSION}${updateReady
           ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
       </table>
-      <div class="btn-row mt">
-        <button class="btn sm" id="refresh">Refresh now</button>
-        <button class="btn sm" id="backupAll">Download a backup</button>
-        <button class="btn sm" id="clear">Clear this device</button>
-      </div>
-      <p class="tiny muted mt mb0">The backup is one file holding every job, variation and comment
-        this device knows about — for the accountant, or for peace of mind.</p>
+      <button class="btn wide mt" id="clear">Clear everything on this device</button>
     </div>`;
 
   $('#saveMe', view).onclick = () => {
@@ -1850,115 +1669,37 @@ function renderSettings(view) {
     render();
   };
 
-  $('#test', view).onclick = async function () {
-    const out = $('#testOut', view);
-    const url = $('#sUrl', view).value.trim().replace(/\/+$/, '');
-    const key = $('#sKey', view).value.trim();
-    if (!url || !key) { out.textContent = 'Fill in both fields first.'; return; }
-    out.textContent = 'Checking…';
-    try {
-      const res = await fetch(`${url}/rest/v1/cost_jobs?select=id&limit=1`, {
-        headers: { apikey: key, Authorization: 'Bearer ' + key }
-      });
-      if (res.ok) out.innerHTML = '<span style="color:var(--green)">Connected. The database is ready.</span>';
-      else if (res.status === 404) out.innerHTML = '<span style="color:var(--red)">Reached Supabase, but the tables are missing. Run supabase-schema.sql first.</span>';
-      else out.innerHTML = `<span style="color:var(--red)">Supabase said ${res.status}. Check the key is the <em>anon public</em> one.</span>`;
-    } catch (e) {
-      out.innerHTML = '<span style="color:var(--red)">Could not reach that URL.</span>';
-    }
-  };
+  $('#save', view).onclick = () => { Backup.download(); toast('Backup saved'); render(); };
 
-  $('#saveDb', view).onclick = async () => {
-    Settings.write({
-      supabaseUrl: $('#sUrl', view).value.trim().replace(/\/+$/, ''),
-      supabaseKey: $('#sKey', view).value.trim(),
-      localMode: false
-    });
-    loadCache();
-    await refresh();
-    toast('Connected');
-    render();
-  };
-
-  const share = $('#shareLink', view);
-  if (share) {
-    const link = setupLink();
-    const copy = async () => {
-      try {
-        await navigator.clipboard.writeText(link);
-        toast('Link copied — paste it into a text or email');
-      } catch (e) {
-        $('#sLink', view).select();
-        toast('Press and hold the link above to copy it');
-      }
-    };
-    share.onclick = async () => {
-      if (navigator.share) {
-        try {
-          await navigator.share({ title: 'RCK Costing setup', text: 'Tap this to set up RCK Costing', url: link });
-          return;
-        } catch (e) { /* cancelled, or not allowed — fall back to copying */ }
-      }
-      copy();
-    };
-    $('#copyLink', view).onclick = copy;
-  }
-
-  $('#saveMode', view).onclick = async () => {
-    Settings.write({ localMode: $('#sLocal', view).value === '1' });
-    loadCache();
-    await refresh();
-    render();
-  };
-
-  /* Everything this device holds, in one file. The last resort that means
-     no amount of going wrong can put the work beyond reach. */
-  function downloadBackup() {
-    const dump = {
-      app: 'RCK Costing', version: VERSION, taken: new Date().toISOString(),
-      device: { name: S.name, localMode: S.localMode },
-      waitingToSend: Outbox.all(),
-      problem: Outbox.problem(),
-      jobs: DB.jobs, variations: DB.variations, comments: DB.comments
-    };
-    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
-    saveAs(URL.createObjectURL(blob), `rck-costing-backup-${today()}.json`);
-    toast('Backup saved');
-  }
-
-  const retry = $('#retry', view);
-  if (retry) retry.onclick = async function () {
+  $('#send', view).onclick = async function () {
     this.disabled = true;
-    this.textContent = 'Sending…';
-    await Outbox.flush();
-    await refresh();
-    const left = Outbox.count();
-    toast(left ? `${left} still waiting — see the message above` : 'All sent');
+    try {
+      if (await Backup.share()) { toast('Sent'); render(); return; }
+    } catch (e) { this.disabled = false; return; }   // cancelled from the share sheet
+    // No share sheet on this device — saving the file does the same job.
+    Backup.download();
+    toast('Saved to this device — attach it from Files');
     render();
   };
-  const b1 = $('#backup', view);    if (b1) b1.onclick = downloadBackup;
-  const b2 = $('#backupAll', view); if (b2) b2.onclick = downloadBackup;
 
-  $('#refresh', view).onclick = async () => { await refresh(); toast('Up to date'); render(); };
+  $('#restore', view).onclick = () => {
+    if (DB.jobs.length && !confirm(
+      `Restoring replaces the ${plural(DB.jobs.length, 'job')} on this device with whatever is ` +
+      'in the file.\n\nSave a backup of what is here first if you are not sure.')) return;
+    pickBackup(render);
+  };
 
   $('#clear', view).onclick = () => {
-    const waiting = Outbox.count();
-    if (waiting) {
-      // This is the one button that can destroy work. Make it take a backup first.
-      if (!confirm(`${waiting} change(s) have not reached the database yet.\n\n` +
-                   'Clearing now would destroy them for good. A backup file will be saved first.')) return;
-      downloadBackup();
-      if (!confirm('Backup saved. Clear this device now?')) return;
-    } else if (!confirm(S.localMode
-      ? 'This device holds the only copy of these figures. Clearing wipes them for good. Carry on?'
-      : 'Clear the copy held on this device? The shared database is not touched.')) {
-      return;
-    }
-    localStorage.removeItem(cacheKey());
-    localStorage.removeItem('rckc.outbox');
-    localStorage.removeItem('rckc.outbox.problem');
-    DB.jobs = []; DB.variations = []; DB.comments = []; DB.localSeq = 0;
-    refresh().then(render);
+    if (!DB.jobs.length) { toast('There is nothing to clear'); return; }
+    // This is the one button that can destroy the lot. Make it take a backup first.
+    if (!confirm(`This wipes ${plural(DB.jobs.length, 'job')} and everything on them, for good.\n\n` +
+                 'A backup file will be saved first.')) return;
+    Backup.download();
+    if (!confirm('Backup saved. Clear this device now?')) return;
+    DB.jobs = []; DB.variations = []; DB.comments = []; DB.seq = 0;
+    saveData();
+    toast('Cleared');
+    render();
   };
 }
 
@@ -2278,49 +2019,6 @@ function printSummary(list, from, to) {
 
   printDoc(html, 'Job costing summary');
 }
-
-/* ================================================================
-   Sync loop
-   ================================================================ */
-let syncState = 'idle';
-
-function paintSync() {
-  const dot = $('#syncDot');
-  if (!dot) return;
-  const pending = Outbox.count();
-  dot.className = 'dot ' + (syncState === 'bad' ? 'bad' : pending ? 'warn'
-    : connected() || S.localMode ? 'ok' : '');
-  dot.title = S.localMode ? 'This device only'
-    : !connected() ? 'Not set up'
-    : pending ? `${pending} change(s) waiting to send`
-    : syncState === 'bad' ? 'No connection — showing the last copy'
-    : 'Connected';
-}
-
-async function refresh() {
-  if (!connected()) { syncState = 'idle'; paintSync(); return; }
-  try {
-    await Outbox.flush();
-    await Store.pull();
-    syncState = 'ok';
-  } catch (e) {
-    syncState = 'bad';
-  }
-  paintSync();
-}
-
-let pollTimer = null;
-function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    if (document.hidden || !connected()) return;
-    const before = JSON.stringify([DB.jobs.length, DB.variations.length, DB.comments.length]);
-    await refresh();
-    const after = JSON.stringify([DB.jobs.length, DB.variations.length, DB.comments.length]);
-    if (before !== after && route.path === '') render();
-  }, 30000);
-}
-
 /* ================================================================
    Boot
    ================================================================ */
@@ -2343,8 +2041,14 @@ window.addEventListener('scroll', () => {
 }, { passive: true });
 
 window.addEventListener('hashchange', render);
-window.addEventListener('online', () => refresh().then(render));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+/* Another tab or window of the app has written something. There is no
+   server to tell this one, but the browser will. */
+window.addEventListener('storage', e => {
+  if (e.key !== CACHE_KEY) return;
+  loadData();
+  render();
+});
 
 function watchForUpdate(reg) {
   const seen = w => {
@@ -2361,13 +2065,9 @@ function watchForUpdate(reg) {
   reg.addEventListener('updatefound', () => seen(reg.installing));
 }
 
-(async function boot() {
-  loadCache();
-  paintSync();
+(function boot() {
+  loadData();
   render();
-  await refresh();
-  render();
-  startPolling();
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then(reg => {
       watchForUpdate(reg);

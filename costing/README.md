@@ -1,12 +1,30 @@
 # RCK Costing
 
 What each job was priced at, what it actually cost, what was claimed from the client,
-and what it made. Built for two people — you and the director — and set up the same
-way as RCK Dispatch: no logins, one key entered once per device, or no database at
-all if the figures only ever need to live on yours.
+and what it made.
+
+It is a home-screen app on your phone and nothing else. No account, no server, no
+database — the jobs live in the phone's own storage, the app itself is a handful of
+files served by GitHub Pages, and what leaves it is a printed PDF you send to whoever
+needs it.
 
 **Green** = money made · **Red** = money lost · **an em dash** = nobody has entered
 that number yet, which is never the same as a zero.
+
+---
+
+## Putting it on your phone
+
+1. Open **https://shyamal22.github.io/rck-workshop/costing/** in the phone's browser.
+2. **Add to Home Screen** — the Share menu on an iPhone, ⋮ on Android.
+3. Open it from the home screen, type your name, tap **Start**.
+
+That's the whole setup. There is nothing to connect and nothing to sign into, and from
+then on it works with no signal at all — it never had one.
+
+**Keep it on the home screen.** On an iPhone, a site that is only ever visited in
+Safari can have its stored data cleared after a few weeks of not being opened. An
+installed app is not treated that way, which is why step 2 matters.
 
 ---
 
@@ -36,14 +54,14 @@ that number yet, which is never the same as a zero.
 - Against that, what it was *priced* to make, and how far it landed either side of it.
 
 **Comments**
-- The two of you, on the record, against the job: why labour ran over, what to price
-  differently next time, what the client said. Each one signed and dated by itself.
+- Why labour ran over, what to price differently next time, what the client said. Each
+  one signed with your name and dated.
 
 **Reports** — this month, last month, a financial year, or between any two dates:
 - Claimed, cost, profit and margin for the period, with the best and worst job in it.
 - Every job in the period as a table, and the same thing as a printed summary.
 - **Print the costing sheet** for any one job: the estimate against the actual, every
-  variation, the claim, the profit, and the comments — one page, letterheaded.
+  variation, the claim, the profit, and the comments — letterheaded, on one page.
 - **CSV** of every job with all its cost lines, and of every variation, for Excel.
 
 A job only joins a total once both its actual cost and its claim are in. Until then it
@@ -53,55 +71,6 @@ a total that reads worse than no total at all.
 All figures exclude GST.
 
 ---
-
-## Setting it up
-
-Two ways, and the app works the same either way. Pick the first if the director
-wants to see the jobs on his own phone; pick the second if you are the only one
-entering them and all you do is print the sheet to PDF and send it on.
-
-### Either: this device only, in about a minute
-
-1. Open the app URL in the browser, **Add to Home Screen**.
-2. **Settings** → enter your name → **Save**.
-3. **Use it without a database** → *This device only* → **Switch mode**.
-
-That's it. The figures live on that one device. Nothing is shared, and nothing is
-backed up anywhere — so take a backup now and then from **Settings → Download a
-backup**, because it is the only copy there is.
-
-### Or: shared between the two of you, in about fifteen
-
-**The database, once:**
-
-1. Go to [supabase.com](https://supabase.com) and create a free account.
-2. **New project** — any name, pick the Sydney region, set a database password
-   (you won't need it again, but save it somewhere).
-   It can be the same project as RCK Workshop, Dispatch and HR — no names clash.
-3. Wait about two minutes for the project to build.
-4. **SQL Editor → New query**, paste the whole of `supabase-schema.sql` from this
-   folder, press **Run**. It should say *Success*.
-5. **Settings → API** and copy two things:
-   - **Project URL** — looks like `https://abcdefgh.supabase.co`
-   - **anon public** key — a long string starting `eyJ…`
-     (The *anon public* one. Never `service_role`.)
-
-The free tier is far more than this app will ever need.
-
-**Your device:** open the app, go to **Settings → Where the figures are kept**, paste
-the two values in, press **Test connection** — it says in words if anything is wrong —
-then **Save & connect**.
-
-**The director's device:** on your phone, **Settings → Set up the other device →
-Share link**, and send him that link. One tap connects him: he enters his name and
-he's in, never typing the key. Because the details ride in the URL's `#` fragment
-they are never sent to the web server.
-
-`config.js` is deliberately left **blank**. This repository and the published site
-are public, so putting the key in that file would publish it — and this app holds
-what every job made. Entering it once per device keeps it off the public page.
-Treat the setup link the same way: anyone who has it can read and write the figures,
-so it only ever goes to the two of you.
 
 ## Using it
 
@@ -118,44 +87,67 @@ The order the app expects, and the order the money actually becomes known:
 Every box you leave empty stays empty. The app never turns a blank into a zero, and it
 never shows a profit worked out from a number nobody has entered.
 
+**Sending a job to the team.** Open the job → **Print the costing sheet** → choose
+*Save as PDF* in the print dialog → share it from there. Same for the period summary
+under Reports. Nothing else leaves the phone.
+
+---
+
+## The one thing to remember: back it up
+
+Your phone holds the only copy. There is no server keeping a second one.
+
+**Settings → Send a backup** writes every job, variation and comment into a single file
+and hands it to the phone's share sheet — email it to yourself once a month and you can
+never lose more than a month. **Save the file** does the same into Files instead.
+
+**Settings → Restore from a backup** reads one back, onto this phone or a new one. It
+replaces everything on the device, so it is how you move to a new phone, not how you
+merge two.
+
+The board tells you when it has been more than a month, or when you have never taken
+one at all. It is the only nagging the app does, and it is worth listening to.
+
+If the director wants his own copy, send him the backup file and he can load it into the
+same app on his phone — but the two phones don't talk to each other. Whichever one you
+enter the jobs on is the one that has them.
+
 ---
 
 ## Hosting it
 
-Plain HTML, CSS and JavaScript — no build step, no server. GitHub Pages serves it from
-this repository along with the other apps, so it is live at
-`https://shyamal22.github.io/rck-workshop/costing/` and updates on every push to `main`.
+Plain HTML, CSS and JavaScript — no build step, no server, no dependencies. GitHub Pages
+serves it from this repository alongside the other RCK apps:
 
-Nothing links to it from anywhere. Bookmark it, or install it to the home screen, and
-that is the whole of the distribution — what leaves the app is a printed PDF.
+**Settings → Pages → Source: Deploy from a branch → Branch `main`, folder `/ (root)` → Save**
+
+It is live at `https://shyamal22.github.io/rck-workshop/costing/` a minute later, and
+every push to `main` updates it — the app checks for a new version whenever you open it
+and says so in Settings when one is ready.
+
+Nothing links to it from anywhere. The home-screen icon is the whole of the distribution.
 
 ---
 
 ## Things worth knowing
 
-- **No logins.** Both devices share one key, so anyone holding that key can read and
-  write. That's the same bargain as the workshop and dispatch apps — nothing to
-  remember, nothing to lose — but it is a bargain, and this app holds the margins.
-  Don't publish the app link with the key, and don't hand the setup link on.
-- **A bad connection is fine.** The app opens from its own copy and shows the last
-  figures it had. Anything entered with no signal is kept on the device and sent as
-  soon as there is a connection — the dot next to the title turns orange while
-  something is waiting, and every screen says so until it has gone.
+- **Nothing is shared, ever.** No key, no link, no sync. The figures are on the phone
+  they were entered on. That is also the security: there is nothing on the internet to
+  find, and the published app is an empty shell until someone types into it.
+- **It works with no signal**, including on a plane or down a hole, because it never
+  asks the network for anything after the first visit.
 - **Cost lines aren't fixed.** Add one to `COST_LINES` in `app.js` and both forms, the
-  comparison table, the printed sheet and the CSV all grow the line by themselves — the
-  database needs no change, because the breakdown is stored as a map.
+  comparison table, the printed sheet and the CSV all grow the line by themselves.
 - **Types of work aren't a fixed list either.** Pick **+ Add a new type…** when creating
   a job and name it; from then on it's a type like any other. Naming one that already
   exists in a different spelling reuses the existing one.
 - **A job's period** is the month it was *claimed* in, or if it hasn't been claimed, the
   month it was last on site. So a job that ran in March and was claimed in April lands
   in April, where the accountant will look for it.
-- **Deleting a job** takes its variations and comments with it and cannot be undone. It
-  asks twice. Print the costing sheet first if there's any doubt.
-- **Switching between shared and this-device-only** doesn't merge anything: each mode
-  keeps its own copy, and switching back finds what was there before.
-- **Reports print** through the browser's print dialog — choose *Save as PDF* to email
-  or file one.
+- **Deleting a job** takes its variations and comments with it, cannot be undone, and
+  there is no copy anywhere else. It asks twice. Print the sheet first if there's doubt.
+- **Clearing the browser's website data** or deleting the installed app takes everything
+  with it. So does a lost phone. The backup file is what survives all three.
 
 ## Files
 
@@ -164,9 +156,8 @@ that is the whole of the distribution — what leaves the app is a printed PDF.
 | `index.html` | Page shell |
 | `app.js` | The whole application |
 | `app.css` | Styling, including the printed sheets |
-| `config.js` | The letterhead (the Supabase key is left blank on purpose) |
-| `supabase-schema.sql` | Run once in Supabase to create the database |
-| `sw.js` | Offline caching of the app itself |
+| `config.js` | The letterhead on the printed sheets |
+| `sw.js` | Caches the app so it opens with no connection |
 
 ## The other RCK apps in this repository
 

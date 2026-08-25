@@ -1,7 +1,11 @@
 /* RCK Costing service worker.
-   The app shell is cached so it opens instantly and still works with no
-   connection. Supabase calls are never cached — the figures must always be
-   live, and the app keeps its own copy of them for when they aren't. */
+
+   The app is cached in full, so it opens with no connection at all — which
+   is the normal case, not the exception: the figures live in the browser's
+   own storage and nothing is ever fetched from anywhere.
+
+   The cache is only ever the app itself. No job, no figure and no backup
+   passes through here. */
 const CACHE = 'rck-costing-v1';
 const ASSETS = [
   './', './index.html', './app.css', './app.js', './config.js',
@@ -28,11 +32,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-
-  // Anything that isn't our own app shell — Supabase — goes to the network.
   if (url.origin !== location.origin) return;
 
-  // Network-first for the app itself, so a deploy reaches everyone next open.
+  // Network-first for the app itself, so a push to GitHub reaches the phone
+  // next time it opens; the cache answers when there is no signal.
   //
   // 'no-cache' is the important word. Without it this fetch is answered by
   // the browser's own cache, which GitHub Pages lets hold a file for ten
