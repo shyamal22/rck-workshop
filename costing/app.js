@@ -60,13 +60,15 @@ const BUILTIN_WORK_TYPES = [
 
 /* ---------------------------------------------------------- cost lines */
 /* The breakdown both estimates and actuals are entered against, so
-   expected and actual can be read side by side and the overrun can be
-   pointed at rather than guessed. Every line is optional: an empty box
-   means nobody has said yet, and is never counted as a zero.
+   expected and actual can be read side by side. Every line is optional: an
+   empty box means nobody has said yet, and is never counted as a zero.
 
-   Adding a line here is all it takes — the two forms, the comparison
-   table, the printed sheet and the CSV all build themselves from it, and
-   the database needs no change because the breakdown is stored as a map. */
+   These are the ones the app starts with. Any other — accommodation, a
+   stay-away allowance, whatever this job happened to need — is added from
+   the Costs screen when it comes up, and from then on it is a line like
+   any other: on both forms, on the printed sheet, in the CSV. That works
+   because a breakdown is stored as a map of line to figure, so a new line
+   costs nothing but a name. */
 const COST_LINES = [
   { key: 'labour',    label: 'Labour',             hint: 'Wages, hours, overtime' },
   { key: 'plant',     label: 'Plant & equipment',  hint: 'Machine hire, floats, fuel' },
@@ -76,6 +78,40 @@ const COST_LINES = [
   { key: 'cartage',   label: 'Cartage & disposal', hint: 'Trucking, tip fees' },
   { key: 'other',     label: 'Other',              hint: 'Anything that fits nowhere else' }
 ];
+
+/** Built-in lines, then any that have been added, with Other last —
+    because "Other" is where the eye stops looking. */
+function allCostLines() {
+  const builtin = new Set(COST_LINES.map(l => l.key));
+  const added = (DB.lines || []).filter(l => l && l.key && !builtin.has(l.key));
+  return COST_LINES.filter(l => l.key !== 'other')
+    .concat(added, COST_LINES.filter(l => l.key === 'other'));
+}
+function costLineLabel(key) {
+  const l = allCostLines().find(x => x.key === key);
+  return l ? l.label : humanise(key);
+}
+/** Adds a line, or hands back the one already there under that name, so a
+    second "Accommodation" can't appear beside the first. */
+function addCostLine(name) {
+  const key = slug(name);
+  if (!key) return null;
+  if (!allCostLines().some(l => l.key === key)) {
+    DB.lines.push({ key, label: String(name).trim() });
+    saveData();
+  }
+  return key;
+}
+/** Is any job in the book using this line? An unused one can be taken
+    away again; one with a figure on it never can. */
+function costLineUsed(key) {
+  return DB.jobs.some(j => hasMoney((j.expected_costs || {})[key]) ||
+                           hasMoney((j.actual_costs || {})[key]));
+}
+function removeCostLine(key) {
+  DB.lines = (DB.lines || []).filter(l => l.key !== key);
+  saveData();
+}
 
 /* ----------------------------------------------------- variation states */
 /* A declined variation is kept on the record and left out of every total,
@@ -286,21 +322,23 @@ function whoami() { return S.name || 'Unnamed user'; }
        is the safety net: Settings writes every job to one file, reads one
        back, and the app says so when it has been a while.
    ================================================================ */
-const DB = { jobs: [], variations: [], comments: [], seq: 0 };
+const DB = { jobs: [], variations: [], comments: [], lines: [], seq: 0 };
 
 const CACHE_KEY = 'rckc.data';
 
 function loadData() {
-  DB.jobs = []; DB.variations = []; DB.comments = []; DB.seq = 0;
+  DB.jobs = []; DB.variations = []; DB.comments = []; DB.lines = []; DB.seq = 0;
   try {
     const raw = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
     if (raw) {
       DB.jobs = raw.jobs || [];
       DB.variations = raw.variations || [];
       DB.comments = raw.comments || [];
+      DB.lines = raw.lines || [];
       DB.seq = raw.seq || 0;
     }
   } catch (e) {}
+  adoptCostLines();
   // An older copy of the app, or a restored backup, may not carry the
   // counter. Take it from the highest job number rather than start again
   // at one and hand out a number that is already on a printed sheet.
@@ -308,11 +346,30 @@ function loadData() {
   if (DB.seq < highest) DB.seq = highest;
 }
 
+/** A job may carry a figure against a line this device has never heard of
+    — a backup restored from another phone, or a line that was removed
+    while a job still used it. Rather than drop the money on the floor, the
+    line is taken back on under a name made from its key. */
+function adoptCostLines() {
+  const known = new Set(COST_LINES.map(l => l.key).concat((DB.lines || []).map(l => l.key)));
+  DB.jobs.forEach(j => {
+    [j.expected_costs, j.actual_costs].forEach(map => {
+      Object.keys(map || {}).forEach(k => {
+        if (!known.has(k) && hasMoney(map[k])) {
+          known.add(k);
+          DB.lines.push({ key: k, label: humanise(k) });
+        }
+      });
+    });
+  });
+}
+
 /** Every write goes through here, so nothing can be entered and lost. */
 function saveData() {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      jobs: DB.jobs, variations: DB.variations, comments: DB.comments, seq: DB.seq
+      jobs: DB.jobs, variations: DB.variations, comments: DB.comments,
+      lines: DB.lines, seq: DB.seq
     }));
     return true;
   } catch (e) {
@@ -366,7 +423,8 @@ const Backup = {
     return {
       app: 'RCK Costing', version: VERSION, taken: new Date().toISOString(),
       device: { name: S.name },
-      jobs: DB.jobs, variations: DB.variations, comments: DB.comments, seq: DB.seq
+      jobs: DB.jobs, variations: DB.variations, comments: DB.comments,
+      lines: DB.lines, seq: DB.seq
     };
   },
 
@@ -397,9 +455,11 @@ const Backup = {
     DB.jobs = data.jobs || [];
     DB.variations = data.variations || [];
     DB.comments = data.comments || [];
+    DB.lines = data.lines || [];
     DB.seq = Number(data.seq) || 0;
     const highest = DB.jobs.reduce((n, j) => Math.max(n, Number(j.number) || 0), 0);
     if (DB.seq < highest) DB.seq = highest;
+    adoptCostLines();
     saveData();
     return DB.jobs.length;
   },
@@ -768,9 +828,13 @@ function figure(label, value, opts) {
     rather than a nought, because that is what an empty one means. */
 function costInput(prefix, line, map) {
   const v = map && hasMoney(map[line.key]) ? map[line.key] : '';
+  const added = !COST_LINES.some(b => b.key === line.key);
   return `
     <label class="numline">
-      <span class="nl-label">${esc(line.label)}</span>
+      <span class="nl-label">${esc(line.label)}${
+        added && !costLineUsed(line.key)
+          ? ` <button type="button" class="dropline" data-line="${esc(line.key)}"
+                title="Remove this line" aria-label="Remove ${esc(line.label)}">&times;</button>` : ''}</span>
       <span class="nl-box">
         <em>$</em>
         <input type="number" inputmode="decimal" step="0.01"
@@ -784,7 +848,7 @@ function costInput(prefix, line, map) {
     map entirely, so "not said" survives the round trip. */
 function readCosts(prefix, root) {
   const map = {};
-  COST_LINES.forEach(line => {
+  allCostLines().forEach(line => {
     const el = $('#' + prefix + '_' + line.key, root);
     const n = readMoney(el ? el.value : '');
     if (n != null) map[line.key] = n;
@@ -961,7 +1025,7 @@ function renderJob(view, args) {
 
   /* Only the lines somebody has put a number against — an empty row for a
      cost that was never going to apply is noise on the page. */
-  const usedLines = COST_LINES.filter(l =>
+  const usedLines = allCostLines().filter(l =>
     hasMoney((j.expected_costs || {})[l.key]) || hasMoney((j.actual_costs || {})[l.key]));
 
   view.innerHTML = `
@@ -1314,7 +1378,8 @@ function renderCosts(view, args) {
     <div class="card">
       <h2>Expected costs</h2>
       <p class="muted small">What the job was priced to cost, before anyone turned a wheel.</p>
-      ${COST_LINES.map(l => costInput('ex', l, j.expected_costs || {})).join('')}
+      ${allCostLines().map(l => costInput('ex', l, j.expected_costs || {})).join('')}
+      <button class="btn sm addline" data-add="ex">${icon('plus')}Add a cost line</button>
       <div class="sumline"><span>Expected cost</span><b id="ex_total">—</b></div>
     </div>
 
@@ -1322,7 +1387,8 @@ function renderCosts(view, args) {
       <h2>Actual costs</h2>
       <p class="muted small">What it really cost, once the invoices and the timesheets are in.
         Variations are costed separately, further down the job page.</p>
-      ${COST_LINES.map(l => costInput('ac', l, j.actual_costs || {})).join('')}
+      ${allCostLines().map(l => costInput('ac', l, j.actual_costs || {})).join('')}
+      <button class="btn sm addline" data-add="ac">${icon('plus')}Add a cost line</button>
       <div class="sumline"><span>Actual cost</span><b id="ac_total">—</b></div>
     </div>
 
@@ -1352,15 +1418,45 @@ function renderCosts(view, args) {
   wireSum('ex', view);
   wireSum('ac', view);
 
+  /* Everything typed into this screen, in one object. Adding or removing a
+     line redraws the form, so what is on it has to be put somewhere first
+     — nothing typed is ever thrown away by tidying the list of lines. */
+  const readForm = () => ({
+    contract_value: readMoney($('#agreed', view).value),
+    expected_costs: readCosts('ex', view),
+    actual_costs: readCosts('ac', view),
+    claim_value: readMoney($('#claim', view).value),
+    invoice_ref: $('#inv', view).value.trim(),
+    claimed_on: $('#claimed', view).value || null
+  });
+
+  /* A cost line nobody thought of until this job: accommodation, a
+     stay-away allowance, a ferry crossing. Named once, then it is there on
+     every job, on the printed sheet and in the CSV like any other. */
+  $$('.addline', view).forEach(b => b.onclick = () => {
+    const name = (prompt('Name the cost line — e.g. "Accommodation"') || '').trim();
+    if (!name) return;
+    Store.patch('jobs', j.id, readForm());
+    const key = addCostLine(name);
+    render();
+    // Land in the box that was just made, on the side it was asked for.
+    setTimeout(() => {
+      const el = $('#' + b.dataset.add + '_' + key);
+      if (el) { el.focus(); el.scrollIntoView({ block: 'center' }); }
+    }, 60);
+  });
+
+  $$('.dropline', view).forEach(b => b.onclick = e => {
+    e.preventDefault();
+    const key = b.dataset.line;
+    if (costLineUsed(key)) return toast('That line has figures on a job, so it stays');
+    Store.patch('jobs', j.id, readForm());
+    removeCostLine(key);
+    render();
+  });
+
   $('#save', view).onclick = () => {
-    Store.patch('jobs', j.id, {
-      contract_value: readMoney($('#agreed', view).value),
-      expected_costs: readCosts('ex', view),
-      actual_costs: readCosts('ac', view),
-      claim_value: readMoney($('#claim', view).value),
-      invoice_ref: $('#inv', view).value.trim(),
-      claimed_on: $('#claimed', view).value || null
-    });
+    Store.patch('jobs', j.id, readForm());
     toast('Saved');
     go('#/job/' + j.id);
   };
@@ -1696,7 +1792,7 @@ function renderSettings(view) {
                  'A backup file will be saved first.')) return;
     Backup.download();
     if (!confirm('Backup saved. Clear this device now?')) return;
-    DB.jobs = []; DB.variations = []; DB.comments = []; DB.seq = 0;
+    DB.jobs = []; DB.variations = []; DB.comments = []; DB.lines = []; DB.seq = 0;
     saveData();
     toast('Cleared');
     render();
@@ -1730,9 +1826,9 @@ function downloadCsv(name, rows) {
 
 function exportJobsCsv(list) {
   const head = ['Job', 'Name', 'Client', 'Site', 'Type', 'Status', 'First day', 'Last day', 'Reference']
-    .concat(COST_LINES.map(l => 'Expected ' + l.label))
+    .concat(allCostLines().map(l => 'Expected ' + l.label))
     .concat(['Expected cost'])
-    .concat(COST_LINES.map(l => 'Actual ' + l.label))
+    .concat(allCostLines().map(l => 'Actual ' + l.label))
     .concat(['Actual cost', 'Agreed price', 'Base claim', 'Variation cost', 'Variation claim',
              'Total claimed', 'Total cost', 'Profit', 'Margin %', 'Invoice', 'Claimed on']);
 
@@ -1742,9 +1838,9 @@ function exportJobsCsv(list) {
     const ex = j.expected_costs || {}, ac = j.actual_costs || {};
     rows.push([jobNo(j), j.name, j.client, j.site, typeLabel(typeOf(j)), statusLabel(j.status),
                j.start_date || '', j.end_date || '', j.reference || '']
-      .concat(COST_LINES.map(l => hasMoney(ex[l.key]) ? ex[l.key] : ''))
+      .concat(allCostLines().map(l => hasMoney(ex[l.key]) ? ex[l.key] : ''))
       .concat([m.ex == null ? '' : m.ex])
-      .concat(COST_LINES.map(l => hasMoney(ac[l.key]) ? ac[l.key] : ''))
+      .concat(allCostLines().map(l => hasMoney(ac[l.key]) ? ac[l.key] : ''))
       .concat([m.ac == null ? '' : m.ac,
                m.agreed == null ? '' : m.agreed,
                m.claimed == null ? '' : m.claimed,
@@ -1835,6 +1931,35 @@ function printDoc(html, running) {
   setTimeout(() => window.print(), 80);
 }
 
+/** Facts two to a row. A costing sheet is not a form, and the page is only
+    so tall: eight labels down the left edge is half a page spent on words
+    nobody reads twice. */
+function factGrid(rows) {
+  const live = rows.filter(Boolean);
+  const out = [];
+  for (let i = 0; i < live.length; i += 2) {
+    const a = live[i], b = live[i + 1];
+    out.push(`<tr><td>${esc(a[0])}</td><td>${a[1]}</td>` +
+             (b ? `<td>${esc(b[0])}</td><td>${b[1]}</td>` : '<td></td><td></td>') + `</tr>`);
+  }
+  return `<table class="kv two">${out.join('')}</table>`;
+}
+
+/** The four figures that settle a job, in one band: what it cost, what was
+    claimed, what is left, and what that is as a percentage. The cost sits in
+    red because it is the number being defended. Nothing else on the sheet
+    repeats any of them. */
+function moneyBand(cost, claim, profit, margin) {
+  const tone = toneOf(profit);
+  return `
+    <div class="band">
+      <div class="cost"><div class="l">Cost</div><div class="n">${fmtMoney(cost, true)}</div></div>
+      <div><div class="l">Claim</div><div class="n">${fmtMoney(claim, true)}</div></div>
+      <div><div class="l">Profit</div><div class="n ${tone}">${fmtSigned(profit, true)}</div></div>
+      <div><div class="l">Profit %</div><div class="n ${tone}">${fmtPct(margin)}</div></div>
+    </div>`;
+}
+
 /** A money cell that carries its own colour when the number is the point. */
 function pcell(v) {
   if (!hasMoney(v)) return '<td class="r">—</td>';
@@ -1842,113 +1967,87 @@ function pcell(v) {
   return `<td class="r ${cls}">${fmtSigned(v, true)}</td>`;
 }
 
-/** One job's whole costing on one sheet: the estimate against the actual,
-    every variation, the claim, what it made, and what was said about it. */
+/** One job's costing, on one page.
+
+    It is read in the order somebody asks the questions: what the job was,
+    what it cost line by line, what was claimed on top of it, and — at the
+    bottom, in one band and nowhere else — the four figures that settle it.
+    Cost, claim, profit, profit per cent. Everything the sheet used to say
+    twice has been taken out; a costing sheet that needs a second page to
+    reach its own answer is not a costing sheet. */
 function printJobSheet(j) {
   const m = jobMoney(j);
   const vars = varsFor(j.id);
   const comments = commentsFor(j.id);
-  const lines = COST_LINES.filter(l =>
-    hasMoney((j.expected_costs || {})[l.key]) || hasMoney((j.actual_costs || {})[l.key]));
+  const ex = j.expected_costs || {}, ac = j.actual_costs || {};
+  const lines = allCostLines().filter(l => hasMoney(ex[l.key]) || hasMoney(ac[l.key]));
 
   const html = `
     ${docHead('Job costing', j.name, `${jobNo(j)} · ${j.client || 'No client named'}`)}
 
-    <div class="figures">
-      <div><div class="n">${fmtMoney(m.totalClaim, true)}</div><div class="l">Total claimed</div></div>
-      <div><div class="n">${fmtMoney(m.totalCost, true)}</div><div class="l">Total cost</div></div>
-      <div><div class="n ${toneOf(m.profit)}">${fmtSigned(m.profit, true)}</div>
-        <div class="l">Profit${m.margin == null ? '' : ' · ' + fmtPct(m.margin) + ' margin'}</div></div>
-    </div>
-
     <h2>The job</h2>
-    <table class="kv">
-      <tr><td>Job number</td><td><strong>${jobNo(j)}</strong></td></tr>
-      <tr><td>Client</td><td>${esc(j.client || '—')}</td></tr>
-      <tr><td>Site</td><td>${esc(j.site || '—')}</td></tr>
-      <tr><td>Type of work</td><td>${esc(typeLabel(typeOf(j)))}</td></tr>
-      <tr><td>Status</td><td><span class="badge">${esc(statusLabel(j.status))}</span></td></tr>
-      <tr><td>On site</td><td>${j.start_date ? fmtDate(j.start_date) : 'not set'}${
-        j.end_date && j.end_date !== j.start_date ? ' to ' + fmtDate(j.end_date) : ''}</td></tr>
-      ${j.reference ? `<tr><td>Client reference</td><td>${esc(j.reference)}</td></tr>` : ''}
-    </table>
+    ${factGrid([
+      ['Job number', `<strong>${jobNo(j)}</strong>`],
+      ['Client', esc(j.client || '—')],
+      ['Site', esc(j.site || '—')],
+      ['Type of work', esc(typeLabel(typeOf(j)))],
+      ['On site', (j.start_date ? fmtDate(j.start_date) : 'not set') +
+        (j.end_date && j.end_date !== j.start_date ? ' to ' + fmtDate(j.end_date) : '')],
+      ['Status', esc(statusLabel(j.status))],
+      j.reference ? ['Reference', esc(j.reference)] : null,
+      j.invoice_ref ? ['Invoice', esc(j.invoice_ref) + (j.claimed_on ? ', ' + fmtDate(j.claimed_on) : '')]
+        : j.claimed_on ? ['Claimed on', fmtDate(j.claimed_on)] : null
+    ])}
     ${j.description ? `<p class="note">${esc(j.description)}</p>` : ''}
 
-    <h2>Costs — expected against actual</h2>
+    <h2>Costs</h2>
     ${lines.length ? `
     <table>
-      <thead><tr><th>Line</th><th class="r">Expected</th><th class="r">Actual</th><th class="r">Over / under</th></tr></thead>
+      <thead><tr><th>Line</th><th class="r">Expected</th><th class="r">Actual</th></tr></thead>
       <tbody>
-        ${lines.map(l => {
-          const vv = lineVariance(j, l.key);
-          return `<tr>
-            <td>${esc(l.label)}</td>
-            <td class="r">${fmtMoney((j.expected_costs || {})[l.key], true)}</td>
-            <td class="r">${fmtMoney((j.actual_costs || {})[l.key], true)}</td>
-            ${vv == null ? '<td class="r">—</td>' : `<td class="r ${toneOf(-vv)}">${fmtSigned(vv, true)}</td>`}
-          </tr>`;
-        }).join('')}
-        <tr class="tot"><td>Base job</td>
+        ${lines.map(l => `<tr>
+          <td>${esc(l.label)}</td>
+          <td class="r">${fmtMoney(ex[l.key], true)}</td>
+          <td class="r">${fmtMoney(ac[l.key], true)}</td>
+        </tr>`).join('')}
+        <tr class="tot">
+          <td>${m.v.cost ? 'Base job' : 'Total cost'}</td>
           <td class="r">${fmtMoney(m.ex, true)}</td>
           <td class="r">${fmtMoney(m.ac, true)}</td>
-          ${m.ex == null || m.ac == null ? '<td class="r">—</td>'
-            : `<td class="r ${toneOf(-(m.ac - m.ex))}">${fmtSigned(m.ac - m.ex, true)}</td>`}
         </tr>
         ${m.v.cost ? `
-        <tr><td>Variations</td><td class="r">—</td><td class="r">${fmtMoney(m.v.cost, true)}</td><td class="r">—</td></tr>
-        <tr class="tot"><td>Everything</td>
+        <tr><td>Variations</td><td class="r">—</td><td class="r">${fmtMoney(m.v.cost, true)}</td></tr>
+        <tr class="tot"><td>Total cost</td>
           <td class="r">${fmtMoney(m.ex, true)}</td>
-          <td class="r">${fmtMoney(m.totalCost, true)}</td>
-          <td class="r ${m.costSwing == null ? '' : toneOf(-m.costSwing)}">${
-            m.costSwing == null ? '—' : fmtSigned(m.costSwing, true)}</td></tr>` : ''}
+          <td class="r">${fmtMoney(m.totalCost, true)}</td></tr>` : ''}
       </tbody>
-    </table>
-    <p class="lede">Over / under is the actual against the estimate. A positive number is money the
-      job spent that it was not priced to spend.</p>`
-    : '<p class="lede">No costs have been entered for this job.</p>'}
+    </table>` : '<p class="lede">No costs have been entered for this job.</p>'}
 
-    <h2>Variations</h2>
     ${vars.length ? `
+    <h2>Variations</h2>
     <table>
-      <thead><tr><th>No.</th><th>What it is</th><th>Status</th><th class="r">Cost</th><th class="r">Claimed</th><th class="r">Made</th></tr></thead>
+      <thead><tr><th>No.</th><th>What it is</th><th>Status</th><th class="r">Cost</th><th class="r">Claimed</th></tr></thead>
       <tbody>
         ${vars.map(v => {
-          const cost = hasMoney(v.cost) ? Number(v.cost) : null;
-          const claim = hasMoney(v.claim_value) ? Number(v.claim_value) : null;
-          const p = (cost == null || claim == null) ? null : claim - cost;
           const off = v.status === 'declined';
           return `<tr${off ? ' class="off"' : ''}>
             <td>${varNo(v)}</td>
             <td>${esc(v.title || '—')}${v.detail ? `<div class="sub">${esc(v.detail)}</div>` : ''}</td>
             <td>${esc(varStatusDef(v.status).label)}</td>
-            <td class="r">${fmtMoney(cost, true)}</td>
-            <td class="r">${fmtMoney(claim, true)}</td>
-            ${off ? '<td class="r">not counted</td>' : pcell(p)}
+            <td class="r">${fmtMoney(v.cost, true)}</td>
+            <td class="r">${fmtMoney(v.claim_value, true)}</td>
           </tr>`;
         }).join('')}
-        <tr class="tot"><td colspan="3">Counted (${m.v.n} of ${m.v.all})</td>
+        <tr class="tot"><td colspan="3">${
+          m.v.n === m.v.all ? 'Variations' : `Counted — ${m.v.n} of ${m.v.all}`}</td>
           <td class="r">${fmtMoney(m.v.cost, true)}</td>
-          <td class="r">${fmtMoney(m.v.claim, true)}</td>
-          ${pcell(m.v.profit)}</tr>
+          <td class="r">${fmtMoney(m.v.claim, true)}</td></tr>
       </tbody>
-    </table>` : '<p class="lede">None on this job.</p>'}
+    </table>` : ''}
 
-    <h2>The claim, and what it made</h2>
-    <table class="kv">
-      <tr><td>Agreed price</td><td>${fmtMoney(m.agreed, true)}</td></tr>
-      <tr><td>Claimed — base job</td><td>${fmtMoney(m.claimed, true)}</td></tr>
-      <tr><td>Claimed — variations</td><td>${m.v.n ? fmtMoney(m.v.claim, true) : '—'}</td></tr>
-      <tr><td><strong>Total claimed</strong></td><td><strong>${fmtMoney(m.totalClaim, true)}</strong></td></tr>
-      <tr><td>Total cost</td><td>${fmtMoney(m.totalCost, true)}</td></tr>
-      <tr><td><strong>Profit</strong></td><td><strong class="${toneOf(m.profit)}">${fmtSigned(m.profit, true)}</strong>${
-        m.margin == null ? '' : ` &nbsp;<span class="sub">${fmtPct(m.margin)} margin</span>`}</td></tr>
-      ${m.expProfit != null ? `<tr><td>Priced to make</td><td>${fmtMoney(m.expProfit, true)}${
-        m.expMargin == null ? '' : ` &nbsp;<span class="sub">${fmtPct(m.expMargin)} margin</span>`}</td></tr>` : ''}
-      ${m.swing != null ? `<tr><td>Against the price</td><td class="${toneOf(m.swing)}">${fmtSigned(m.swing, true)}</td></tr>` : ''}
-      ${j.invoice_ref ? `<tr><td>Invoice</td><td>${esc(j.invoice_ref)}</td></tr>` : ''}
-      ${j.claimed_on ? `<tr><td>Claimed on</td><td>${fmtDate(j.claimed_on)}</td></tr>` : ''}
-    </table>
-    <p class="lede">All figures exclude GST.</p>
+    ${moneyBand(m.totalCost, m.totalClaim, m.profit, m.margin)}
+    <p class="lede">All figures exclude GST${
+      vars.some(v => v.status === 'declined') ? '. Declined variations are left out of every figure' : ''}.</p>
 
     ${comments.length ? `
     <h2>Comments</h2>
@@ -1963,28 +2062,19 @@ function printJobSheet(j) {
   printDoc(html, `${jobNo(j)} — job costing`);
 }
 
-/** The period on one sheet: the figures, then every job behind them. */
+/** The period on one page: what it covers, every job in it, then the same
+    four figures at the bottom that a single job's sheet ends on. */
 function printSummary(list, from, to) {
   const t = totalsFor(list);
   const html = `
     ${docHead('Costing summary', 'Job costing summary', periodLabel(repPeriod, from, to))}
 
-    <div class="figures">
-      <div><div class="n">${fmtMoney(t.claim, true)}</div><div class="l">Claimed</div></div>
-      <div><div class="n">${fmtMoney(t.cost, true)}</div><div class="l">Cost</div></div>
-      <div><div class="n ${toneOf(t.profit)}">${fmtSigned(t.profit, true)}</div>
-        <div class="l">Profit${t.margin == null ? '' : ' · ' + fmtPct(t.margin) + ' margin'}</div></div>
-    </div>
-
     <h2>The period</h2>
-    <table class="kv">
-      <tr><td>Jobs in the period</td><td>${t.jobs}</td></tr>
-      <tr><td>Counted in the figures</td><td>${t.counted}</td></tr>
-      ${t.waiting ? `<tr><td>Waiting on a cost or a claim</td><td>${t.waiting}</td></tr>` : ''}
-      ${t.expProfit != null ? `<tr><td>Priced to make${
-        t.expCounted !== t.jobs ? ` (${t.expCounted} of ${t.jobs} priced)` : ''}</td>
-        <td>${fmtMoney(t.expProfit, true)}</td></tr>` : ''}
-    </table>
+    ${factGrid([
+      ['Jobs', String(t.jobs)],
+      ['Counted', String(t.counted)],
+      t.waiting ? ['Waiting on a figure', String(t.waiting)] : null
+    ])}
     ${t.waiting ? `<p class="lede">A job joins the figures once both its actual cost and its claim
       are entered. The ${plural(t.waiting, 'job')} still waiting are listed below and left out of
       the totals.</p>` : ''}
@@ -1992,33 +2082,35 @@ function printSummary(list, from, to) {
     <h2>Every job</h2>
     ${list.length ? `
     <table>
-      <thead><tr><th>Job</th><th>Client</th><th>Status</th><th class="r">Claimed</th><th class="r">Cost</th><th class="r">Made</th><th class="r">Margin</th></tr></thead>
+      <thead><tr><th>Job</th><th>Client</th><th class="r">Cost</th><th class="r">Claim</th><th class="r">Profit</th><th class="r">%</th></tr></thead>
       <tbody>
         ${list.map(j => {
           const m = jobMoney(j);
           return `<tr>
-            <td><strong>${esc(j.name)}</strong><div class="sub">${jobNo(j)}</div></td>
+            <td><strong>${esc(j.name)}</strong><div class="sub">${jobNo(j)} · ${esc(statusLabel(j.status))}</div></td>
             <td>${esc(j.client || '—')}</td>
-            <td>${esc(statusLabel(j.status))}</td>
-            <td class="r">${fmtMoney(m.totalClaim, true)}</td>
             <td class="r">${fmtMoney(m.totalCost, true)}</td>
+            <td class="r">${fmtMoney(m.totalClaim, true)}</td>
             ${pcell(m.profit)}
             <td class="r">${fmtPct(m.margin, 0)}</td>
           </tr>`;
         }).join('')}
         <tr class="tot">
-          <td colspan="3">${plural(t.counted, 'job')} counted</td>
-          <td class="r">${fmtMoney(t.claim, true)}</td>
+          <td colspan="2">${plural(t.counted, 'job')} counted</td>
           <td class="r">${fmtMoney(t.cost, true)}</td>
+          <td class="r">${fmtMoney(t.claim, true)}</td>
           ${pcell(t.profit)}
           <td class="r">${fmtPct(t.margin, 0)}</td>
         </tr>
       </tbody>
     </table>` : '<p class="lede">No jobs in this period.</p>'}
+
+    ${moneyBand(t.cost, t.claim, t.profit, t.margin)}
     <p class="lede">All figures exclude GST.</p>`;
 
   printDoc(html, 'Job costing summary');
 }
+
 /* ================================================================
    Boot
    ================================================================ */

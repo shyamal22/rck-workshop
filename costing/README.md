@@ -34,6 +34,9 @@ installed app is not treated that way, which is why step 2 matters.
 - Enter the job — name, client, site, type of work, the client's order number, dates.
 - Enter the **agreed price**, and the **expected costs** broken down by line: labour,
   plant, materials, subcontractors, traffic management, cartage, other.
+- Need a line that isn't there — accommodation, a stay-away allowance, a ferry
+  crossing? **Add a cost line**, name it, and it is a line like any other from then
+  on: on both forms, on the printed sheet, in the CSV.
 - The app works out what the job is priced to make, and the margin on it.
 
 **After the job**
@@ -60,8 +63,9 @@ installed app is not treated that way, which is why step 2 matters.
 **Reports** — this month, last month, a financial year, or between any two dates:
 - Claimed, cost, profit and margin for the period, with the best and worst job in it.
 - Every job in the period as a table, and the same thing as a printed summary.
-- **Print the costing sheet** for any one job: the estimate against the actual, every
-  variation, the claim, the profit, and the comments — letterheaded, on one page.
+- **Print the costing sheet** for any one job: the job, the costs line by line, every
+  variation, and then one band across the foot — **cost, claim, profit, profit %** —
+  and nothing said twice. Letterheaded, and sized to come off the printer as one page.
 - **CSV** of every job with all its cost lines, and of every variation, for Excel.
 
 A job only joins a total once both its actual cost and its claim are in. Until then it
@@ -136,8 +140,11 @@ Nothing links to it from anywhere. The home-screen icon is the whole of the dist
   find, and the published app is an empty shell until someone types into it.
 - **It works with no signal**, including on a plane or down a hole, because it never
   asks the network for anything after the first visit.
-- **Cost lines aren't fixed.** Add one to `COST_LINES` in `app.js` and both forms, the
-  comparison table, the printed sheet and the CSV all grow the line by themselves.
+- **Cost lines aren't fixed.** **Add a cost line** on the Costs screen names a new one —
+  it appears on both the expected and the actual side, on every job, on the printed
+  sheet and in the CSV. Naming one that already exists reuses it rather than making a
+  near-duplicate. A line nothing has used yet has a small **×** beside it; one with a
+  figure on any job has no × and stays.
 - **Types of work aren't a fixed list either.** Pick **+ Add a new type…** when creating
   a job and name it; from then on it's a type like any other. Naming one that already
   exists in a different spelling reuses the existing one.
