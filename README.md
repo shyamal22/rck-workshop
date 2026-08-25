@@ -12,6 +12,18 @@ the last job is signed off the gear goes green again on its own.
 
 ---
 
+## Two sides, deliberately unconnected
+
+Opening the app lands on a choice:
+
+- **Maintenance** — gear status, damage reports, work orders, repair history.
+- **Costs** — planned and actual spend against each asset, with invoices.
+
+Nothing crosses between them. A repair cost recorded on a work order does **not**
+appear in the cost tracker, and a cost recorded against an asset does **not**
+change its colour or raise a work order. The only thing they share is the asset
+list itself. If a repair should show up in the cost tracker, enter it there too.
+
 ## What it does
 
 **For the crew**
@@ -51,6 +63,20 @@ the record of a machine's repairs is complete without anyone having to keep it.
 
 ---
 
+## Costs
+
+- **Assets** — the same fleet, showing actual and planned spend per machine.
+- Tapping one shows its running total, its variance and every entry against it.
+- **Adding a cost** takes: planned or actual, the amount, what it is for, the
+  date it was incurred, the date payment is due, and any number of invoices or
+  photos attached to it.
+- A **planned** cost can later be marked **actual** in place, which avoids the
+  double counting that comes from entering it twice.
+- **Tracker** — this month, last month, this quarter, the financial year
+  (April to March) or any custom range. Shows actual vs planned vs variance, a
+  month-by-month bar breakdown, spend per asset, and planned payments coming up.
+  Prints to PDF and exports to CSV.
+
 ## Setting it up
 
 Two jobs, about 15 minutes total, done once.
@@ -63,7 +89,8 @@ Two jobs, about 15 minutes total, done once.
 3. Wait about two minutes for the project to build.
 4. Open **SQL Editor** in the left sidebar → **New query**.
 5. Open `supabase-schema.sql` from this repo, copy the whole file, paste it in,
-   press **Run**. It should say *Success*.
+   press **Run**. It should say *Success*. (Re-running it later is safe, and is
+   how you add the **Costs** section to a database created before costs existed.)
 6. Go to **Settings → API** and copy two things:
    - **Project URL** — looks like `https://abcdefgh.supabase.co`
    - **anon public** key — a long string starting `eyJ…`

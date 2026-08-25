@@ -54,6 +54,10 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* Elements here set their own display, which would otherwise beat the
+   browser's rule for [hidden] and leave hidden controls on screen. */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -447,6 +451,98 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   box-shadow: var(--sh-3); max-width: 86vw;
   animation: toastIn var(--t) var(--ease-soft) both;
 }
+
+/* =====================================================================
+   The landing page, and the costs portal
+   ===================================================================== */
+.hub { display: grid; gap: 14px; margin-top: 6vh; }
+.hub-card {
+  display: block; text-decoration: none; color: inherit;
+  background: var(--panel); border-radius: var(--r);
+  box-shadow: var(--sh-2); padding: 24px 22px;
+  animation: riseIn var(--t) var(--ease) both;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
+}
+.hub-card:nth-child(2) { animation-delay: 70ms; }
+.hub-card:active { transform: scale(.985); box-shadow: var(--sh-1); }
+.hub-icon {
+  display: grid; place-items: center; width: 46px; height: 46px;
+  border-radius: 13px; background: var(--panel-2); margin-bottom: 14px;
+}
+.hub-icon svg { width: 25px; height: 25px; }
+.hub-card b { display: block; font-size: 22px; font-weight: 660; letter-spacing: -.022em; }
+.hub-sub { display: block; font-size: 14px; color: var(--ink-2); margin-top: 3px; }
+.hub-stat { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 11px; font-weight: 550; }
+
+@media (min-width: 720px) {
+  .hub { grid-template-columns: 1fr 1fr; margin-top: 8vh; }
+  .hub-card:hover { box-shadow: var(--sh-3); transform: translateY(-2px); }
+}
+
+/* Costs deliberately has no status colour — it must not read as maintenance. */
+.cost-tally .cost-tile {
+  border: 0; background: var(--panel); box-shadow: var(--sh-2);
+  border-radius: var(--r); padding: 12px 12px 13px; cursor: pointer;
+  font: inherit; text-align: left;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
+}
+.cost-tile:active { transform: scale(.97); }
+.cost-tile .n {
+  display: block; font-size: 21px; font-weight: 700; line-height: 1.1;
+  letter-spacing: -.025em; font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.cost-tile .n.planned { color: var(--ink-2); }
+.cost-tile .l { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+
+.gear-card.cost-card { background: var(--panel); }
+.cost-line {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px; color: var(--ink-2); margin-top: 6px;
+}
+.cost-line b { font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cost-line b.planned { font-weight: 620; color: var(--ink-2); }
+
+.cost-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.cost-totals > div { min-width: 0; }
+.cost-totals .l { display: block; font-size: 11.5px; color: var(--ink-3); font-weight: 650;
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+.cost-totals b { font-size: 17px; font-weight: 700; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; word-break: break-all; }
+.cost-totals b.planned { color: var(--ink-2); }
+.cost-totals b.over { color: var(--red); }
+.cost-totals.big {
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 18px 16px; margin-bottom: 8px;
+}
+.cost-totals.big b { font-size: 21px; }
+
+.cost-entry { padding: 14px 15px; }
+.cost-entry::before { display: none; }
+.cost-entry.actual  { background: var(--panel); }
+.cost-entry.planned { background: var(--panel-2); }
+.cost-entry .hdr { align-items: center; }
+.cost-entry .amount { font-size: 16px; font-weight: 700; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; }
+.cost-entry.planned .amount { color: var(--ink-2); }
+
+.cost-choice button[aria-pressed="true"] { border-color: var(--ink); background: var(--panel-2); }
+.cost-choice .bulb { border-color: var(--line-2); }
+.cost-choice button[aria-pressed="true"] .bulb {
+  border-color: var(--ink); background: var(--ink); box-shadow: inset 0 0 0 3px var(--panel);
+}
+
+.filerow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.filerow .attach { margin-top: 0; flex: 1; min-width: 0; overflow: hidden; }
+
+/* month bars: solid is actual, outline is planned */
+.mrow { display: grid; grid-template-columns: 54px 1fr 62px; gap: 10px; align-items: center; margin-bottom: 11px; }
+.mrow:last-of-type { margin-bottom: 0; }
+.mlabel { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+.mbars { display: grid; gap: 3px; min-width: 0; }
+.mbar { height: 8px; border-radius: 4px; min-width: 2px; transition: width var(--t-slow) var(--ease-soft); }
+.mbar.actual { background: var(--ink); }
+.mbar.planned { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-2); }
+.mamt { font-size: 12.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* =====================================================================
    Workshop wall screen

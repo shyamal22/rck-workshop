@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.6.0';
+const VERSION = '2.0.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -182,10 +182,34 @@ const ICONS = {
   share:   '<path d="M12 15.5V3.5"/><path d="M8.5 7L12 3.5 15.5 7"/><path d="M5.5 13v6.5a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V13"/>',
   copy:    '<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15"/>',
   file:    '<path d="M14 3.5H7.5A1.5 1.5 0 0 0 6 5v14a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 18 19V7.5z"/><path d="M14 3.5V8h4"/>',
-  plus:    '<path d="M12 5.5v13M5.5 12h13"/>'
+  plus:    '<path d="M12 5.5v13M5.5 12h13"/>',
+  grid:    '<rect x="3.75" y="3.75" width="6.5" height="6.5" rx="2"/><rect x="13.75" y="3.75" width="6.5" height="6.5" rx="2"/><rect x="3.75" y="13.75" width="6.5" height="6.5" rx="2"/><rect x="13.75" y="13.75" width="6.5" height="6.5" rx="2"/>',
+  orders:  '<path d="M8 4h8a2 2 0 0 1 2 2v13.1a1 1 0 0 1-1.47.88L12 17.4l-4.53 2.58A1 1 0 0 1 6 19.1V6a2 2 0 0 1 2-2z"/><path d="M9.25 8.5h5.5"/>',
+  chart:   '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  coin:    '<circle cx="12" cy="12" r="8.2"/><path d="M14.4 9.3a2.9 2.9 0 0 0-2.4-1.1c-1.5 0-2.5.8-2.5 1.9 0 2.6 5 1.3 5 3.9 0 1.1-1 1.9-2.5 1.9a2.9 2.9 0 0 1-2.5-1.2"/><path d="M12 6.6v10.8"/>',
+  spanner: '<path d="M15.5 8.5a3.8 3.8 0 0 0 4.6 4.6l-8 8a2.6 2.6 0 0 1-3.7-3.7l8-8a3.8 3.8 0 0 0-4.6-4.6l3 3-1.9 1.9-3-3a3.8 3.8 0 0 0 5.6 1.8z"/>'
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+
+/** Set when the database has no costs table yet, so the app can say so
+    rather than looking empty and broken. */
+let costsTableMissing = false;
+
+function money(n) {
+  const v = Number(n) || 0;
+  return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-NZ',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+/** Compact form for cards and tiles: $8,400 → $8.4k */
+function moneyShort(n) {
+  const v = Number(n) || 0;
+  const a = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (a >= 1000000) return `${sign}$${(a / 1000000).toFixed(a >= 10000000 ? 0 : 1)}m`;
+  if (a >= 10000) return `${sign}$${(a / 1000).toFixed(a >= 100000 ? 0 : 1)}k`;
+  return sign + '$' + Math.round(a).toLocaleString('en-NZ');
 }
 
 let toastTimer;
@@ -229,7 +253,7 @@ const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 /* ================================================================
    Local cache — the app opens instantly and stays readable offline
    ================================================================ */
-const DB = { gear: [], work_orders: [], wo_updates: [], localSeq: 0 };
+const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], localSeq: 0 };
 
 function cacheKey() { return 'rckw.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -240,6 +264,7 @@ function loadCache() {
       DB.gear = raw.gear || [];
       DB.work_orders = raw.work_orders || [];
       DB.wo_updates = raw.wo_updates || [];
+      DB.costs = raw.costs || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -288,14 +313,19 @@ async function rest(path, opts) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [gear, orders, updates] = await Promise.all([
+    const [gear, orders, updates, costs] = await Promise.all([
       rest('gear?select=*&order=code.asc', { headers: restHeaders() }),
       rest('work_orders?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
-      rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() })
+      rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }),
+      // The cost table may not exist yet on an older database; the rest of
+      // the app must keep working if it doesn't.
+      rest('costs?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }).catch(() => null)
     ]);
     DB.gear = gear || [];
     DB.work_orders = orders || [];
     DB.wo_updates = (updates || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    if (costs) { DB.costs = costs; costsTableMissing = false; }
+    else costsTableMissing = true;
     saveCache();
   },
 
@@ -337,6 +367,22 @@ const Store = {
       });
     } catch (err) {
       Outbox.add({ kind: 'patch', table, id, patch });
+    }
+  },
+
+  async remove(table, id) {
+    const list = DB[table];
+    const i = list.findIndex(r => r.id === id);
+    if (i >= 0) list.splice(i, 1);
+    saveCache();
+    if (!connected()) return;
+    try {
+      await rest(`${table}?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: restHeaders({ Prefer: 'return=minimal' })
+      });
+    } catch (err) {
+      Outbox.add({ kind: 'delete', table, id });
     }
   },
 
@@ -391,7 +437,12 @@ const Outbox = {
     const left = [];
     for (const op of list) {
       try {
-        if (op.kind === 'insert') {
+        if (op.kind === 'delete') {
+          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+            method: 'DELETE',
+            headers: restHeaders({ Prefer: 'return=minimal' })
+          });
+        } else if (op.kind === 'insert') {
           await rest(op.table, {
             method: 'POST',
             headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
@@ -584,8 +635,45 @@ function parseHash() {
 }
 function go(hash) { location.hash = hash; }
 
+/** Which half of the app a path belongs to. The two never share a screen. */
+function sectionOf(path) {
+  if (path === '/') return 'hub';
+  if (path === '/screen') return 'kiosk';
+  if (path.startsWith('/costs')) return 'costs';
+  return 'maintenance';
+}
+
+const TABS = {
+  maintenance: [
+    { href: '#/gear',   label: 'Gear',        icon: 'grid',   on: p => p === '/gear' || p.startsWith('/gear/') },
+    { href: '#/orders', label: 'Work orders', icon: 'orders', on: p => p === '/orders' || p.startsWith('/wo/') },
+    { href: '#/report', label: 'Report',      icon: 'plus',   on: p => p === '/report', primary: true }
+  ],
+  costs: [
+    { href: '#/costs',         label: 'Assets',   icon: 'grid',  on: p => p === '/costs' || /^\/costs\/[^/]+$/.test(p) && p !== '/costs/new' && p !== '/costs/summary' },
+    { href: '#/costs/summary', label: 'Tracker',  icon: 'chart', on: p => p === '/costs/summary' },
+    { href: '#/costs/new',     label: 'Add cost', icon: 'plus',  on: p => p === '/costs/new' || p.startsWith('/costs/edit/'), primary: true }
+  ]
+};
+
+function paintTabs(section, path) {
+  const bar = $('#tabbar');
+  const tabs = TABS[section];
+  if (!tabs) { bar.hidden = true; bar.innerHTML = ''; return; }
+  bar.hidden = false;
+  bar.innerHTML = tabs.map(t => `
+    <a href="${t.href}" class="${t.on(path) ? 'on' : ''}${t.primary ? ' tab-primary' : ''}">
+      ${t.primary ? `<span class="fab">${icon(t.icon)}</span>` : icon(t.icon)}
+      <span>${t.label}</span>
+    </a>`).join('');
+}
+
 const SCREENS = {
-  '/':          { title: 'Gear',          render: renderBoard },
+  '/':          { title: 'RCK Workshop',  render: renderHub },
+  '/gear':      { title: 'Gear',          render: renderBoard },
+  '/costs':          { title: 'Costs',        render: renderCostsBoard },
+  '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
+  '/costs/summary':  { title: 'Cost tracker', render: renderCostSummary },
   '/orders':    { title: 'Work orders',   render: renderOrders },
   '/report':    { title: 'Report damage', render: renderReport,   back: true },
   '/reports':   { title: 'Reports',       render: renderReports,  back: true },
@@ -600,7 +688,7 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = path === '/' || path === '/orders';
+  const keepsPlace = ['/gear', '/orders', '/costs'].includes(path);
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
@@ -614,10 +702,13 @@ function render() {
 
   let screen = SCREENS[route.path];
   let back = false;
+  if (screen) { /* an exact route always wins over the patterns below */ }
 
-  if (route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
-  else if (route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
-  else if (route.path.startsWith('/wo/')) { screen = { title: 'Work order', render: renderWorkOrder }; back = true; }
+  if (!screen && route.path.startsWith('/costs/edit/')) { screen = { title: 'Edit cost', render: renderCostForm }; back = true; }
+  else if (!screen && route.path.startsWith('/costs/')) { screen = { title: 'Costs', render: renderCostsAsset }; back = true; }
+  else if (!screen && route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
+  else if (!screen && route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
+  else if (!screen && route.path.startsWith('/wo/')) { screen = { title: 'Work order', render: renderWorkOrder }; back = true; }
 
   if (!screen) { go('#/'); return; }
 
@@ -625,7 +716,10 @@ function render() {
   $('#backBtn').hidden = !(back || screen.back);
   $('#menu').hidden = true;
 
-  $$('#tabbar a').forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + route.path));
+  const section = sectionOf(route.path);
+  document.body.classList.toggle('in-costs', section === 'costs');
+  paintTabs(section, route.path);
+  $('#homeBtn').hidden = !(section === 'costs' || section === 'maintenance') || (back || screen.back);
 
   const view = $('#view');
   view.innerHTML = '';
@@ -1630,14 +1724,18 @@ function exportCsv() {
         o.completed_at ? fmtDateTime(o.completed_at) : '', o.completed_by || '', o.work_done || '',
         daysBetween(o.reported_at, o.completed_at) ?? ''];
     });
-  const csv = [head, ...rows]
+  downloadCsv([head, ...rows], `rck-work-orders-${today()}.csv`);
+}
+
+/** One CSV writer for both portals. The BOM keeps Excel happy with macrons. */
+function downloadCsv(rows, filename) {
+  const csv = rows
     .map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(','))
     .join('\r\n');
-
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `rck-work-orders-${today()}.csv`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -1964,6 +2062,522 @@ function renderKiosk(view) {
 }
 
 /* ================================================================
+   Screen — the landing page: costs or maintenance
+   ================================================================ */
+function renderHub(view) {
+  const gear = activeGear();
+  const open = activeOrders().length;
+  const red = gear.filter(g => gearStatus(g) === 'red').length;
+
+  const now = new Date();
+  const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const monthActual = DB.costs
+    .filter(c => c.kind === 'actual' && costDate(c) >= from)
+    .reduce((t, c) => t + (Number(c.amount) || 0), 0);
+
+  view.innerHTML = `
+    <div class="hub">
+      <a class="hub-card" href="#/gear">
+        <span class="hub-icon">${icon('spanner')}</span>
+        <b>Maintenance</b>
+        <span class="hub-sub">Gear status, damage reports and repairs</span>
+        <span class="hub-stat">${open} open work order${open === 1 ? '' : 's'}${red ? ` · ${red} out of action` : ''}</span>
+      </a>
+
+      <a class="hub-card" href="#/costs">
+        <span class="hub-icon">${icon('coin')}</span>
+        <b>Costs</b>
+        <span class="hub-sub">Planned and actual spend against each asset</span>
+        <span class="hub-stat">${monthActual ? money(monthActual) + ' actual this month' : 'No costs recorded this month'}</span>
+      </a>
+    </div>
+
+    <p class="muted small center mt">The two are kept separate — nothing recorded
+    on one side appears on the other.</p>`;
+}
+
+/* ================================================================
+   Costs — a portal of its own, sharing only the asset list
+   ================================================================ */
+const costsFor = id => DB.costs
+  .filter(c => c.gear_id === id)
+  .sort((a, b) => String(costDate(b)).localeCompare(String(costDate(a))));
+
+const costById = id => DB.costs.find(c => c.id === id);
+
+/** The date a cost belongs to for period reporting. */
+const costDate = c => (c.incurred_on || (c.created_at || '').slice(0, 10) || '');
+
+function costTotals(list) {
+  return list.reduce((t, c) => {
+    const v = Number(c.amount) || 0;
+    if (c.kind === 'planned') t.planned += v; else t.actual += v;
+    return t;
+  }, { planned: 0, actual: 0 });
+}
+
+function costsInRange(from, to) {
+  return DB.costs.filter(c => {
+    const d = costDate(c);
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  });
+}
+
+function costsBanner() {
+  return costsTableMissing
+    ? `<div class="banner">The costs table isn't in the database yet. Run the
+       <strong>Costs</strong> section at the end of <code>supabase-schema.sql</code>
+       in Supabase, then reopen the app. Nothing entered here will save until then.</div>`
+    : '';
+}
+
+/* ---------------------------------------------------- costs: asset board */
+const costFilter = { cat: 'all', q: '' };
+
+function renderCostsBoard(view) {
+  const gear = sortedGear(activeGear());
+  if (!gear.length) {
+    view.innerHTML = costsBanner() + `<div class="empty"><b>No assets yet</b>Add the fleet from the maintenance side first.</div>`;
+    return;
+  }
+
+  const totals = costTotals(DB.costs);
+  const cats = allCategoryKeys().filter(k => gear.some(g => catOf(g) === k));
+
+  view.innerHTML = `
+    ${costsBanner()}
+    <div class="tally cost-tally">
+      <button class="cost-tile" data-jump="1"><span class="n">${moneyShort(totals.actual)}</span><span class="l">Actual, all time</span></button>
+      <button class="cost-tile" data-jump="1"><span class="n planned">${moneyShort(totals.planned)}</span><span class="l">Planned</span></button>
+      <button class="cost-tile" data-jump="1"><span class="n">${DB.costs.length}</span><span class="l">Entries</span></button>
+    </div>
+
+    <div class="filters">
+      <button class="chip" data-cat="all" aria-pressed="${costFilter.cat === 'all'}">All assets</button>
+      ${cats.map(k => `<button class="chip" data-cat="${esc(k)}" aria-pressed="${costFilter.cat === k}">${esc(catPlural(k))}</button>`).join('')}
+    </div>
+
+    <label class="field"><input type="text" id="cq" placeholder="Search code or name" value="${esc(costFilter.q)}"></label>
+    <div class="gear-grid" id="cgrid"></div>`;
+
+  $$('[data-cat]', view).forEach(b => b.onclick = () => { costFilter.cat = b.dataset.cat; renderCostsBoard(view); });
+  $$('[data-jump]', view).forEach(b => b.onclick = () => go('#/costs/summary'));
+  const q = $('#cq', view);
+  q.oninput = () => { costFilter.q = q.value; paint(); };
+  paint();
+
+  function paint() {
+    const needle = costFilter.q.trim().toLowerCase();
+    const list = gear.filter(g => {
+      if (costFilter.cat !== 'all' && catOf(g) !== costFilter.cat) return false;
+      if (needle && !`${g.code} ${g.name}`.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    const grid = $('#cgrid', view);
+    grid.innerHTML = list.map((g, i) => {
+      const mine = costsFor(g.id);
+      const t = costTotals(mine);
+      return `
+        <button class="gear-card cost-card" data-id="${g.id}" style="--i:${Math.min(i, 14)}">
+          <div class="code">${esc(g.code)}</div>
+          <div class="name">${esc(g.name || catLabel(catOf(g)))}</div>
+          <div class="cost-line"><span>Actual</span><b>${moneyShort(t.actual)}</b></div>
+          <div class="cost-line"><span>Planned</span><b class="planned">${moneyShort(t.planned)}</b></div>
+          <div class="loc">${mine.length ? `${mine.length} entr${mine.length === 1 ? 'y' : 'ies'}` : 'Nothing recorded'}</div>
+        </button>`;
+    }).join('') || `<div class="empty" style="grid-column:1/-1"><b>Nothing matches</b></div>`;
+    $$('.cost-card', grid).forEach(b => b.onclick = () => go('#/costs/' + b.dataset.id));
+  }
+}
+
+/* --------------------------------------------------- costs: one asset */
+function renderCostsAsset(view) {
+  const g = gearById(route.path.split('/')[2]);
+  if (!g) { view.innerHTML = `<div class="empty"><b>Asset not found</b></div>`; return; }
+
+  const list = costsFor(g.id);
+  const t = costTotals(list);
+  $('#title').textContent = g.code;
+
+  view.innerHTML = `
+    ${costsBanner()}
+    <div class="card">
+      <h2 style="font-size:19px">${esc(g.code)}</h2>
+      <div class="muted small">${esc(g.name || '')}${g.make_model ? ' · ' + esc(g.make_model) : ''}</div>
+      <div class="cost-totals mt">
+        <div><span class="l">Actual</span><b>${money(t.actual)}</b></div>
+        <div><span class="l">Planned</span><b class="planned">${money(t.planned)}</b></div>
+        <div><span class="l">Variance</span><b class="${t.actual > t.planned ? 'over' : ''}">${money(t.actual - t.planned)}</b></div>
+      </div>
+    </div>
+
+    <a class="btn primary wide" href="#/costs/new?gear=${g.id}">${icon('plus')}Add a cost</a>
+
+    <div class="section-title">Costs (${list.length})</div>
+    ${list.length ? list.map(costRow).join('')
+      : `<div class="card muted small">Nothing recorded against this asset yet.</div>`}`;
+
+  $$('[data-cost]', view).forEach(b => b.onclick = () => go('#/costs/edit/' + b.dataset.cost));
+}
+
+function costRow(c) {
+  const files = Array.isArray(c.files) ? c.files : [];
+  const due = c.payment_on ? dueText(c.payment_on) : null;
+  const chasing = c.kind === 'planned' && due && due.late;
+  return `
+    <button class="wo cost-entry ${c.kind}" data-cost="${c.id}">
+      <div class="hdr">
+        <span class="num">${c.kind === 'planned' ? 'PLANNED' : 'ACTUAL'}</span>
+        <span class="grow"></span>
+        <span class="amount">${money(c.amount)}</span>
+      </div>
+      <div class="ttl">${esc(c.description || 'No description')}</div>
+      <div class="sub">
+        <span>Incurred ${c.incurred_on ? fmtDate(c.incurred_on) : '—'}</span>
+        ${c.payment_on ? `<span class="${chasing ? 'overdue' : ''}">Payment ${fmtDate(c.payment_on)}</span>` : ''}
+        ${files.length ? `<span>${files.length} file${files.length === 1 ? '' : 's'}</span>` : ''}
+      </div>
+    </button>`;
+}
+
+/* ------------------------------------------- costs: add / edit one cost */
+function renderCostForm(view) {
+  const editing = route.path.startsWith('/costs/edit/');
+  const existing = editing ? costById(route.path.split('/')[3]) : null;
+  if (editing && !existing) { view.innerHTML = `<div class="empty"><b>Cost not found</b></div>`; return; }
+
+  const gear = sortedGear(activeGear());
+  if (!gear.length) { view.innerHTML = `<div class="empty"><b>No assets yet</b></div>`; return; }
+
+  const preset = existing ? existing.gear_id : (route.query.gear || '');
+  const draft = {
+    kind: existing ? existing.kind : 'actual',
+    files: existing && Array.isArray(existing.files) ? existing.files.slice() : [],
+    newFiles: []
+  };
+
+  view.innerHTML = `
+    ${costsBanner()}
+    <div class="card">
+      <label class="field"><span>Which asset?</span>
+        <select id="cGear">
+          <option value="">Choose…</option>
+          ${allCategoryKeys().filter(k => gear.some(x => catOf(x) === k)).map(k => `
+            <optgroup label="${esc(catPlural(k))}">
+              ${gear.filter(x => catOf(x) === k).map(x =>
+                `<option value="${x.id}" ${x.id === preset ? 'selected' : ''}>${esc(x.code)}${x.name ? ' — ' + esc(x.name) : ''}</option>`).join('')}
+            </optgroup>`).join('')}
+        </select></label>
+    </div>
+
+    <div class="card">
+      <h2>Planned or actual?</h2>
+      <div class="choice cost-choice" id="cKind">
+        <button type="button" data-kind="planned" aria-pressed="${draft.kind === 'planned'}">
+          <span class="bulb"></span>
+          <span><b>Planned</b><span>Expected, not yet incurred.</span></span>
+        </button>
+        <button type="button" data-kind="actual" aria-pressed="${draft.kind === 'actual'}">
+          <span class="bulb"></span>
+          <span><b>Actual</b><span>A cost that has been incurred.</span></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="field"><span>Amount (NZD)</span>
+        <input type="number" id="cAmt" step="0.01" inputmode="decimal" placeholder="0.00"
+               value="${existing && existing.amount != null ? esc(existing.amount) : ''}"></label>
+      <label class="field"><span>What is it for?</span>
+        <textarea id="cDesc" placeholder="e.g. 500-hour service, new drum teeth">${esc(existing ? existing.description : '')}</textarea></label>
+      <div class="row" style="gap:10px">
+        <label class="field grow"><span>Date incurred</span>
+          <input type="date" id="cInc" value="${esc(existing ? (existing.incurred_on || '') : today())}"></label>
+        <label class="field grow"><span>Payment date</span>
+          <input type="date" id="cPay" value="${esc(existing ? (existing.payment_on || '') : '')}"></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Invoice or paperwork</h2>
+      <input type="file" id="cFile" hidden multiple>
+      <button class="btn wide" id="cAddFile" type="button">${icon('clip')}Attach a file</button>
+      <div id="cFiles" class="mt"></div>
+    </div>
+
+    <button class="btn primary wide" id="cSave">${editing ? 'Save changes' : 'Save cost'}</button>
+    ${editing ? `
+      <div class="btn-row mt">
+        ${existing.kind === 'planned' ? `<button class="btn" id="cActualise">Mark as actual</button>` : ''}
+        <button class="btn" id="cDelete">Delete</button>
+      </div>` : ''}`;
+
+  $$('#cKind button', view).forEach(b => b.onclick = () => {
+    draft.kind = b.dataset.kind;
+    $$('#cKind button', view).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  });
+
+  const fileInput = $('#cFile', view);
+  $('#cAddFile', view).onclick = () => fileInput.click();
+  fileInput.onchange = async () => {
+    for (const f of Array.from(fileInput.files || [])) draft.newFiles.push(await compressImage(f));
+    fileInput.value = '';
+    paintFiles();
+  };
+  paintFiles();
+
+  function paintFiles() {
+    const box = $('#cFiles', view);
+    const saved = draft.files.map((f, i) =>
+      `<div class="filerow"><a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>
+       <button class="btn sm" data-drop="${i}">Remove</button></div>`).join('');
+    const pending = draft.newFiles.map((f, i) =>
+      `<div class="filerow"><span class="attach">${icon('file')}${esc(f.name || 'file')}</span>
+       <button class="btn sm" data-dropnew="${i}">Remove</button></div>`).join('');
+    box.innerHTML = (saved + pending) || '<p class="muted small" style="margin:0">Nothing attached.</p>';
+    $$('[data-drop]', box).forEach(b => b.onclick = () => { draft.files.splice(+b.dataset.drop, 1); paintFiles(); });
+    $$('[data-dropnew]', box).forEach(b => b.onclick = () => { draft.newFiles.splice(+b.dataset.dropnew, 1); paintFiles(); });
+  }
+
+  $('#cSave', view).onclick = async function () {
+    const gear_id = $('#cGear', view).value;
+    const raw = $('#cAmt', view).value.trim();
+    const amount = Number(raw);
+    if (!gear_id) return toast('Pick an asset');
+    if (!raw || isNaN(amount)) return toast('Enter an amount');
+
+    this.disabled = true;
+    this.textContent = 'Saving…';
+    const files = draft.files.slice();
+    for (const f of draft.newFiles) files.push(await Store.upload(f));
+
+    const row = {
+      gear_id,
+      kind: draft.kind,
+      amount,
+      description: $('#cDesc', view).value.trim(),
+      incurred_on: $('#cInc', view).value || null,
+      payment_on: $('#cPay', view).value || null,
+      files,
+      updated_at: new Date().toISOString()
+    };
+
+    if (editing) await Store.patch('costs', existing.id, row);
+    else await Store.insert('costs', Object.assign(
+      { id: uid(), created_by: whoami(), created_at: new Date().toISOString() }, row));
+
+    toast(editing ? 'Saved' : 'Cost added');
+    go('#/costs/' + gear_id);
+  };
+
+  const actualise = $('#cActualise', view);
+  if (actualise) actualise.onclick = async () => {
+    await Store.patch('costs', existing.id, {
+      kind: 'actual',
+      incurred_on: existing.incurred_on || today(),
+      updated_at: new Date().toISOString()
+    });
+    toast('Moved to actual');
+    go('#/costs/' + existing.gear_id);
+  };
+
+  const del = $('#cDelete', view);
+  if (del) del.onclick = async () => {
+    if (!confirm('Delete this cost? It cannot be undone.')) return;
+    const gid = existing.gear_id;
+    await Store.remove('costs', existing.id);
+    toast('Deleted');
+    go('#/costs/' + gid);
+  };
+}
+
+/* ------------------------------------------------- costs: the tracker */
+const trackRange = { from: '', to: '', preset: 'month' };
+
+function presetRange(key) {
+  const n = new Date();
+  const y = n.getFullYear(), m = n.getMonth();
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (key === 'month')   return [iso(new Date(y, m, 1)), iso(new Date(y, m + 1, 0))];
+  if (key === 'last')    return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
+  if (key === 'quarter') { const q = Math.floor(m / 3) * 3; return [iso(new Date(y, q, 1)), iso(new Date(y, q + 3, 0))]; }
+  // NZ financial year runs April to March
+  if (key === 'year')    { const fy = m >= 3 ? y : y - 1; return [`${fy}-04-01`, `${fy + 1}-03-31`]; }
+  return ['', ''];
+}
+
+function renderCostSummary(view) {
+  if (trackRange.preset !== 'custom' && !trackRange.from) {
+    const r = presetRange(trackRange.preset);
+    trackRange.from = r[0]; trackRange.to = r[1];
+  }
+  const list = costsInRange(trackRange.from, trackRange.to);
+  const t = costTotals(list);
+  const variance = t.actual - t.planned;
+
+  const byAsset = {};
+  list.forEach(c => {
+    byAsset[c.gear_id] = byAsset[c.gear_id] || { planned: 0, actual: 0 };
+    const v = Number(c.amount) || 0;
+    if (c.kind === 'planned') byAsset[c.gear_id].planned += v;
+    else byAsset[c.gear_id].actual += v;
+  });
+  const assets = Object.keys(byAsset)
+    .map(id => ({ g: gearById(id), planned: byAsset[id].planned, actual: byAsset[id].actual }))
+    .filter(r => r.g)
+    .sort((a, b) => (b.actual + b.planned) - (a.actual + a.planned));
+
+  const months = {};
+  list.forEach(c => {
+    const key = costDate(c).slice(0, 7);
+    if (!key) return;
+    months[key] = months[key] || { planned: 0, actual: 0 };
+    const v = Number(c.amount) || 0;
+    if (c.kind === 'planned') months[key].planned += v; else months[key].actual += v;
+  });
+  const monthRows = Object.keys(months).sort((a, b) => b.localeCompare(a)).map(k => [k, months[k]]);
+  const peak = Math.max(1, ...monthRows.map(r => Math.max(r[1].actual, r[1].planned)));
+
+  const upcoming = DB.costs
+    .filter(c => c.kind === 'planned' && c.payment_on)
+    .sort((a, b) => a.payment_on.localeCompare(b.payment_on))
+    .slice(0, 8);
+
+  const presets = [['month', 'This month'], ['last', 'Last month'], ['quarter', 'This quarter'],
+                   ['year', 'Financial year'], ['custom', 'Custom']];
+
+  view.innerHTML = `
+    ${costsBanner()}
+    <div class="filters">
+      ${presets.map(pr => `<button class="chip" data-preset="${pr[0]}" aria-pressed="${trackRange.preset === pr[0]}">${pr[1]}</button>`).join('')}
+    </div>
+
+    ${trackRange.preset === 'custom' ? `
+      <div class="row" style="gap:10px">
+        <label class="field grow"><span>From</span><input type="date" id="rFrom" value="${esc(trackRange.from)}"></label>
+        <label class="field grow"><span>To</span><input type="date" id="rTo" value="${esc(trackRange.to)}"></label>
+      </div>` : ''}
+
+    <div class="cost-totals big">
+      <div><span class="l">Actual</span><b>${money(t.actual)}</b></div>
+      <div><span class="l">Planned</span><b class="planned">${money(t.planned)}</b></div>
+      <div><span class="l">Variance</span><b class="${variance > 0 ? 'over' : ''}">${money(variance)}</b></div>
+    </div>
+    <p class="muted tiny center">${trackRange.from ? fmtDate(trackRange.from) : 'start'} to ${trackRange.to ? fmtDate(trackRange.to) : 'today'} · ${list.length} entr${list.length === 1 ? 'y' : 'ies'}</p>
+
+    <div class="section-title">By month</div>
+    <div class="card">
+      ${monthRows.length ? monthRows.map(r => {
+        const d = new Date(r[0] + '-01T00:00:00');
+        return `
+          <div class="mrow">
+            <div class="mlabel">${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}</div>
+            <div class="mbars">
+              <div class="mbar actual" style="width:${(r[1].actual / peak * 100).toFixed(1)}%"></div>
+              <div class="mbar planned" style="width:${(r[1].planned / peak * 100).toFixed(1)}%"></div>
+            </div>
+            <div class="mamt">${moneyShort(r[1].actual)}</div>
+          </div>`;
+      }).join('') : '<p class="muted small" style="margin:0">Nothing in this period.</p>'}
+      ${monthRows.length ? '<p class="muted tiny mt" style="margin-bottom:0">Solid bar actual, outline planned.</p>' : ''}
+    </div>
+
+    <div class="section-title">By asset</div>
+    ${assets.length ? `<div class="card"><table class="data">
+      <tr><th style="width:auto">Asset</th><th style="width:26%">Actual</th><th style="width:26%">Planned</th></tr>
+      ${assets.map(r => `<tr>
+        <td><strong>${esc(r.g.code)}</strong> <span class="muted">${esc(r.g.name || '')}</span></td>
+        <td>${money(r.actual)}</td>
+        <td class="muted">${money(r.planned)}</td>
+      </tr>`).join('')}
+    </table></div>` : '<div class="card muted small">Nothing in this period.</div>'}
+
+    <div class="section-title">Payments coming up</div>
+    ${upcoming.length ? upcoming.map(c => {
+      const g = gearById(c.gear_id) || {};
+      const due = dueText(c.payment_on);
+      return `<button class="wo cost-entry planned" data-cost="${c.id}">
+        <div class="hdr"><span class="num">${esc(g.code || '')}</span><span class="grow"></span>
+          <span class="amount">${money(c.amount)}</span></div>
+        <div class="ttl">${esc(c.description || 'No description')}</div>
+        <div class="sub"><span class="${due.late ? 'overdue' : ''}">${fmtDate(c.payment_on)} · ${due.text}</span></div>
+      </button>`;
+    }).join('') : '<div class="card muted small">No planned payments with a date.</div>'}
+
+    <div class="btn-row mt">
+      <button class="btn" id="costPrint">${icon('printer')}Print</button>
+      <button class="btn" id="costCsv">Download CSV</button>
+    </div>`;
+
+  $$('[data-preset]', view).forEach(b => b.onclick = () => {
+    trackRange.preset = b.dataset.preset;
+    if (trackRange.preset !== 'custom') {
+      const r = presetRange(trackRange.preset);
+      trackRange.from = r[0]; trackRange.to = r[1];
+    }
+    renderCostSummary(view);
+  });
+  const f = $('#rFrom', view), tt = $('#rTo', view);
+  if (f) f.onchange = () => { trackRange.from = f.value; renderCostSummary(view); };
+  if (tt) tt.onchange = () => { trackRange.to = tt.value; renderCostSummary(view); };
+  $$('[data-cost]', view).forEach(b => b.onclick = () => go('#/costs/edit/' + b.dataset.cost));
+  $('#costPrint', view).onclick = () => printCosts(list, assets, t);
+  $('#costCsv', view).onclick = () => exportCostsCsv(list);
+}
+
+function printCosts(list, assets, t) {
+  const range = `${trackRange.from ? fmtDate(trackRange.from) : 'start'} to ${trackRange.to ? fmtDate(trackRange.to) : 'today'}`;
+  printDoc(`
+    ${docHead('Cost report', range)}
+    <h2>Summary</h2>
+    <table class="kv">
+      <tr><td>Actual</td><td><strong>${money(t.actual)}</strong></td></tr>
+      <tr><td>Planned</td><td>${money(t.planned)}</td></tr>
+      <tr><td>Variance</td><td>${money(t.actual - t.planned)}</td></tr>
+      <tr><td>Entries</td><td>${list.length}</td></tr>
+    </table>
+
+    <h2>By asset</h2>
+    <table>
+      <tr><th>Asset</th><th>Name</th><th>Actual</th><th>Planned</th></tr>
+      ${assets.map(r => `<tr><td><strong>${esc(r.g.code)}</strong></td><td>${esc(r.g.name || '')}</td>
+        <td>${money(r.actual)}</td><td>${money(r.planned)}</td></tr>`).join('')
+        || '<tr><td colspan="4">Nothing in this period.</td></tr>'}
+    </table>
+
+    <h2>Every entry</h2>
+    <table>
+      <tr><th style="width:22mm">Incurred</th><th style="width:17mm">Type</th><th style="width:19mm">Asset</th>
+          <th>Description</th><th style="width:22mm">Payment</th><th style="width:23mm">Amount</th></tr>
+      ${list.slice().sort((a, b) => costDate(a).localeCompare(costDate(b))).map(c => {
+        const g = gearById(c.gear_id) || {};
+        return `<tr class="avoid-break">
+          <td>${c.incurred_on ? fmtDate(c.incurred_on) : '—'}</td>
+          <td>${c.kind === 'planned' ? 'Planned' : 'Actual'}</td>
+          <td><strong>${esc(g.code || '')}</strong></td>
+          <td class="note">${esc(c.description || '')}</td>
+          <td>${c.payment_on ? fmtDate(c.payment_on) : '—'}</td>
+          <td>${money(c.amount)}</td></tr>`;
+      }).join('') || '<tr><td colspan="6">Nothing in this period.</td></tr>'}
+    </table>`);
+}
+
+function exportCostsCsv(list) {
+  const head = ['Type', 'Asset', 'Name', 'Amount', 'Description', 'Date incurred',
+                'Payment date', 'Attachments', 'Entered by', 'Entered'];
+  const rows = list.slice().sort((a, b) => costDate(a).localeCompare(costDate(b))).map(c => {
+    const g = gearById(c.gear_id) || {};
+    const files = Array.isArray(c.files) ? c.files : [];
+    return [c.kind === 'planned' ? 'Planned' : 'Actual', g.code || '', g.name || '',
+      Number(c.amount) || 0, c.description || '', c.incurred_on || '', c.payment_on || '',
+      files.map(f => f.name).join('; '), c.created_by || '', fmtDateTime(c.created_at)];
+  });
+  downloadCsv([head, ...rows], `rck-costs-${today()}.csv`);
+}
+
+/* ================================================================
    Screen — settings
    ================================================================ */
 function renderSetup(view) {
@@ -2165,6 +2779,7 @@ function startPolling() {
    ================================================================ */
 $('#menuBtn').onclick = () => { $('#menu').hidden = !$('#menu').hidden; };
 $('#backBtn').onclick = () => history.back();
+$('#homeBtn').onclick = () => go('#/');
 $$('#menu [data-go]').forEach(b => b.onclick = () => { $('#menu').hidden = true; go(b.dataset.go); });
 document.addEventListener('click', e => {
   if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('#menuBtn')) $('#menu').hidden = true;

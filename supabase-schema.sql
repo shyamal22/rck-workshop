@@ -116,3 +116,36 @@ create policy workshop_files_read on storage.objects
 create policy workshop_files_write on storage.objects
   for insert to anon, authenticated
   with check (bucket_id = 'workshop-files');
+
+-- =====================================================================
+--  Costs — planned and actual spend against each asset.
+--
+--  Deliberately independent of work orders: nothing here feeds the
+--  maintenance side and nothing there feeds this. A repair cost recorded
+--  on a work order does NOT appear in the cost tracker, and vice versa.
+-- =====================================================================
+create table if not exists costs (
+  id          uuid primary key default gen_random_uuid(),
+  gear_id     uuid not null references gear(id) on delete cascade,
+  kind        text not null default 'actual' check (kind in ('planned','actual')),
+  amount      numeric not null default 0,
+  description text not null default '',
+  incurred_on date,                                  -- when the cost was incurred
+  payment_on  date,                                  -- when payment is/was due
+  files       jsonb not null default '[]'::jsonb,    -- invoices and attachments
+  created_by  text not null default '',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index if not exists costs_gear_idx     on costs (gear_id);
+create index if not exists costs_incurred_idx on costs (incurred_on);
+create index if not exists costs_payment_idx  on costs (payment_on);
+
+drop trigger if exists costs_touch on costs;
+create trigger costs_touch before update on costs
+  for each row execute function touch_work_order();
+
+alter table costs enable row level security;
+drop policy if exists costs_all on costs;
+create policy costs_all on costs for all to anon, authenticated using (true) with check (true);
