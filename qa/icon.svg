@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RCK QA">
+  <rect width="512" height="512" rx="112" fill="#14171a"/>
+  <path d="M150 268 L222 340 L362 180" stroke="#facc15" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M128 396 L384 396" stroke="#3f464e" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M160 396 L160 368M224 396 L224 358M288 396 L288 368M352 396 L352 358" stroke="#3f464e" stroke-width="18" stroke-linecap="round" fill="none"/>
+</svg>

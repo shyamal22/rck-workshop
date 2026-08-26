@@ -211,3 +211,4 @@ its own. They share nothing but the look, so a phone that knows one knows the ot
 | [`hr/`](hr/) | **RCK HR** — staff records, licences and compliance |
 | [`dispatch/`](dispatch/) | **RCK Dispatch** — jobs, site paperwork and the daily job diary |
 | [`costing/`](costing/) | **RCK Costing** — what a job was priced at, what it cost, and what it made (no database — it lives on the phone) |
+| [`qa/`](qa/) | **RCK QA** — asphalt QA: site details, patch photos and string depths |
