@@ -18,7 +18,7 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 ## What it does
 
 **For the office (and directors, who can do everything)**
-- Create a job: name, client, site, type of work, the dates, and who's running it.
+- Create a job: name, client, site, **which crew is on it**, the dates, and who's running it.
 - Load anything onto it — PMP, scope, job cards, TMP, drawings, permits, spreadsheets,
   photos. Several files at once is fine.
 - Decide who each document is for: **everyone**, **site crew**, or **office only**.
@@ -174,6 +174,11 @@ Workshop in the same repository and GitHub Pages serves it from
 - **The money is not a secret from the database.** Value and cost are hidden from site phones
   by the app, not by the database — same as the office-only documents. See the note on logins
   below before deciding what to put in those boxes.
+- **The board is filtered by crew.** Yellow, Subbie, Civil and Green, each with its own
+  colour so a chip is recognised before it is read, plus **Unassigned** whenever a job has
+  no crew on it yet. Type of work is still on every job, and in the reports and the
+  spreadsheet — it just isn't a filter, because nobody looks for a job that way. Adding a
+  fifth crew is one line in `CREWS` at the top of `app.js`.
 - **Types of work aren't a fixed list.** Pick **+ Add a new type…** when creating a job
   and name it — "Chip seal", say — and from then on it's a type like any other, with
   its own filter on the board. Naming one that already exists in a different spelling
