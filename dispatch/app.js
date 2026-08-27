@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -144,23 +144,23 @@ const AUDIENCES = [
    them. `mark` gives the entry a coloured dot on the timeline, because it
    is a moment that matters rather than a passing note. */
 const ENTRY_TYPES = [
-  { key: 'onsite',        label: 'On site',            tone: 'green',  mark: true,  quick: true },
-  { key: 'prestart',      label: 'Prestart',           tone: 'green',  mark: true,  quick: true },
+  { key: 'onsite',        label: 'On site',            tone: 'green',  mark: true },
+  { key: 'prestart',      label: 'Prestart',           tone: 'green',  mark: true },
   { key: 'tm_setup',      label: 'Traffic management set up', tone: 'blue' },
-  { key: 'milling_start', label: 'Milling started',    tone: 'green',  mark: true,  quick: true },
+  { key: 'milling_start', label: 'Milling started',    tone: 'green',  mark: true },
   { key: 'milling_stop',  label: 'Milling stopped',    tone: 'blue',   mark: true },
-  { key: 'paving_start',  label: 'Paving started',     tone: 'green',  mark: true,  quick: true },
+  { key: 'paving_start',  label: 'Paving started',     tone: 'green',  mark: true },
   { key: 'paving_stop',   label: 'Paving stopped',     tone: 'blue',   mark: true },
   { key: 'delivery',      label: 'Delivery',           tone: 'blue' },
   { key: 'break',         label: 'Break',              tone: 'slate' },
-  { key: 'issue',         label: 'Issue',              tone: 'red',    mark: true,  quick: true },
+  { key: 'issue',         label: 'Issue',              tone: 'red',    mark: true },
   { key: 'delay',         label: 'Delay',              tone: 'yellow', mark: true },
   { key: 'weather',       label: 'Weather',            tone: 'yellow' },
   { key: 'visitor',       label: 'Visitor',            tone: 'blue' },
   { key: 'tm_down',       label: 'Traffic management removed', tone: 'blue' },
   { key: 'note',          label: 'Note',               tone: 'slate' },
   { key: 'photos',        label: 'Photos',             tone: 'slate' },
-  { key: 'offsite',       label: 'Off site',           tone: 'slate',  mark: true,  quick: true }
+  { key: 'offsite',       label: 'Off site',           tone: 'slate',  mark: true }
 ];
 
 /* ------------------------------------------------------- small tools */
@@ -798,7 +798,11 @@ function defaultShiftDate(projectId) {
   const y = new Date(now.getTime() - 86400000);
   const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
   const last = entriesFor(projectId, yStr);
-  return last.length && isNightShift(last.concat([{ at: now.toISOString() }])) ? yStr : today();
+  if (!last.length) return today();
+  if (!isNightShift(last.concat([{ at: now.toISOString() }]))) return today();
+  // Once the crew has logged itself off site that shift is finished, and an
+  // early start the next morning is a new day — not more of last night.
+  return last.some(e => e.kind === 'offsite') ? today() : yStr;
 }
 
 /** Diary entries for a job, in the order they happened. One shift when a
@@ -849,16 +853,8 @@ function isTodayJob(p) {
 }
 
 /* --------------------------------------------------------- periods */
-/* A director thinks in months and financial years, not in dates typed
-   twice. RCK's year runs 1 April to 31 March like everyone else's here. */
-const PERIODS = [
-  { key: 'month',   label: 'This month' },
-  { key: 'last',    label: 'Last month' },
-  { key: 'quarter', label: 'This quarter' },
-  { key: 'fy',      label: 'Financial year' },
-  { key: 'all',     label: 'All time' }
-];
-
+/* The only preset left, for the month's figure on the landing page. The
+   P&L itself takes the dates the director picks. */
 function periodRange(key) {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
@@ -871,13 +867,6 @@ function periodRange(key) {
                            return [iso(y, q, 1), iso(y, q + 2, lastDay(y, q + 2))]; }
   if (key === 'fy')      { const fy = m >= 3 ? y : y - 1; return [iso(fy, 3, 1), iso(fy + 1, 2, 31)]; }
   return ['', ''];
-}
-function periodLabel(key, from, to) {
-  const p = PERIODS.find(x => x.key === key);
-  if (p && key !== 'all') return `${p.label} — ${fmtDate(from)} to ${fmtDate(to)}`;
-  if (key === 'all') return 'All time';
-  if (from || to) return `${from ? fmtDate(from) : 'the beginning'} to ${to ? fmtDate(to) : 'today'}`;
-  return 'All time';
 }
 
 /** A job belongs to a period if it was actually on site in it, or was due
@@ -1967,40 +1956,40 @@ function renderDiary(view) {
   if (!p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
   $('#title').textContent = 'Job diary';
 
-  const days = diaryDays(p.id);
   const closed = p.status === 'completed';
-  const quick = ENTRY_TYPES.filter(t => t.quick);
+  // The day turns over whether or not anybody has written in it yet. Showing
+  // today's box empty is how a supervisor sees that it is a new day.
+  const days = diaryDays(p.id);
+  const showToday = !closed && !days.includes(today());
+  const boxes = showToday ? [today()].concat(days) : days;
 
   view.innerHTML = `
     ${jobHeader(p, 'diary')}
 
     ${closed ? '<div class="banner info">This job is completed — the diary is closed and kept as it is.</div>' : `
-      <div class="card">
-        <h2>Log something now</h2>
-        <div class="quick">
-          ${quick.map(t => `<button data-kind="${t.key}" class="status-${t.tone}">
-            <span class="swatch"></span>${esc(t.label)}</button>`).join('')}
-        </div>
-        <a class="btn wide mt" href="#/entry/${p.id}">${icon('plus')}Something else…</a>
-      </div>`}
+      <a class="btn primary wide logbtn" href="#/entry/${p.id}">${icon('plus')}Log something</a>`}
 
-    ${days.length ? days.map(day => {
+    ${boxes.map(day => {
       const list = entriesFor(p.id, day);
       const span = shiftSpan(list);
+      const isToday = day === today();
       return `
-        <div class="dayhead">
-          <h3>${esc(fmtDayDate(day))}</h3>
-          <span class="sub">${list.length} entr${list.length > 1 ? 'ies' : 'y'}${span ? ' · ' + esc(span) + ' on site' : ''}</span>
+        <div class="dayhead${isToday ? ' today' : ''}">
+          <h3>${esc(fmtDayDate(day))}${isToday ? '<em>Today</em>' : ''}</h3>
+          <span class="sub">${list.length
+            ? `${list.length} entr${list.length > 1 ? 'ies' : 'y'}${span ? ' · ' + esc(span) + ' on site' : ''}`
+            : 'nothing yet'}</span>
         </div>
         <div class="card">
-          <div class="diary">${list.map(diaryItem).join('')}</div>
-          <div class="btn-row mt">
-            <button class="btn sm" data-day="${day}">${icon('printer')}Print this day</button>
-          </div>
+          ${list.length ? `
+            <div class="diary">${list.map(diaryItem).join('')}</div>
+            <div class="btn-row mt">
+              <button class="btn sm" data-day="${day}">${icon('printer')}Print this day</button>
+            </div>`
+          : `<p class="muted small" style="margin:0">Nothing logged for today yet.
+             <a href="#/entry/${p.id}">Start the day →</a></p>`}
         </div>`;
-    }).join('') : `<div class="empty"><b>Nothing logged yet</b>The first entry starts the job.</div>`}`;
-
-  $$('.quick button', view).forEach(b => b.onclick = () => go(`#/entry/${p.id}?kind=${encodeURIComponent(b.dataset.kind)}`));
+    }).join('') || `<div class="empty"><b>Nothing logged yet</b>The first entry starts the job.</div>`}`;
   $$('[data-day]', view).forEach(b => b.onclick = () => printDayReport(p, b.dataset.day));
   $$('.d-item', view).forEach(el => el.onclick = ev => {
     if (ev.target.closest('a')) return;   // opening a photo isn't editing
@@ -2356,9 +2345,27 @@ function renderCosts(view) {
 
   view.innerHTML = `
     <div class="card accent status-${statusTone(p.status)}">
-      <div class="tiny" style="color:var(--ink-3);letter-spacing:.04em;font-weight:700">${jobNo(p)}</div>
-      <h2 style="font-size:18px;margin:2px 0 3px">${esc(p.name)}</h2>
-      <div class="small muted">${esc(p.client || 'No client named')}</div>
+      <div class="row spread" style="align-items:flex-start">
+        <div class="grow">
+          <div class="tiny" style="color:var(--ink-3);letter-spacing:.04em;font-weight:700">${jobNo(p)}</div>
+          <h2 style="font-size:18px;margin:2px 0 3px">${esc(p.name)}</h2>
+          <div class="small muted">${esc(p.client || 'No client named')}</div>
+        </div>
+        <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+      </div>
+      <div class="sub" style="margin-top:9px;display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12.5px">
+        <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
+        ${p.site ? `<span>${esc(p.site)}</span>` : ''}
+        ${p.start_date ? `<span>${esc(fmtShort(p.start_date))}${
+          p.end_date && p.end_date !== p.start_date ? '–' + esc(fmtShort(p.end_date)) : ''}</span>` : ''}
+        ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="btn-row mb">
+      <a class="btn sm" href="#/diary/${p.id}">${icon('book')}Timeline${
+        entriesFor(p.id).length ? ` (${entriesFor(p.id).length})` : ''}</a>
+      <a class="btn sm" href="#/job/${p.id}">${icon('doc')}Full job</a>
     </div>
 
     <div class="card">
@@ -2531,11 +2538,24 @@ function wireCosts(view, p) {
    supervisors and the office entered on the jobs themselves — nothing
    here is typed twice.
    ================================================================ */
-const overview = { period: 'month', from: '', to: '', sort: 'value' };
+/* Active by default, because those are the jobs a decision can still be
+   made about. Completed is one tap away, and that is where the actuals are. */
+const pnlFilter = { view: 'active', client: 'all', from: '', to: '', sort: 'value' };
 
-function overviewRange() {
-  if (overview.period === 'custom') return [overview.from, overview.to];
-  return periodRange(overview.period);
+function pnlJobs() {
+  return DB.projects.filter(p => {
+    if (pnlFilter.view === 'active' && p.status === 'completed') return false;
+    if (pnlFilter.view === 'done' && p.status !== 'completed') return false;
+    if (pnlFilter.client !== 'all' && (p.client || '').trim() !== pnlFilter.client) return false;
+    return jobInPeriod(p, pnlFilter.from, pnlFilter.to);
+  });
+}
+function pnlLabel() {
+  const who = pnlFilter.client === 'all' ? 'all clients' : pnlFilter.client;
+  const when = (pnlFilter.from || pnlFilter.to)
+    ? `${pnlFilter.from ? fmtDate(pnlFilter.from) : 'the beginning'} to ${pnlFilter.to ? fmtDate(pnlFilter.to) : 'today'}`
+    : 'all dates';
+  return `${pnlFilter.view === 'done' ? 'Completed jobs' : 'Planned and on site'} · ${who} · ${when}`;
 }
 
 function renderPnl(view) {
@@ -2551,65 +2571,62 @@ function renderPnl(view) {
     return;
   }
 
-  const [from, to] = overviewRange();
-  const list = DB.projects.filter(p => jobInPeriod(p, from, to));
+  const list = pnlJobs();
   const t = periodTotals(list);
+  const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim()).filter(Boolean))).sort();
+  const done = pnlFilter.view === 'done';
 
   const mg = p => { const m = costing(p); return m.acMargin != null ? m.acMargin : m.exMargin; };
   const sorters = {
     value:  (a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1),
     margin: (a, b) => ((mg(b) == null ? -Infinity : mg(b)) - (mg(a) == null ? -Infinity : mg(a))),
-    days:   (a, b) => diaryDays(b.id).length - diaryDays(a.id).length,
-    issues: (a, b) => issueCount(b.id) - issueCount(a.id)
+    name:   (a, b) => String(a.name || '').localeCompare(String(b.name || '')),
+    date:   (a, b) => String(b.start_date || '').localeCompare(String(a.start_date || ''))
   };
-  const sorted = list.slice().sort(sorters[overview.sort] || sorters.value);
+  const sorted = list.slice().sort(sorters[pnlFilter.sort] || sorters.value);
 
   view.innerHTML = `
-    <div class="filters" id="periodChips">
-      ${PERIODS.map(x => `<button class="chip" data-period="${x.key}"
-        aria-pressed="${overview.period === x.key}">${esc(x.label)}</button>`).join('')}
-      <button class="chip" data-period="custom" aria-pressed="${overview.period === 'custom'}">Pick dates</button>
-    </div>
-
-    ${overview.period === 'custom' ? `
-      <div class="card">
-        <div class="row">
-          <label class="field grow"><span>From</span><input type="date" id="from" value="${esc(overview.from)}"></label>
-          <label class="field grow"><span>To</span><input type="date" id="to" value="${esc(overview.to)}"></label>
-        </div>
-      </div>` : ''}
-
-    <p class="muted small mb">${esc(periodLabel(overview.period, from, to))}</p>
-
-    <div class="card">
-      <div class="stat">
-        <div><span class="n">${t.jobs}</span><span class="l">Jobs</span></div>
-        <div><span class="n">${t.days}</span><span class="l">Days on site</span></div>
-        <div><span class="n">${t.entries}</span><span class="l">Diary entries</span></div>
-        <div><span class="n" style="color:${t.issues ? 'var(--red)' : 'inherit'}">${t.issues}</span><span class="l">Issues</span></div>
-      </div>
+    <div class="filters" id="viewChips">
+      <button class="chip" data-view="active" aria-pressed="${!done}">Planned &amp; on site</button>
+      <button class="chip" data-view="done" aria-pressed="${done}">Completed</button>
     </div>
 
     <div class="card">
-      <h2>Value and margin</h2>
-      <div class="stat">
-        <div><span class="n" style="font-size:19px">${esc(fmtMoney(t.value))}</span><span class="l">Contract value</span></div>
-        <div><span class="n" style="font-size:19px">${esc(fmtMoney(t.cost))}</span><span class="l">Cost</span></div>
-        <div><span class="n" style="font-size:19px;color:${t.margin == null ? 'inherit' : t.margin < 0 ? 'var(--red)' : 'var(--green)'}">${
-          t.margin == null ? '—' : esc(fmtMoney(t.margin))}</span><span class="l">Margin${
-          t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</span></div>
+      <label class="field" style="margin-bottom:10px"><span>Client</span>
+        <select id="client">
+          <option value="all">All clients</option>
+          ${clients.map(c => `<option value="${esc(c)}" ${pnlFilter.client === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select></label>
+      <div class="row">
+        <label class="field grow" style="margin-bottom:0"><span>From</span>
+          <input type="date" id="from" value="${esc(pnlFilter.from)}"></label>
+        <label class="field grow" style="margin-bottom:0"><span>To</span>
+          <input type="date" id="to" value="${esc(pnlFilter.to)}"></label>
       </div>
-      ${t.settled ? `<p class="small mt" style="margin-bottom:0">${t.settled} job(s) finished and
-        invoiced: <strong class="${t.acMargin < 0 ? 'neg' : 'pos'}">${esc(fmtMoney(t.acMargin))}</strong>
-        actual margin${t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}.</p>` : ''}
-      ${t.valued < t.jobs || t.costed < t.jobs ? `<p class="muted tiny mt" style="margin-bottom:0">
-        An invoice is set on ${t.valued} of ${t.jobs} job(s), a costing on ${t.costed}. Totals count
-        only the jobs carrying the figure, so they are a floor, not the whole picture.</p>` : ''}
+      ${(pnlFilter.from || pnlFilter.to || pnlFilter.client !== 'all')
+        ? '<button class="btn sm wide mt" id="clearF">Clear the filters</button>' : ''}
+    </div>
+
+    <div class="card">
+      <div class="stat">
+        <div><span class="n" style="font-size:19px">${esc(fmtMoney(done ? t.acValue : t.value))}</span>
+          <span class="l">${done ? 'Invoiced' : 'Invoice'}</span></div>
+        <div><span class="n" style="font-size:19px">${esc(fmtMoney(done ? t.acCost : t.cost))}</span>
+          <span class="l">Cost</span></div>
+        <div><span class="n" style="font-size:19px;color:${
+          (done ? t.acMargin : t.margin) == null ? 'inherit'
+          : (done ? t.acMargin : t.margin) < 0 ? 'var(--red)' : 'var(--green)'}">${
+          (done ? t.acMargin : t.margin) == null ? '—' : esc(fmtMoney(done ? t.acMargin : t.margin))}</span>
+          <span class="l">Margin${(done ? t.acMarginPct : t.marginPct) != null
+            ? ' · ' + (done ? t.acMarginPct : t.marginPct).toFixed(1) + '%' : ''}</span></div>
+      </div>
+      <p class="muted tiny mt" style="margin-bottom:0">${list.length} job${list.length === 1 ? '' : 's'}${
+        done ? `, ${t.settled} of them invoiced` : `, ${t.valued} priced`}.</p>
     </div>
 
     <div class="filters" id="sortChips">
-      ${[['value','By value'],['margin','By margin'],['days','By days on site'],['issues','By issues']]
-        .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${overview.sort === k}">${l}</button>`).join('')}
+      ${[['value','By value'],['margin','By margin'],['date','By date'],['name','By name']]
+        .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${pnlFilter.sort === k}">${l}</button>`).join('')}
     </div>
 
     ${sorted.length ? sorted.map((p, i) => {
@@ -2617,54 +2634,44 @@ function renderPnl(view) {
       const settled = c.acMargin != null;
       const m = settled ? c.acMargin : c.exMargin;
       const pct = settled ? c.acPct : c.exPct;
-      const days = diaryDays(p.id).length, iss = issueCount(p.id);
       return `
         <button class="job-row status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
           <div class="hdr">
             <span class="num">${jobNo(p)}</span>
             <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
-            ${p.archived ? '<span class="pill plain">Archived</span>' : ''}
+            <span class="pill plain">${settled ? 'Final' : c.lines.length ? 'Priced' : 'Not priced'}</span>
           </div>
           <div class="ttl">${esc(p.name)}</div>
           <div class="sub">
-            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
             ${p.client ? `<span>${esc(p.client)}</span>` : ''}
-            ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
-            <span>${days} day${days === 1 ? '' : 's'} on site</span>
-            ${iss ? `<span class="overdue">${iss} issue${iss > 1 ? 's' : ''}</span>` : ''}
+            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
+            ${p.start_date ? `<span>${esc(fmtShort(p.start_date))}</span>` : ''}
           </div>
           <div class="sub">
             <span><strong>${esc(fmtMoney(settled ? c.acInv : c.exInv))}</strong> invoice</span>
             <span>${esc(fmtMoney(settled ? c.acCost : c.exCost))} cost</span>
             ${m != null ? `<span style="color:${m < 0 ? 'var(--red)' : 'var(--green)'};font-weight:640">${
               esc(fmtMoney(m))}${pct != null ? ' · ' + pct.toFixed(1) + '%' : ''}</span>` : ''}
-            <span class="pill plain">${settled ? 'Final' : c.lines.length ? 'Priced' : 'Not priced'}</span>
           </div>
         </button>`;
-    }).join('') : '<div class="empty"><b>No jobs in this period</b>Try a wider one.</div>'}
+    }).join('') : `<div class="empty"><b>No jobs here</b>${
+      done ? 'Nothing completed matches these filters.' : 'Nothing planned or on site matches these filters.'}</div>`}
 
     <div class="card">
-      <button class="btn wide" id="print">${icon('printer')}Print the director's report</button>
-      <p class="muted tiny center mt" style="margin-bottom:0">Every job in the period, plus every issue
-      and delay the supervisors logged.</p>
+      <button class="btn wide" id="print">${icon('printer')}Print this list</button>
     </div>`;
 
-  $$('#periodChips .chip', view).forEach(b => b.onclick = () => {
-    overview.period = b.dataset.period;
-    if (overview.period === 'custom' && !overview.from && !overview.to) {
-      const [f, t2] = periodRange('month');
-      overview.from = f; overview.to = t2;
-    }
-    render();
-  });
-  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { overview.sort = b.dataset.sort; render(); });
+  $$('#viewChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.view = b.dataset.view; render(); });
+  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.sort = b.dataset.sort; render(); });
+  $('#client', view).onchange = e => { pnlFilter.client = e.target.value; render(); };
+  $('#from', view).onchange = e => { pnlFilter.from = e.target.value; render(); };
+  $('#to', view).onchange = e => { pnlFilter.to = e.target.value; render(); };
+  const clr = $('#clearF', view);
+  if (clr) clr.onclick = () => { pnlFilter.client = 'all'; pnlFilter.from = ''; pnlFilter.to = ''; render(); };
 
-  const f = $('#from', view), t2 = $('#to', view);
-  if (f) f.onchange = () => { overview.from = f.value; render(); };
-  if (t2) t2.onchange = () => { overview.to = t2.value; render(); };
-
-  $$('.job-row', view).forEach(b => b.onclick = () => go('#/job/' + b.dataset.id));
-  $('#print', view).onclick = () => printDirectorReport(from, to);
+  // Straight to the money, not the whole dispatch job page.
+  $$('.job-row', view).forEach(b => b.onclick = () => go('#/costs/' + b.dataset.id));
+  $('#print', view).onclick = () => printDirectorReport(pnlFilter.from, pnlFilter.to, list);
 }
 
 /* ================================================================
@@ -3035,8 +3042,8 @@ function printDocRegister(p) {
 /** The director's report: the period's numbers, every job in it, and every
     issue and delay the crews logged — the supervisors' and the office's own
     entries added up, rather than a separate thing anyone has to write. */
-function printDirectorReport(from, to) {
-  const list = DB.projects.filter(p => jobInPeriod(p, from, to));
+function printDirectorReport(from, to, only) {
+  const list = only || DB.projects.filter(p => jobInPeriod(p, from, to));
   const t = periodTotals(list);
   const sorted = list.slice().sort((a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1));
 
@@ -3048,7 +3055,7 @@ function printDirectorReport(from, to) {
   troubles.sort((a, b) => (a.e.entry_date || '').localeCompare(b.e.entry_date || ''));
 
   printDoc(`
-    ${docHead('Director\'s report', 'Jobs, days and margin', periodLabel(overview.period, from, to))}
+    ${docHead('Director\'s report', 'Jobs, days and margin', pnlLabel())}
 
     <div class="figures">
       <div><div class="n">${t.jobs}</div><div class="l">Jobs</div></div>
@@ -3117,7 +3124,7 @@ function printDirectorReport(from, to) {
     <div class="sig">
       <div>Director &amp; date</div>
       <div>Reviewed &amp; date</div>
-    </div>`, `Director's report · ${periodLabel(overview.period, from, to)}`);
+    </div>`, `Director's report · ${pnlLabel()}`);
 }
 
 /** The job, end to end, in money: what it was priced at, what it came to,

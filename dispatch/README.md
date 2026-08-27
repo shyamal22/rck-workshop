@@ -31,12 +31,13 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 
 **For the supervisor on site**
 - Open the job, read and **download** every document the office put there.
-- Keep the day's diary as it happens. Tap **On site**, **Prestart**, **Milling
-  started**, **Paving started**, **Issue** or **Off site** and it fills in the time;
-  add the comment and the photos.
-- Anything not on that list — *Traffic management set up*, *Delivery*, *Weather*,
-  *Visitor* — is in the full list, and you can name a new type of entry yourself. It
-  is a real type from that moment, on everyone's phone.
+- Keep the day's diary as it happens. **Log something** takes you to one list of everything
+  that can happen — on site, prestart, milling and paving start and stop, deliveries,
+  weather, visitors, issues, delays, off site — with the time already filled in. Name a new
+  type yourself and it is a real type from that moment, on everyone's phone.
+- **Today always has its own box**, empty or not, so a turned-over day is never mistaken for
+  the last one. An early start counts as a new day once the crew has logged itself off site
+  the night before.
 - Every entry takes photos. They're shrunk on the phone so they go through on site.
 - When the job's finished: **Project completed**, with a closing note.
 
@@ -57,11 +58,10 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 - **The job P&L prints** as one document: the money, every line with its variance, your note,
   and every entry the supervisors wrote — because the reason a job went over is usually in
   the diary rather than the spreadsheet.
-- **⋮ → Profit & loss**: every job at once over a period — this month, last month, this
-  quarter, the financial year (1 April to 31 March), or dates you pick. Days on site, diary
-  entries, issues, contract value, cost and margin, sorted by whichever of those you care
-  about. Nothing on it is typed twice: it is added up from what the crews and the office
-  already entered on the jobs.
+- **⋮ → Profit & loss**: what is planned and on site, because those are the jobs a decision
+  can still be made about. **Completed** is one tap away, and that is where the actuals are.
+  Filter by client, or by dates you pick. Tapping a job goes straight to its costing — the
+  overview, a button through to the timeline, and the money — not the whole dispatch page.
 - **The director's report** prints that period — the totals, every job with its margin, and
   **every issue and delay the supervisors logged**, gathered across all the jobs into one table.
 - Value and cost live on the job itself, entered by the office or a director. They are never
