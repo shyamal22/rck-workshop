@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -26,6 +26,30 @@ const JOB_STATUS = [
   { key: 'completed', label: 'Completed', short: 'Done',      tone: 'completed',
     blurb: 'Finished and signed off' }
 ];
+
+/* ------------------------------------------------------------- crews */
+/* Who is on the job. A short, fixed roster — this is the one thing the
+   board is filtered by, so it stays small enough to read at a glance.
+   Adding a fifth crew is one line here and nothing else. */
+const CREWS = [
+  { key: 'yellow', label: 'Yellow Crew', dot: '#d99b00' },
+  { key: 'subbie', label: 'Subbie Crew', dot: '#7a6ad4' },
+  { key: 'civil',  label: 'Civil Crew',  dot: '#2b76c9' },
+  { key: 'green',  label: 'Green Crew',  dot: '#1c8a4f' }
+];
+const UNCREWED = { key: '', label: 'Unassigned', dot: '#9aa2ab' };
+
+function crewOf(p) { return ((p && p.crew) || '').trim(); }
+function crewDef(key) { return CREWS.find(c => c.key === key) || UNCREWED; }
+function crewLabel(key) { return crewDef(key).label; }
+/** The coloured dot that makes a crew readable without reading. */
+function crewDot(key) {
+  return `<span class="crew-dot" style="background:${crewDef(key).dot}"></span>`;
+}
+function crewPill(p) {
+  const k = crewOf(p);
+  return `<span class="pill plain">${crewDot(k)}${esc(crewLabel(k))}</span>`;
+}
 
 /* ------------------------------------------------------- types of work */
 /* What RCK started with. Anyone can add more when creating a job — a type
@@ -1153,6 +1177,7 @@ function renderLogPicker(view) {
             <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span></div>
           <div class="ttl">${esc(p.name)}</div>
           <div class="sub">
+            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
             ${p.site ? `<span>${esc(p.site)}</span>` : ''}
             ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
             <span>${n ? n + ' logged today' : 'nothing logged today'}</span>
@@ -1174,6 +1199,7 @@ function jobHeader(p, tab) {
           <div class="tiny" style="color:var(--ink-3);letter-spacing:.04em;font-weight:700">${jobNo(p)}</div>
           <h2 style="font-size:19px;margin:2px 0 3px">${esc(p.name)}</h2>
           <div class="small muted">${esc(p.client || 'No client named')} · ${esc(typeLabel(typeOf(p)))}</div>
+          <div style="margin-top:7px">${crewPill(p)}</div>
         </div>
         <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
       </div>
@@ -1284,7 +1310,7 @@ function renderWelcome(view) {
 /* ================================================================
    Screen — job board (home)
    ================================================================ */
-const boardFilter = { type: 'all', status: 'all', q: '' };
+const boardFilter = { crew: 'all', status: 'all', q: '' };
 
 function jobCard(p, i) {
   const days = daysOnSite(p);
@@ -1304,8 +1330,8 @@ function jobCard(p, i) {
       ${p.supervisor ? `<div class="line">${icon('person')}${esc(p.supervisor)}</div>` : ''}
       <div class="foot">
         <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+        ${crewPill(p)}
         ${p._unsent ? '<span class="pill plain">Not sent yet</span>' : ''}
-        <span class="pill plain">${esc(typeLabel(typeOf(p)))}</span>
         ${issues ? `<span class="pill plain">${issues} issue${issues > 1 ? 's' : ''}</span>` : ''}
       </div>
     </button>`;
@@ -1333,7 +1359,9 @@ function renderBoard(view) {
   const counts = { planned: 0, ongoing: 0, completed: 0 };
   jobs.forEach(p => { counts[p.status] = (counts[p.status] || 0) + 1; });
 
-  const types = allTypeKeys().filter(k => jobs.some(p => typeOf(p) === k));
+  // The full roster always shows, in the same order, so a chip is where you
+  // last saw it. Unassigned only appears when there is something in it.
+  const crews = CREWS.concat(jobs.some(p => !crewOf(p)) ? [UNCREWED] : []);
 
   view.innerHTML = `
     <div class="tally">
@@ -1344,9 +1372,10 @@ function renderBoard(view) {
         </button>`).join('')}
     </div>
 
-    <div class="filters" id="typeChips">
-      <button class="chip" data-type="all" aria-pressed="${boardFilter.type === 'all'}">All work</button>
-      ${types.map(k => `<button class="chip" data-type="${esc(k)}" aria-pressed="${boardFilter.type === k}">${esc(typeLabel(k))}</button>`).join('')}
+    <div class="filters" id="crewChips">
+      <button class="chip" data-crew="all" aria-pressed="${boardFilter.crew === 'all'}">All crews</button>
+      ${crews.map(c => `<button class="chip" data-crew="${esc(c.key || 'none')}"
+        aria-pressed="${boardFilter.crew === (c.key || 'none')}">${crewDot(c.key)}${esc(c.label)}</button>`).join('')}
     </div>
 
     <label class="field"><input type="text" id="q" value="${esc(boardFilter.q)}"
@@ -1360,9 +1389,12 @@ function renderBoard(view) {
     const q = boardFilter.q.toLowerCase();
     const list = boardOrder(jobs.filter(p => {
       if (boardFilter.status !== 'all' && p.status !== boardFilter.status) return false;
-      if (boardFilter.type !== 'all' && typeOf(p) !== boardFilter.type) return false;
+      if (boardFilter.crew !== 'all') {
+        const want = boardFilter.crew === 'none' ? '' : boardFilter.crew;
+        if (crewOf(p) !== want) return false;
+      }
       if (!q) return true;
-      return [p.name, p.client, p.site, p.supervisor, jobNo(p), typeLabel(typeOf(p))]
+      return [p.name, p.client, p.site, p.supervisor, jobNo(p), crewLabel(crewOf(p)), typeLabel(typeOf(p))]
         .some(v => String(v || '').toLowerCase().includes(q));
     }));
 
@@ -1378,9 +1410,9 @@ function renderBoard(view) {
     paint();
   });
 
-  $$('#typeChips .chip', view).forEach(b => b.onclick = () => {
-    boardFilter.type = b.dataset.type;
-    $$('#typeChips .chip', view).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.type === boardFilter.type)));
+  $$('#crewChips .chip', view).forEach(b => b.onclick = () => {
+    boardFilter.crew = b.dataset.crew;
+    $$('#crewChips .chip', view).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.crew === boardFilter.crew)));
     paint();
   });
 
@@ -1421,6 +1453,7 @@ function renderToday(view) {
         </div>
         <div class="ttl">${esc(p.name)}</div>
         <div class="sub">
+          <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
           ${p.site ? `<span>${esc(p.site)}</span>` : ''}
           ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
           <span>${eToday.length ? eToday.length + ' entr' + (eToday.length > 1 ? 'ies' : 'y') + ' today' : 'nothing logged today'}</span>
@@ -1439,8 +1472,8 @@ function renderToday(view) {
           <div class="hdr"><span class="num">${jobNo(p)}</span>
             <span class="pill plain">${esc(startText(p.start_date).text)}</span></div>
           <div class="ttl">${esc(p.name)}</div>
-          <div class="sub">${p.site ? `<span>${esc(p.site)}</span>` : ''}
-            <span>${esc(typeLabel(typeOf(p)))}</span>
+          <div class="sub"><span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
+            ${p.site ? `<span>${esc(p.site)}</span>` : ''}
             ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}</div>
         </button>`).join('')}` : ''}`;
 
@@ -1482,6 +1515,7 @@ function renderJob(view) {
     <div class="card">
       <table class="data">
         <tr><th>Status</th><td>${statusLabel(p.status)} <span class="muted">— ${esc(statusDef(p.status).blurb)}</span></td></tr>
+        <tr><th>Crew</th><td>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</td></tr>
         <tr><th>Type of work</th><td>${esc(typeLabel(typeOf(p)))}</td></tr>
         <tr><th>Client</th><td>${esc(p.client || '—')}</td></tr>
         <tr><th>Site</th><td>${esc(p.site || '—')}</td></tr>
@@ -2057,6 +2091,12 @@ function renderJobEdit(view) {
           <input type="date" id="end" value="${esc(p.end_date || '')}"></label>
       </div>
 
+      <label class="field"><span>Crew</span>
+        <select id="crew">
+          <option value="" ${!crewOf(p) ? 'selected' : ''}>Not assigned yet</option>
+          ${CREWS.map(c => `<option value="${c.key}" ${crewOf(p) === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+        </select></label>
+
       <label class="field"><span>Supervisor on site</span>
         <input type="text" id="super" value="${esc(p.supervisor || '')}" placeholder="Name" list="supers">
         <datalist id="supers">${names.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist></label>
@@ -2123,6 +2163,7 @@ function renderJobEdit(view) {
       description: $('#desc', view).value.trim(),
       start_date: start,
       end_date: end,
+      crew: $('#crew', view).value,
       supervisor: $('#super', view).value.trim(),
       contact: $('#contact', view).value.trim(),
       contract_value: moneyField($('#value', view).value),
@@ -2257,6 +2298,7 @@ function renderOverview(view) {
           </div>
           <div class="ttl">${esc(p.name)}</div>
           <div class="sub">
+            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
             ${p.client ? `<span>${esc(p.client)}</span>` : ''}
             ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
             <span>${days} day${days === 1 ? '' : 's'} on site</span>
@@ -2375,12 +2417,12 @@ function downloadCsv(name, rows) {
 
 function exportJobsCsv() {
   const money = isOffice();     // a site phone exports a spreadsheet without the money in it
-  const rows = [['Job', 'Name', 'Client', 'Site', 'Type of work', 'Status', 'First day',
+  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Type of work', 'Status', 'First day',
     'Last day', 'Supervisor', 'Started', 'Completed', 'Days on site', 'Diary entries',
     'Issues', 'Documents', 'Closing note']
     .concat(money ? ['Contract value', 'Cost', 'Margin'] : [])];
   boardOrder(DB.projects.slice()).forEach(p => rows.push([
-    jobNo(p), p.name, p.client, p.site, typeLabel(typeOf(p)), statusLabel(p.status),
+    jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), typeLabel(typeOf(p)), statusLabel(p.status),
     p.start_date || '', p.end_date || '', p.supervisor,
     p.started_at ? fmtDate(p.started_at) : '', p.completed_at ? fmtDate(p.completed_at) : '',
     diaryDays(p.id).length, entriesFor(p.id).length, issueCount(p.id), allDocsFor(p.id).length,
@@ -2487,6 +2529,7 @@ function jobFacts(p) {
       <tr><td>Job number</td><td><strong>${jobNo(p)}</strong></td></tr>
       <tr><td>Client</td><td>${esc(p.client || '—')}</td></tr>
       <tr><td>Site</td><td>${esc(p.site || '—')}</td></tr>
+      <tr><td>Crew</td><td>${esc(crewLabel(crewOf(p)))}</td></tr>
       <tr><td>Type of work</td><td>${esc(typeLabel(typeOf(p)))}</td></tr>
       <tr><td>Status</td><td><span class="badge ${tone}">${esc(statusLabel(p.status))}</span></td></tr>
       <tr><td>Planned dates</td><td>${p.start_date ? fmtDate(p.start_date) : 'not set'}${
@@ -2837,7 +2880,7 @@ function renderKiosk(view) {
                 <div class="k-job status-ongoing" style="--i:${i}">
                   <div>
                     <div class="kcode">${jobNo(p)}</div>
-                    <div class="kno">${esc(typeLabel(typeOf(p)).toUpperCase())}</div>
+                    <div class="kno">${esc(crewLabel(crewOf(p)).toUpperCase())}</div>
                   </div>
                   <div>
                     <div class="kttl">${esc(p.name)}</div>

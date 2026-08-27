@@ -209,6 +209,16 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .pill.plain { background: var(--panel-2); color: var(--ink-2); }
 .swatch { width: 7px; height: 7px; border-radius: 50%; background: var(--s, var(--ink-3)); flex: none; }
 
+/* A crew is recognised by its colour before its name is read — on a chip,
+   on a card, on the wall screen. The colour is the crew's, not a status,
+   so it is set inline rather than from the status variables. */
+.crew-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  display: inline-block; vertical-align: middle;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .55);
+}
+.chip[aria-pressed="true"] .crew-dot { box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .35); }
+
 /* A tinted pill would vanish into a tinted card. Translucent white keeps it
    legible and lets it pick up the warmth of whatever it is sitting on. */
 .job-card .pill, .job-row .pill, .card.accent .pill { background: rgba(255, 255, 255, .78); }
@@ -226,6 +236,7 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .filters::-webkit-scrollbar { display: none; }
 .chip {
   flex: none; scroll-snap-align: start;
+  display: inline-flex; align-items: center; gap: 7px;
   padding: 8px 14px; border-radius: var(--r-pill);
   border: 0; background: var(--panel); box-shadow: var(--sh-1);
   font: inherit; font-size: 13.5px; font-weight: 560; color: var(--ink-2);

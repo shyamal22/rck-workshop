@@ -38,6 +38,8 @@ create table if not exists projects (
   -- director, never shown on a site phone. Left null until somebody knows.
   contract_value numeric,
   actual_cost    numeric,
+  -- Which crew is on it. Blank until the office assigns one.
+  crew           text not null default '',
   updated_at     timestamptz not null default now()
 );
 
@@ -46,6 +48,9 @@ create table if not exists projects (
 -- which is what makes this file safe to re-run over a live database.
 alter table projects add column if not exists contract_value numeric;
 alter table projects add column if not exists actual_cost    numeric;
+alter table projects add column if not exists crew           text not null default '';
+
+create index if not exists projects_crew_idx on projects (crew);
 
 create index if not exists projects_status_idx on projects (status);
 create index if not exists projects_dates_idx  on projects (start_date, end_date);
