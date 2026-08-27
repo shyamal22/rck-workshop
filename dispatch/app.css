@@ -410,10 +410,19 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
    column so the shape of the day is readable at a glance. */
 .dayhead {
   display: flex; align-items: baseline; gap: 10px;
-  margin: 22px 4px 9px;
+  margin: 22px 0 9px; padding: 0 4px 7px;
+  border-bottom: 2px solid var(--line-2);
 }
-.dayhead h3 { font-size: 15px; letter-spacing: -.015em; }
-.dayhead .sub { font-size: 12px; color: var(--ink-3); }
+.dayhead h3 { font-size: 15.5px; letter-spacing: -.015em; }
+.dayhead .sub { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+/* Today is where the next entry goes, so it says so. */
+.dayhead.today { border-bottom-color: var(--ink); }
+.dayhead.today h3 em {
+  font-style: normal; margin-left: 8px; padding: 2px 8px;
+  border-radius: var(--r-pill); background: var(--ink); color: #fff;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  vertical-align: middle;
+}
 
 .diary { position: relative; }
 .d-item {
@@ -445,18 +454,10 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .d-item .dn { font-size: 13.5px; white-space: pre-wrap; margin-top: 3px; line-height: 1.45; color: var(--ink-2); }
 .d-item .dw { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
 
-/* Quick-add buttons — the entries a supervisor makes twenty times a week. */
-.quick { display: flex; gap: 7px; flex-wrap: wrap; }
-.quick button {
-  flex: 1 1 calc(50% - 4px);
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 13px; border: 0; border-radius: var(--r-sm);
-  background: var(--panel-2); font: inherit; font-size: 13.5px; font-weight: 600;
-  color: var(--ink); cursor: pointer; text-align: left;
-  transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
-}
-.quick button:active { background: var(--line); transform: scale(.97); }
-.quick button .swatch { width: 8px; height: 8px; }
+/* One way in. The list of what happened lives in the entry form, where it
+   can be as long as it needs to be without cluttering the diary. */
+.logbtn { margin-bottom: 4px; }
+.logbtn svg { width: 20px; height: 20px; stroke-width: 2.2; }
 
 /* -------------------------------------------------------- the landing */
 /* Two tools behind one door. Big targets, because this is the first thing
