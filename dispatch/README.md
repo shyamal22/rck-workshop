@@ -35,9 +35,10 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   that can happen — on site, prestart, milling and paving start and stop, deliveries,
   weather, visitors, issues, delays, off site — with the time already filled in. Name a new
   type yourself and it is a real type from that moment, on everyone's phone.
-- **Today always has its own box**, empty or not, so a turned-over day is never mistaken for
-  the last one. An early start counts as a new day once the crew has logged itself off site
-  the night before.
+- **A day in the diary is the day on the calendar.** Today always has its own box, empty or
+  not, and an entry made at 01:30 goes under the date it was made on — a night job simply
+  reads as two days, which is how the crew talk about it and how the report sets it out. The
+  date is editable on every entry for the rare case that is wrong.
 - Every entry takes photos. They're shrunk on the phone so they go through on site.
 - When the job's finished: **Project completed**, with a closing note.
 
@@ -58,10 +59,11 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 - **The job P&L prints** as one document: the money, every line with its variance, your note,
   and every entry the supervisors wrote — because the reason a job went over is usually in
   the diary rather than the spreadsheet.
-- **⋮ → Profit & loss**: what is planned and on site, because those are the jobs a decision
-  can still be made about. **Completed** is one tap away, and that is where the actuals are.
-  Filter by client, or by dates you pick. Tapping a job goes straight to its costing — the
-  overview, a button through to the timeline, and the money — not the whole dispatch page.
+- **⋮ → Profit & loss** opens on the month you are in: invoice, cost and margin for every job
+  in it, before a single choice has been made. **Filter** narrows it — planned, on site or
+  completed, one client, any dates — and both the printed report and the **Excel export**
+  cover exactly what is filtered. Tapping a job goes straight to its costing: the overview, a
+  button through to the timeline, and the money — not the whole dispatch page.
 - **The director's report** prints that period — the totals, every job with its margin, and
   **every issue and delay the supervisors logged**, gathered across all the jobs into one table.
 - Value and cost live on the job itself, entered by the office or a director. They are never
@@ -69,11 +71,18 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   when both numbers are there — half the figures is worse than none.
 - Archiving a job is a director's call. Nothing in the app is ever deleted.
 
-**The report**
-The full job report is the whole record in one document: the job's details, a summary,
-every issue and delay, the documents on file, then each day of the diary in the order
-it happened with its photos underneath and a sign-off line at the end. It opens the
-phone's print dialog — choose *Save as PDF* to email it or file it.
+**The reports**
+The full job report is the whole record in one document: the job's details, a summary, every
+issue and delay, the documents on file, then the diary set out as **Day 1, Day 2, Day 3** —
+and all the photographs together at the back, four to a page, each captioned with the day and
+entry it came from. Photographs are gathered rather than cut into the middle of each day, so
+nothing overflows and a thirty-photo job is still a document somebody will open.
+
+The director's **Profit & loss** report is the period's figures, then how they split by
+client, then a job at a time, then the note on each finished job and everything the crews
+flagged — top down from *how did we do* to *and why*.
+
+All of them open the phone's print dialog — choose *Save as PDF* to email or file.
 
 **Night works**
 The app knows a shift isn't a calendar day. A crew that comes on at 19:45 and goes off

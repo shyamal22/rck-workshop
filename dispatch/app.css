@@ -9,17 +9,19 @@
    ===================================================================== */
 
 :root {
-  /* surfaces */
-  --bg:        #f2f4f5;
-  --panel:     #ffffff;
-  --panel-2:   #f6f7f9;
+  /* Surfaces. Warm rather than blue-grey: paper and asphalt, not screen
+     default. The panel is very slightly off-white, which is what stops a
+     page of cards reading as a template somebody generated. */
+  --bg:        #f4f2ef;
+  --panel:     #fffefc;
+  --panel-2:   #f4f2ee;
 
-  /* ink */
-  --ink:       #0f1418;
-  --ink-2:     #59636f;
-  --ink-3:     #939ca6;
-  --line:      #e9ecef;
-  --line-2:    #d9dee3;
+  /* Ink, warmed the same way. */
+  --ink:       #17140f;
+  --ink-2:     #625b52;
+  --ink-3:     #9a9289;
+  --line:      #e8e3dc;
+  --line-2:    #d8d1c7;
 
   /* State. Each has a pastel fill for the whole card and a deep tone for
      text on top of it — every pairing clears 4.5:1, including yellow, which
@@ -27,27 +29,29 @@
 
      green  = on site now   ·  blue = planned, not started
      slate  = finished      ·  yellow/red = something needs attention */
-  --green:     #15703c;
-  --green-bg:  #e4f4ea;
+  --green:     #2c6b41;
+  --green-bg:  #e7f1e7;
   --yellow:    #7d5e00;
-  --yellow-bg: #fdf3cc;
-  --red:       #a81f1f;
-  --red-bg:    #fce9e9;
-  --blue:      #17558c;
-  --blue-bg:   #e6eff8;
-  --slate:     #4a545e;
-  --slate-bg:  #eceff2;
+  --yellow-bg: #fbf1cf;
+  --red:       #9e3226;
+  --red-bg:    #f8e9e5;
+  --blue:      #2a5578;
+  --blue-bg:   #e9eff4;
+  --slate:     #5a544c;
+  --slate-bg:  #efece7;
 
-  /* shape */
-  --r:      14px;
-  --r-sm:   10px;
+  /* Shape. Slightly softer and less uniform than a 14-everywhere grid —
+     the small radius is genuinely smaller, so surfaces differ by their
+     size rather than all being cut from the same template. */
+  --r:      13px;
+  --r-sm:   9px;
   --r-pill: 999px;
   --tap:    48px;
 
-  /* depth */
-  --sh-1: 0 1px 2px rgba(15, 20, 24, .05);
-  --sh-2: 0 2px 6px rgba(15, 20, 24, .06), 0 1px 2px rgba(15, 20, 24, .04);
-  --sh-3: 0 10px 34px rgba(15, 20, 24, .14), 0 2px 8px rgba(15, 20, 24, .08);
+  /* Depth, cast in the warm ink so a shadow never goes blue on paper. */
+  --sh-1: 0 1px 2px rgba(38, 30, 20, .05);
+  --sh-2: 0 1px 2px rgba(38, 30, 20, .05), 0 3px 10px rgba(38, 30, 20, .045);
+  --sh-3: 0 10px 34px rgba(38, 30, 20, .13), 0 2px 8px rgba(38, 30, 20, .07);
 
   /* motion */
   --t-fast: 130ms;
@@ -73,12 +77,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   padding-bottom: calc(74px + var(--safe-b));
   overscroll-behavior-y: none;
 }
 
-h1, h2, h3 { margin: 0; font-weight: 640; letter-spacing: -.014em; }
+h1, h2, h3 { margin: 0; font-weight: 660; letter-spacing: -.017em; }
 p { margin: 0 0 10px; }
 a { color: inherit; }
 
@@ -171,18 +175,23 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
   background: var(--panel);
   border-radius: var(--r);
   box-shadow: var(--sh-2);
-  padding: 16px;
+  padding: 17px 18px;
   margin-bottom: 12px;
 }
-.card > h2 { font-size: 15.5px; margin-bottom: 10px; }
+.card > h2 { font-size: 15.5px; margin-bottom: 10px; letter-spacing: -.015em; }
 
 /* A card that takes the status colour as its own surface. */
 .card.accent { background: var(--s-bg); }
 
 .section-title {
-  font-size: 11.5px; font-weight: 700; letter-spacing: .09em;
-  text-transform: uppercase; color: var(--ink-3);
-  margin: 22px 4px 9px;
+  font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  color: var(--ink-2);
+  margin: 24px 2px 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+/* A rule that runs out from the title, rather than a label floating alone. */
+.section-title::after {
+  content: ''; flex: 1; height: 1px; background: var(--line-2);
 }
 
 /* ------------------------------------------------------------ status */
@@ -458,6 +467,36 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
    can be as long as it needs to be without cluttering the diary. */
 .logbtn { margin-bottom: 4px; }
 .logbtn svg { width: 20px; height: 20px; stroke-width: 2.2; }
+
+/* ------------------------------------------------------- the ledger */
+/* The month's figures, set like a statement rather than a dashboard: a
+   ruled column of money you read down, not tiles you scan across. */
+.ledger {
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 16px 18px 14px; margin-bottom: 12px;
+  animation: riseIn var(--t) var(--ease) both;
+}
+.ledger .lh {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-3); padding-bottom: 10px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.ledger .lrow {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 7px 0; font-size: 14.5px; color: var(--ink-2);
+}
+.ledger .lrow b { font-size: 17px; font-weight: 640; color: var(--ink);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.ledger .lrow.tot { border-top: 1.5px solid var(--line-2); margin-top: 4px; padding-top: 11px; }
+.ledger .lrow.tot span { font-weight: 640; color: var(--ink); }
+.ledger .lrow.tot b { font-size: 23px; font-weight: 700; }
+.ledger .lrow.tot b em { font-style: normal; font-size: 13px; font-weight: 600; margin-left: 6px; opacity: .8; }
+.ledger .lf { font-size: 12px; color: var(--ink-3); padding-top: 11px; margin-top: 6px;
+  border-top: 1px solid var(--line); }
+
+.filterbtn { justify-content: flex-start; gap: 10px; margin-bottom: 12px; }
+.filterbtn.on { background: var(--ink); color: #fff; }
+.filterpanel { animation: riseIn var(--t-fast) var(--ease) both; }
 
 /* -------------------------------------------------------- the landing */
 /* Two tools behind one door. Big targets, because this is the first thing
@@ -926,15 +965,26 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 /* -------------------------------------------------------- the day diary */
 /* One entry is one block that never splits: the time, what happened, and
    whatever the supervisor wrote about it stay together or move together. */
-.doc .day { margin-bottom: 2mm; }
+.doc .day { margin-bottom: 5mm; }
 .doc .day-head {
   display: flex; align-items: baseline; gap: 3mm;
-  margin: 7mm 0 3mm; padding-bottom: 1.6mm;
-  border-bottom: .7pt solid var(--d-line);
+  margin: 7mm 0 0; padding-bottom: 1.8mm;
+  border-bottom: 1.4pt solid var(--d-ink);
   break-after: avoid; page-break-after: avoid;
 }
+.doc .day-head .dn {
+  font-size: 7.5pt; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--d-accent); align-self: center; white-space: nowrap;
+}
 .doc .day-head h3 { font-size: 12pt; font-weight: 700; margin: 0; letter-spacing: -.01em; }
-.doc .day-head .span { font-size: 8.5pt; color: var(--d-ink-3); margin-left: auto; }
+.doc .day-head .span {
+  font-size: 8.5pt; color: var(--d-ink-2); margin-left: auto;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.doc .day-sub {
+  font-size: 8pt; color: var(--d-ink-3); padding-top: 1.4mm;
+  break-after: avoid; page-break-after: avoid;
+}
 
 .doc .entry {
   display: flex; gap: 4mm; align-items: flex-start;
@@ -955,17 +1005,25 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .doc .entry.flag { border-left: 1.2pt solid var(--d-red); padding-left: 3mm; }
 .doc .entry.flag .e-kind, .doc .entry.flag .e-time { color: var(--d-red); }
 
-/* --------------------------------------------------------- photo sheet */
-/* Two across, two down — four to a page. The cell height is what holds
-   that: a third row cannot fit, so a page never carries more than four. */
-.doc .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm 6mm; margin-bottom: 3mm; }
-.doc .photo { break-inside: avoid; page-break-inside: avoid; }
-.doc .photo img {
-  width: 100%; height: 88mm; object-fit: cover; display: block;
-  border: .6pt solid var(--d-line); border-radius: 1mm;
+/* --------------------------------------------------------- photographs */
+/* All of them together at the back, two across and two down. The fixed cell
+   height is what holds four to a page: a third row cannot fit, so nothing
+   overflows and no caption is ever orphaned from its picture. */
+.doc .page-break { break-before: page; page-break-before: always; height: 0; }
+.doc .photos {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; margin: 0; align-items: start;
 }
-.doc .photo .cap { font-size: 8pt; color: var(--d-ink-2); margin-top: 1.4mm; line-height: 1.35; }
-.doc .photo .cap b { color: var(--d-ink); font-weight: 650; }
+.doc .photo {
+  break-inside: avoid; page-break-inside: avoid;
+  margin: 0; display: flex; flex-direction: column; height: 104mm; overflow: hidden;
+}
+.doc .photo img {
+  width: 100%; height: 84mm; flex: none; object-fit: cover; display: block;
+  border: .6pt solid var(--d-line); border-radius: 1mm; background: var(--d-tint);
+}
+.doc .photo figcaption { font-size: 7.5pt; color: var(--d-ink-2); margin-top: 1.6mm; line-height: 1.3; }
+.doc .photo figcaption b { display: block; color: var(--d-ink); font-weight: 700; }
+.doc .photo figcaption span { display: block; margin-top: .4mm; }
 
 /* ----------------------------------------------------------- oddments */
 .doc .sig { margin-top: 12mm; display: flex; gap: 14mm; break-inside: avoid; }
