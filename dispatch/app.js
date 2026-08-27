@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -85,6 +85,36 @@ const ROLES = [
 ];
 function roleDef(key) { return ROLES.find(r => r.key === key) || ROLES[0]; }
 function roleLabel(key) { return roleDef(key).label; }
+
+/* --------------------------------------------------------- job costing */
+/* What a job is built out of. Quantity times rate on each line, expected
+   when the office prices it and actual once it is done, so a job that went
+   over says exactly where it went. */
+const COST_KINDS = [
+  { key: 'asphalt',     label: 'Asphalt purchase',    unit: 'tonnes' },
+  { key: 'emulsion',    label: 'Emulsion purchase',   unit: 'litres' },
+  { key: 'concrete',    label: 'Concrete purchase',   unit: 'm³' },
+  { key: 'materials',   label: 'Materials purchase',  unit: 'items' },
+  { key: 'crew',        label: 'Crew',                unit: 'hours' },
+  { key: 'trucking',    label: 'Trucking',            unit: 'hours' },
+  { key: 'plant',       label: 'Plant and machinery', unit: 'hours' },
+  { key: 'transport',   label: 'Transport',           unit: 'loads' },
+  { key: 'subcontract', label: 'Subcontractors',      unit: 'items' },
+  { key: 'other',       label: 'Other',               unit: '' }
+];
+
+/* Maintenance is never typed in. It is a tenth of everything else, worked
+   out wherever it is shown, so it cannot drift out of step with the lines
+   above it — on the expected side and the actual side alike. */
+const MAINTENANCE_RATE = 0.10;
+
+function costKind(key) { return COST_KINDS.find(k => k.key === key) || COST_KINDS[COST_KINDS.length - 1]; }
+function costLabel(l) { return (l.label || '').trim() || costKind(l.kind).label; }
+
+function num(v) { const n = Number(v); return isFinite(n) ? n : 0; }
+function lineExpected(l) { return num(l.qty) * num(l.rate); }
+function lineActual(l)   { return num(l.actual_qty) * num(l.actual_rate); }
+function lineHasActual(l) { return hasMoney(l.actual_qty) || hasMoney(l.actual_rate); }
 
 /* ---------------------------------------------------------- documents */
 const DOC_KINDS = [
@@ -251,9 +281,11 @@ function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
 
 /** What a job made, or null when we don't know both halves. Guessing a
     margin from half the numbers is worse than showing nothing. */
+/** A job's margin — the settled one when the job is finished and invoiced,
+    otherwise what it was priced to make. */
 function jobMargin(p) {
-  if (!hasMoney(p.contract_value) || !hasMoney(p.actual_cost)) return null;
-  return Number(p.contract_value) - Number(p.actual_cost);
+  const c = costing(p);
+  return c.acMargin != null ? c.acMargin : c.exMargin;
 }
 function marginPct(value, margin) {
   const v = Number(value);
@@ -361,7 +393,9 @@ const ICONS = {
   check:    '<path d="M5 12.5l4.2 4.2L19 7"/>',
   play:     '<path d="M8 5.5l10 6.5-10 6.5z"/>',
   plus:     '<path d="M12 5.5v13M5.5 12h13"/>',
-  clock:    '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>'
+  clock:    '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>',
+  chart:    '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3.4" height="5"/><rect x="13.6" y="7.5" width="3.4" height="9.5"/>',
+  money:    '<rect x="3" y="6.5" width="18" height="11" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 12h.01M17.5 12h.01"/>'
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -413,7 +447,7 @@ function whoami() { return S.name || 'Unnamed user'; }
    Local cache — the app opens instantly and stays readable on site
    with no signal, which is most of the time
    ================================================================ */
-const DB = { projects: [], project_docs: [], diary_entries: [], localSeq: 0 };
+const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], localSeq: 0 };
 
 function cacheKey() { return 'rckd.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -424,6 +458,7 @@ function loadCache() {
       DB.projects = raw.projects || [];
       DB.project_docs = raw.project_docs || [];
       DB.diary_entries = raw.diary_entries || [];
+      DB.job_costs = raw.job_costs || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -507,14 +542,16 @@ function reconcile(table, fromServer) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [projects, docs, entries] = await Promise.all([
+    const [projects, docs, entries, costs] = await Promise.all([
       rest('projects?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
-      rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() })
+      rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() }),
+      rest('job_costs?select=*&order=sort.asc&limit=20000', { headers: restHeaders() })
     ]);
     DB.projects = reconcile('projects', projects || []);
     DB.project_docs = reconcile('project_docs', docs || []);
     DB.diary_entries = reconcile('diary_entries', entries || []);
+    DB.job_costs = reconcile('job_costs', costs || []);
     saveCache();
   },
 
@@ -860,18 +897,64 @@ function jobInPeriod(p, from, to) {
 function periodTotals(list) {
   const t = { jobs: list.length, days: 0, entries: 0, issues: 0,
               value: 0, valued: 0, cost: 0, costed: 0,
+              acValue: 0, acCost: 0, settled: 0,
               ongoing: 0, planned: 0, completed: 0 };
   list.forEach(p => {
     t.days += diaryDays(p.id).length;
     t.entries += entriesFor(p.id).length;
     t.issues += issueCount(p.id);
-    if (hasMoney(p.contract_value)) { t.value += Number(p.contract_value); t.valued++; }
-    if (hasMoney(p.actual_cost))    { t.cost  += Number(p.actual_cost);    t.costed++; }
+    const c = costing(p);
+    if (c.exInv != null)  { t.value += c.exInv; t.valued++; }
+    if (c.exCost != null) { t.cost  += c.exCost; t.costed++; }
+    if (c.acMargin != null) { t.acValue += c.acInv; t.acCost += c.acCost; t.settled++; }
     t[p.status] = (t[p.status] || 0) + 1;
   });
   t.margin = (t.valued && t.costed) ? t.value - t.cost : null;
   t.marginPct = marginPct(t.value, t.margin);
+  t.acMargin = t.settled ? t.acValue - t.acCost : null;
+  t.acMarginPct = marginPct(t.acValue, t.acMargin);
   return t;
+}
+
+/* --------------------------------------------------- the money on a job */
+const costLinesFor = id => DB.job_costs
+  .filter(l => l.project_id === id)
+  .sort((a, b) => (a.sort || 0) - (b.sort || 0) || (a.created_at || '').localeCompare(b.created_at || ''));
+
+/** Everything the P&L needs about one job, worked out in one place so the
+    screen and the printed report can never disagree. */
+function costing(p) {
+  const lines = costLinesFor(p.id);
+
+  const exLines = lines.reduce((n, l) => n + lineExpected(l), 0);
+  const acLines = lines.reduce((n, l) => n + lineActual(l), 0);
+  const anyActual = lines.some(lineHasActual);
+
+  const exMaint = exLines * MAINTENANCE_RATE;
+  const acMaint = acLines * MAINTENANCE_RATE;
+
+  // A job priced before the costing existed still has its old single figure.
+  const legacy = !lines.length && hasMoney(p.actual_cost) ? Number(p.actual_cost) : null;
+
+  const exCost = lines.length ? exLines + exMaint : legacy;
+  const acCost = anyActual ? acLines + acMaint : null;
+
+  const exInv = hasMoney(p.contract_value) ? Number(p.contract_value) : null;
+  const acInv = hasMoney(p.actual_invoice) ? Number(p.actual_invoice) : null;
+
+  const margin = (inv, cost) => (inv == null || cost == null) ? null : inv - cost;
+
+  return {
+    lines, anyActual, legacy,
+    exLines, exMaint, exCost, acLines, acMaint, acCost, exInv, acInv,
+    exMargin: margin(exInv, exCost),
+    acMargin: margin(acInv, acCost),
+    exPct: marginPct(exInv, margin(exInv, exCost)),
+    acPct: marginPct(acInv, margin(acInv, acCost)),
+    // What the job did against what it was priced to do.
+    swing: (margin(acInv, acCost) == null || margin(exInv, exCost) == null)
+      ? null : margin(acInv, acCost) - margin(exInv, exCost)
+  };
 }
 
 /** Board order: on site first, then what starts soonest, then finished. */
@@ -1039,11 +1122,13 @@ function go(hash) { location.hash = hash; }
 function jobIdFromPath() { return route.path.split('/')[2] || ''; }
 
 const SCREENS = {
-  '/':        { title: 'Jobs',          render: renderBoard },
+  '/':        { title: 'RCK Dispatch',  render: renderHome },
+  '/jobs':    { title: 'Jobs',          render: renderBoard },
+  '/pnl':     { title: 'Profit & loss', render: renderPnl,    back: true },
   '/today':   { title: 'Today on site', render: renderToday },
   '/log':     { title: 'Log',           render: renderLogPicker, back: true },
   '/new':     { title: 'New job',       render: renderJobEdit, back: true },
-  '/overview':{ title: 'Overview',      render: renderOverview, back: true },
+
   '/reports': { title: 'Reports',       render: renderReports, back: true },
   '/setup':   { title: 'Settings',      render: renderSetup,   back: true },
   '/join':    { title: 'Set up',        render: renderJoin },
@@ -1055,7 +1140,7 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = path === '/' || path === '/today' || path.startsWith('/diary/');
+  const keepsPlace = path === '/jobs' || path === '/today' || path.startsWith('/diary/');
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
@@ -1076,6 +1161,8 @@ function render() {
   else if (route.path.startsWith('/diary/')) { screen = { title: 'Job diary', render: renderDiary };    back = true; }
   else if (route.path.startsWith('/entry/')) { screen = { title: 'Diary entry', render: renderEntry };  back = true; }
   else if (route.path.startsWith('/upload/')){ screen = { title: 'Add document', render: renderUpload }; back = true; }
+  else if (route.path.startsWith('/costs/')) { screen = { title: 'Costing', render: renderCosts }; back = true; }
+  else if (route.path === '/overview')       { go('#/pnl'); return; }   // the old name
 
   if (!screen) { go('#/'); return; }
 
@@ -1308,7 +1395,53 @@ function renderWelcome(view) {
 }
 
 /* ================================================================
-   Screen — job board (home)
+   Screen — the landing page
+   Two tools behind one door. Everyone gets the jobs; the money is
+   behind the Director role and nothing hints at it otherwise.
+   ================================================================ */
+function renderHome(view) {
+  const jobs = activeJobs();
+  const onSite = jobs.filter(p => p.status === 'ongoing').length;
+  const planned = jobs.filter(p => p.status === 'planned').length;
+
+  let money = '';
+  if (isDirector()) {
+    const [from, to] = periodRange('month');
+    const inMonth = DB.projects.filter(p => jobInPeriod(p, from, to));
+    const t = inMonth.reduce((acc, p) => {
+      const c = costing(p);
+      if (c.exInv != null) { acc.inv += c.exInv; acc.priced++; }
+      if (c.exMargin != null) { acc.margin += c.exMargin; acc.withMargin++; }
+      return acc;
+    }, { inv: 0, priced: 0, margin: 0, withMargin: 0 });
+    money = t.priced
+      ? `${esc(fmtMoney(t.inv))} invoiced this month${t.withMargin ? ' · ' + esc(fmtMoney(t.margin)) + ' margin' : ''}`
+      : 'No job priced this month yet';
+  }
+
+  view.innerHTML = `
+    <div class="tiles">
+      <a class="tile" href="#/jobs">
+        <span class="ti">${icon('book')}</span>
+        <b>Jobs</b>
+        <span class="td">Site paperwork and the daily job diary</span>
+        <span class="ts">${jobs.length} job${jobs.length === 1 ? '' : 's'} · ${onSite} on site · ${planned} planned</span>
+      </a>
+
+      ${isDirector() ? `
+      <a class="tile money" href="#/pnl">
+        <span class="ti">${icon('chart')}</span>
+        <b>Profit &amp; loss</b>
+        <span class="td">What each job was priced at, and what it did</span>
+        <span class="ts">${money}</span>
+      </a>` : ''}
+    </div>
+
+    ${isDirector() ? '<p class="muted tiny center mt">Profit &amp; loss is shown on Director devices only.</p>' : ''}`;
+}
+
+/* ================================================================
+   Screen — job board
    ================================================================ */
 const boardFilter = { crew: 'all', status: 'all', q: '' };
 
@@ -1531,20 +1664,7 @@ function renderJob(view) {
       </table>
     </div>
 
-    ${isOffice() && (hasMoney(p.contract_value) || hasMoney(p.actual_cost)) ? `
-      <div class="card">
-        <h2>Value and cost</h2>
-        <table class="data">
-          <tr><th>Contract value</th><td>${fmtMoney(p.contract_value, true)}</td></tr>
-          <tr><th>Cost to RCK</th><td>${fmtMoney(p.actual_cost, true)}</td></tr>
-          ${jobMargin(p) != null ? `<tr><th>Margin</th><td><strong style="color:${
-            jobMargin(p) < 0 ? 'var(--red)' : 'var(--green)'}">${fmtMoney(jobMargin(p), true)}${
-            marginPct(p.contract_value, jobMargin(p)) != null
-              ? ' · ' + marginPct(p.contract_value, jobMargin(p)).toFixed(1) + '%' : ''}</strong></td></tr>`
-            : '<tr><th>Margin</th><td class="muted">needs both numbers</td></tr>'}
-        </table>
-        <p class="muted tiny" style="margin:8px 0 0">Not visible to supervisors.</p>
-      </div>` : ''}
+
 
     ${p.status === 'planned' ? `
       <button class="btn primary wide" id="start">${icon('play')}Start job — crew is on site</button>
@@ -1559,6 +1679,14 @@ function renderJob(view) {
     ${p.status === 'completed' ? `
       <div class="banner info">This job is finished. The diary and documents stay exactly as they are.
       ${isOffice() ? ' Reopen it below if it was closed by mistake.' : ''}</div>` : ''}
+
+    ${isOffice() ? `
+      <a class="btn wide mb" href="#/costs/${p.id}">${icon('chart')}Costing${
+        costing(p).exInv != null || costing(p).lines.length
+          ? ` — ${esc(fmtMoney(costing(p).exInv))} invoice${
+              isDirector() && costing(p).exMargin != null
+                ? ', ' + esc(fmtMoney(costing(p).exMargin)) + ' margin' : ''}`
+          : ' — not priced yet'}</a>` : ''}
 
     <div class="section-title">Reports</div>
     <div class="card">
@@ -2105,20 +2233,6 @@ function renderJobEdit(view) {
         <input type="text" id="contact" value="${esc(p.contact || '')}" placeholder="Name and phone"></label>
     </div>
 
-    <div class="card">
-      <h2>Value and cost</h2>
-      <p class="muted small">Never shown on a site phone. Leave either blank until somebody
-      knows the number — a margin is only worked out when both are filled in.</p>
-      <div class="row">
-        <label class="field grow"><span>Contract value (excl. GST)</span>
-          <input type="number" id="value" inputmode="decimal" step="0.01" min="0"
-            value="${esc(hasMoney(p.contract_value) ? p.contract_value : '')}" placeholder="e.g. 84000"></label>
-        <label class="field grow"><span>Cost to RCK</span>
-          <input type="number" id="cost" inputmode="decimal" step="0.01" min="0"
-            value="${esc(hasMoney(p.actual_cost) ? p.actual_cost : '')}" placeholder="e.g. 61500"></label>
-      </div>
-    </div>
-
     ${editing ? `
     <div class="card">
       <label class="field"><span>Status</span>
@@ -2166,8 +2280,6 @@ function renderJobEdit(view) {
       crew: $('#crew', view).value,
       supervisor: $('#super', view).value.trim(),
       contact: $('#contact', view).value.trim(),
-      contract_value: moneyField($('#value', view).value),
-      actual_cost: moneyField($('#cost', view).value)
     };
 
     this.disabled = true;
@@ -2203,6 +2315,216 @@ function renderJobEdit(view) {
 }
 
 /* ================================================================
+   Screen — costing one job
+   The office prices it: a line per thing the job is made of, quantity
+   times rate. A director fills in what it actually came to once the job
+   is done, and the difference speaks for itself.
+   ================================================================ */
+async function addCostLine(projectId, kind) {
+  const k = costKind(kind);
+  const existing = costLinesFor(projectId);
+  return Store.insert('job_costs', {
+    id: uid(),
+    project_id: projectId,
+    kind: k.key,
+    label: '',
+    unit: k.unit,
+    qty: null, rate: null, actual_qty: null, actual_rate: null,
+    sort: existing.length ? Math.max.apply(null, existing.map(l => l.sort || 0)) + 1 : 0,
+    created_at: new Date().toISOString(),
+    created_by: whoami()
+  });
+}
+
+function renderCosts(view) {
+  const p = jobById(jobIdFromPath());
+  if (!p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
+  if (!isOffice()) {
+    view.innerHTML = `
+      <div class="card">
+        <h2>Office and directors only</h2>
+        <p class="muted small">What a job costs is priced by the office and reviewed by a
+        director. Nothing about money is shown on a site phone.</p>
+        <a class="btn wide mt" href="#/job/${p.id}">Back to the job</a>
+      </div>`;
+    return;
+  }
+  $('#title').textContent = 'Costing';
+
+  const c = costing(p);
+  const showActual = isDirector();
+
+  view.innerHTML = `
+    <div class="card accent status-${statusTone(p.status)}">
+      <div class="tiny" style="color:var(--ink-3);letter-spacing:.04em;font-weight:700">${jobNo(p)}</div>
+      <h2 style="font-size:18px;margin:2px 0 3px">${esc(p.name)}</h2>
+      <div class="small muted">${esc(p.client || 'No client named')}</div>
+    </div>
+
+    <div class="card">
+      <h2>Invoice</h2>
+      <div class="row">
+        <label class="field grow"><span>Expected invoice (excl. GST)</span>
+          <input type="number" id="exInv" inputmode="decimal" step="0.01" min="0"
+            value="${esc(c.exInv == null ? '' : c.exInv)}" placeholder="e.g. 84000"></label>
+        ${showActual ? `
+        <label class="field grow"><span>Final invoice</span>
+          <input type="number" id="acInv" inputmode="decimal" step="0.01" min="0"
+            value="${esc(c.acInv == null ? '' : c.acInv)}" placeholder="once it is billed"></label>` : ''}
+      </div>
+    </div>
+
+    <div class="section-title">What the job is made of</div>
+    <div id="lines">${c.lines.map(l => costRow(l, showActual)).join('')
+      || '<div class="card"><p class="muted small" style="margin:0">Nothing priced yet. Add the first line below.</p></div>'}</div>
+
+    <div class="card">
+      <label class="field"><span>Add a cost</span>
+        <select id="addKind">
+          <option value="">Choose what to add…</option>
+          ${COST_KINDS.map(k => `<option value="${k.key}">${esc(k.label)}</option>`).join('')}
+        </select></label>
+      <p class="muted tiny" style="margin-bottom:0">Maintenance is added for you — always a tenth of
+      everything above it, so it moves when the lines move.</p>
+    </div>
+
+    ${costTotals(p, c, showActual)}
+
+    ${showActual ? `
+    <div class="card">
+      <label class="field"><span>How did it go?</span>
+        <textarea id="pnl" placeholder="Why it landed where it did — the wet week, the extra establishment, the variation that never got signed.">${esc(p.pnl_notes || '')}</textarea>
+      </label>
+      <button class="btn wide" id="saveNotes">Save note</button>
+    </div>
+
+    <div class="card">
+      <button class="btn primary wide" id="printPnl">${icon('printer')}Print the job P&amp;L</button>
+      <p class="muted tiny center mt" style="margin-bottom:0">The money, the variance, your note, and
+      every entry the supervisors wrote.</p>
+    </div>` : ''}`;
+
+  wireCosts(view, p);
+}
+
+/** One line: what it is, how much of it, at what rate — and, for a
+    director, what it actually came to. */
+function costRow(l, showActual) {
+  const ex = lineExpected(l);
+  const ac = lineActual(l);
+  const diff = lineHasActual(l) ? ac - ex : null;
+  return `
+    <div class="costrow" data-id="${l.id}">
+      <div class="ch">
+        <input type="text" class="cname" data-f="label" value="${esc(l.label || '')}"
+          placeholder="${esc(costKind(l.kind).label)}">
+        <button class="cdel" title="Remove">${icon('trash')}</button>
+      </div>
+      <div class="cg">
+        <label><span>Qty</span><input type="number" data-f="qty" inputmode="decimal" step="any"
+          value="${esc(l.qty == null ? '' : l.qty)}"></label>
+        <label><span>Unit</span><input type="text" data-f="unit" value="${esc(l.unit || '')}" placeholder="hours"></label>
+        <label><span>Rate</span><input type="number" data-f="rate" inputmode="decimal" step="any"
+          value="${esc(l.rate == null ? '' : l.rate)}"></label>
+        <div class="ctot"><span>Expected</span><b>${esc(fmtMoney(ex))}</b></div>
+      </div>
+      ${showActual ? `
+      <div class="cg actual">
+        <label><span>Actual qty</span><input type="number" data-f="actual_qty" inputmode="decimal" step="any"
+          value="${esc(l.actual_qty == null ? '' : l.actual_qty)}"></label>
+        <label><span></span><span class="cu">${esc(l.unit || '')}</span></label>
+        <label><span>Actual rate</span><input type="number" data-f="actual_rate" inputmode="decimal" step="any"
+          value="${esc(l.actual_rate == null ? '' : l.actual_rate)}"></label>
+        <div class="ctot"><span>Actual</span><b class="${diff == null ? '' : diff > 0 ? 'neg' : 'pos'}">${
+          lineHasActual(l) ? esc(fmtMoney(ac)) : '—'}</b>${
+          diff ? `<em class="${diff > 0 ? 'neg' : 'pos'}">${diff > 0 ? '+' : ''}${esc(fmtMoney(diff))}</em>` : ''}</div>
+      </div>` : ''}
+    </div>`;
+}
+
+/** The bottom line, expected against actual. */
+function costTotals(p, c, showActual) {
+  const row = (label, ex, ac, strong) => `
+    <tr${strong ? ' class="tot"' : ''}>
+      <th>${esc(label)}</th>
+      <td>${ex == null ? '—' : esc(fmtMoney(ex, true))}</td>
+      ${showActual ? `<td>${ac == null ? '—' : esc(fmtMoney(ac, true))}</td>` : ''}
+    </tr>`;
+  return `
+    <div class="card">
+      <h2>The bottom line</h2>
+      <table class="data money">
+        <tr><th></th><td class="hd">Expected</td>${showActual ? '<td class="hd">Actual</td>' : ''}</tr>
+        ${row('Invoice', c.exInv, c.acInv)}
+        ${row('Costs', c.lines.length ? c.exLines : c.legacy, c.anyActual ? c.acLines : null)}
+        ${c.lines.length ? row('Maintenance (10%)', c.exMaint, c.anyActual ? c.acMaint : null) : ''}
+        ${row('Total cost', c.exCost, c.acCost, true)}
+        <tr class="tot">
+          <th>Margin</th>
+          <td class="${c.exMargin == null ? '' : c.exMargin < 0 ? 'neg' : 'pos'}">${
+            c.exMargin == null ? '—' : esc(fmtMoney(c.exMargin, true)) + (c.exPct != null ? ` · ${c.exPct.toFixed(1)}%` : '')}</td>
+          ${showActual ? `<td class="${c.acMargin == null ? '' : c.acMargin < 0 ? 'neg' : 'pos'}">${
+            c.acMargin == null ? '—' : esc(fmtMoney(c.acMargin, true)) + (c.acPct != null ? ` · ${c.acPct.toFixed(1)}%` : '')}</td>` : ''}
+        </tr>
+      </table>
+      ${showActual && c.swing != null ? `<p class="small mt" style="margin-bottom:0">Against the price,
+        the job came in <strong class="${c.swing < 0 ? 'neg' : 'pos'}">${
+        esc(fmtMoney(Math.abs(c.swing)))} ${c.swing < 0 ? 'behind' : 'ahead'}</strong>.</p>` : ''}
+    </div>`;
+}
+
+function wireCosts(view, p) {
+  const save = (id, patch) => Store.patch('job_costs', id, patch);
+
+  $$('.costrow', view).forEach(rowEl => {
+    const id = rowEl.dataset.id;
+    $$('input', rowEl).forEach(inp => {
+      inp.onchange = async () => {
+        const f = inp.dataset.f;
+        const v = inp.type === 'number' ? moneyField(inp.value) : inp.value.trim();
+        await save(id, { [f]: v });
+        render();                       // totals and maintenance move together
+      };
+    });
+    $('.cdel', rowEl).onclick = async () => {
+      const l = DB.job_costs.find(x => x.id === id);
+      if (!confirm(`Remove "${l ? costLabel(l) : 'this line'}" from the costing?`)) return;
+      await Store.remove('job_costs', id);
+      render();
+    };
+  });
+
+  const add = $('#addKind', view);
+  if (add) add.onchange = async () => {
+    if (!add.value) return;
+    await addCostLine(p.id, add.value);
+    render();
+  };
+
+  const exInv = $('#exInv', view);
+  if (exInv) exInv.onchange = async () => {
+    await Store.patch('projects', p.id, { contract_value: moneyField(exInv.value) });
+    render();
+  };
+  const acInv = $('#acInv', view);
+  if (acInv) acInv.onchange = async () => {
+    await Store.patch('projects', p.id, { actual_invoice: moneyField(acInv.value) });
+    render();
+  };
+
+  const notes = $('#saveNotes', view);
+  if (notes) notes.onclick = async function () {
+    this.disabled = true;
+    await Store.patch('projects', p.id, { pnl_notes: $('#pnl', view).value.trim() });
+    toast('Saved');
+    render();
+  };
+
+  const pr = $('#printPnl', view);
+  if (pr) pr.onclick = () => printJobPnl(p);
+}
+
+/* ================================================================
    Screen — the director's overview
    Every job at once over a period: what the crews did, what went wrong,
    and what it was worth. Everything on it is added up from what the
@@ -2216,15 +2538,15 @@ function overviewRange() {
   return periodRange(overview.period);
 }
 
-function renderOverview(view) {
+function renderPnl(view) {
   if (!isDirector()) {
     view.innerHTML = `
       <div class="card">
         <h2>Director only</h2>
-        <p class="muted small">The overview across every job — days on site, issues, value and
-        margin over a period — is for devices set to <strong>Director</strong>. Everything it adds
-        up is on the jobs themselves, which you can already see.</p>
-        <a class="btn wide mt" href="#/reports">Open reports</a>
+        <p class="muted small">The profit and loss across every job is for devices set to
+        <strong>Director</strong>. The jobs themselves, their paperwork and their diaries are
+        all open to you.</p>
+        <a class="btn wide mt" href="#/jobs">Open the jobs</a>
       </div>`;
     return;
   }
@@ -2233,9 +2555,10 @@ function renderOverview(view) {
   const list = DB.projects.filter(p => jobInPeriod(p, from, to));
   const t = periodTotals(list);
 
+  const mg = p => { const m = costing(p); return m.acMargin != null ? m.acMargin : m.exMargin; };
   const sorters = {
     value:  (a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1),
-    margin: (a, b) => ((jobMargin(b) == null ? -Infinity : jobMargin(b)) - (jobMargin(a) == null ? -Infinity : jobMargin(a))),
+    margin: (a, b) => ((mg(b) == null ? -Infinity : mg(b)) - (mg(a) == null ? -Infinity : mg(a))),
     days:   (a, b) => diaryDays(b.id).length - diaryDays(a.id).length,
     issues: (a, b) => issueCount(b.id) - issueCount(a.id)
   };
@@ -2276,9 +2599,12 @@ function renderOverview(view) {
           t.margin == null ? '—' : esc(fmtMoney(t.margin))}</span><span class="l">Margin${
           t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</span></div>
       </div>
+      ${t.settled ? `<p class="small mt" style="margin-bottom:0">${t.settled} job(s) finished and
+        invoiced: <strong class="${t.acMargin < 0 ? 'neg' : 'pos'}">${esc(fmtMoney(t.acMargin))}</strong>
+        actual margin${t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}.</p>` : ''}
       ${t.valued < t.jobs || t.costed < t.jobs ? `<p class="muted tiny mt" style="margin-bottom:0">
-        Value is filled in on ${t.valued} of ${t.jobs} job(s), cost on ${t.costed}. The totals only
-        count the jobs that carry the number, so they are a floor, not the whole picture.</p>` : ''}
+        An invoice is set on ${t.valued} of ${t.jobs} job(s), a costing on ${t.costed}. Totals count
+        only the jobs carrying the figure, so they are a floor, not the whole picture.</p>` : ''}
     </div>
 
     <div class="filters" id="sortChips">
@@ -2287,8 +2613,11 @@ function renderOverview(view) {
     </div>
 
     ${sorted.length ? sorted.map((p, i) => {
-      const m = jobMargin(p), days = diaryDays(p.id).length, iss = issueCount(p.id);
-      const pct = marginPct(p.contract_value, m);
+      const c = costing(p);
+      const settled = c.acMargin != null;
+      const m = settled ? c.acMargin : c.exMargin;
+      const pct = settled ? c.acPct : c.exPct;
+      const days = diaryDays(p.id).length, iss = issueCount(p.id);
       return `
         <button class="job-row status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
           <div class="hdr">
@@ -2305,10 +2634,11 @@ function renderOverview(view) {
             ${iss ? `<span class="overdue">${iss} issue${iss > 1 ? 's' : ''}</span>` : ''}
           </div>
           <div class="sub">
-            <span><strong>${esc(fmtMoney(p.contract_value))}</strong> value</span>
-            <span>${esc(fmtMoney(p.actual_cost))} cost</span>
+            <span><strong>${esc(fmtMoney(settled ? c.acInv : c.exInv))}</strong> invoice</span>
+            <span>${esc(fmtMoney(settled ? c.acCost : c.exCost))} cost</span>
             ${m != null ? `<span style="color:${m < 0 ? 'var(--red)' : 'var(--green)'};font-weight:640">${
               esc(fmtMoney(m))}${pct != null ? ' · ' + pct.toFixed(1) + '%' : ''}</span>` : ''}
+            <span class="pill plain">${settled ? 'Final' : c.lines.length ? 'Priced' : 'Not priced'}</span>
           </div>
         </button>`;
     }).join('') : '<div class="empty"><b>No jobs in this period</b>Try a wider one.</div>'}
@@ -2373,9 +2703,9 @@ function renderReports(view) {
     ${isDirector() ? `
     <div class="card">
       <h2>Across every job</h2>
-      <p class="muted small">The overview: days on site, issues, value and margin over a period,
-      added up from what the crews and the office entered on the jobs themselves.</p>
-      <a class="btn primary wide" href="#/overview">Open the director's overview</a>
+      <p class="muted small">Profit and loss over a period: what each job was priced at, what it
+      came to, and the margin — added up from the costings and the crews' own entries.</p>
+      <a class="btn primary wide" href="#/pnl">Open profit &amp; loss</a>
     </div>` : ''}
 
     <div class="card">
@@ -2735,12 +3065,15 @@ function printDirectorReport(from, to) {
       <tr><td>Days on site</td><td>${t.days}</td></tr>
       <tr><td>Diary entries</td><td>${t.entries}</td></tr>
       <tr><td>Issues and delays</td><td>${t.issues}</td></tr>
-      <tr><td>Contract value</td><td><strong>${esc(fmtMoney(t.value))}</strong>${
+      <tr><td>Invoice (expected)</td><td><strong>${esc(fmtMoney(t.value))}</strong>${
         t.valued < t.jobs ? ` <em>(on ${t.valued} of ${t.jobs} jobs)</em>` : ''}</td></tr>
-      <tr><td>Cost</td><td>${esc(fmtMoney(t.cost))}${
+      <tr><td>Cost (expected)</td><td>${esc(fmtMoney(t.cost))}${
         t.costed < t.jobs ? ` <em>(on ${t.costed} of ${t.jobs} jobs)</em>` : ''}</td></tr>
-      <tr><td>Margin</td><td><strong>${t.margin == null ? '—' : esc(fmtMoney(t.margin))}</strong>${
+      <tr><td>Margin (expected)</td><td><strong>${t.margin == null ? '—' : esc(fmtMoney(t.margin))}</strong>${
         t.marginPct != null ? ` · ${t.marginPct.toFixed(1)}%` : ''}</td></tr>
+      ${t.settled ? `<tr><td>Finished and invoiced</td><td>${t.settled} job(s) —
+        <strong>${esc(fmtMoney(t.acMargin))}</strong> actual margin${
+        t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}</td></tr>` : ''}
     </table>
     ${t.valued < t.jobs || t.costed < t.jobs
       ? `<p style="font-size:10pt;color:#444">Totals count only the jobs carrying a figure, so they
@@ -2785,6 +3118,82 @@ function printDirectorReport(from, to) {
       <div>Director &amp; date</div>
       <div>Reviewed &amp; date</div>
     </div>`, `Director's report · ${periodLabel(overview.period, from, to)}`);
+}
+
+/** The job, end to end, in money: what it was priced at, what it came to,
+    where the difference went, and every word the supervisors wrote —
+    because the answer to "why did this one go over" is nearly always in
+    the diary rather than the spreadsheet. */
+function printJobPnl(p) {
+  const c = costing(p);
+  const days = diaryDays(p.id).slice().sort();
+  const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
+  const cls = v => v == null ? '' : v < 0 ? ' class="neg"' : ' class="pos"';
+
+  printDoc(`
+    ${docHead('Job profit & loss', p.name, jobNo(p) + (p.client ? ' · ' + p.client : ''))}
+
+    <div class="figures">
+      <div><div class="n">${money(c.acInv != null ? c.acInv : c.exInv)}</div>
+        <div class="l">${c.acInv != null ? 'Final invoice' : 'Expected invoice'}</div></div>
+      <div><div class="n">${money(c.acCost != null ? c.acCost : c.exCost)}</div>
+        <div class="l">${c.acCost != null ? 'Actual cost' : 'Expected cost'}</div></div>
+      <div><div class="n"${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
+        money(c.acMargin != null ? c.acMargin : c.exMargin)}</div>
+        <div class="l">Margin${(c.acPct != null || c.exPct != null)
+          ? ' · ' + (c.acPct != null ? c.acPct : c.exPct).toFixed(1) + '%' : ''}</div></div>
+      <div><div class="n"${cls(c.swing)}>${c.swing == null ? '—' : (c.swing > 0 ? '+' : '') + esc(fmtMoney(c.swing))}</div>
+        <div class="l">Against the price</div></div>
+    </div>
+
+    <h2>The job</h2>
+    ${jobFacts(p)}
+
+    <h2>What it was made of</h2>
+    <table>
+      <tr><th>Line</th><th style="width:26mm">Qty</th><th style="width:24mm">Rate</th>
+        <th style="width:26mm">Expected</th><th style="width:26mm">Actual</th><th style="width:24mm">Difference</th></tr>
+      ${c.lines.map(l => {
+        const ex = lineExpected(l), ac = lineActual(l);
+        const d = lineHasActual(l) ? ac - ex : null;
+        return `<tr class="avoid-break">
+          <td><strong>${esc(costLabel(l))}</strong></td>
+          <td>${l.qty == null ? '—' : esc(l.qty)}${l.unit ? ' ' + esc(l.unit) : ''}${
+            lineHasActual(l) && l.actual_qty != null ? `<br><em>${esc(l.actual_qty)} actual</em>` : ''}</td>
+          <td>${l.rate == null ? '—' : esc(fmtMoney(l.rate, true))}${
+            lineHasActual(l) && l.actual_rate != null ? `<br><em>${esc(fmtMoney(l.actual_rate, true))}</em>` : ''}</td>
+          <td>${esc(fmtMoney(ex, true))}</td>
+          <td>${lineHasActual(l) ? esc(fmtMoney(ac, true)) : '—'}</td>
+          <td${cls(d == null ? null : -d)}>${d == null ? '—' : (d > 0 ? '+' : '') + esc(fmtMoney(d, true))}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6">Nothing was priced on this job.</td></tr>'}
+      ${c.lines.length ? `<tr class="avoid-break">
+        <td><strong>Maintenance</strong> <em>(10% of the above)</em></td><td></td><td></td>
+        <td>${esc(fmtMoney(c.exMaint, true))}</td>
+        <td>${c.anyActual ? esc(fmtMoney(c.acMaint, true)) : '—'}</td><td></td></tr>` : ''}
+    </table>
+
+    <table class="kv">
+      <tr><td>Invoice</td><td>${money(c.exInv, true)} expected${
+        c.acInv != null ? ` · <strong>${esc(fmtMoney(c.acInv, true))} final</strong>` : ''}</td></tr>
+      <tr><td>Total cost</td><td>${money(c.exCost, true)} expected${
+        c.acCost != null ? ` · <strong>${esc(fmtMoney(c.acCost, true))} actual</strong>` : ''}</td></tr>
+      <tr><td>Margin</td><td><strong${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
+        money(c.acMargin != null ? c.acMargin : c.exMargin, true)}</strong>${
+        c.acMargin != null && c.exMargin != null
+          ? ` — priced at ${esc(fmtMoney(c.exMargin, true))}` : ''}</td></tr>
+    </table>
+    ${p.pnl_notes ? `<h2>How it went</h2><p class="note">${esc(p.pnl_notes)}</p>` : ''}
+
+    <h2>What happened on site</h2>
+    ${days.length
+      ? days.map(d => daySection(p, d, false)).join('')
+      : '<p>No diary entries were recorded.</p>'}
+
+    <div class="sig">
+      <div>Director &amp; date</div>
+      <div>Reviewed &amp; date</div>
+    </div>`, `Job P&L · ${jobNo(p)}`);
 }
 
 function printJobsSummary(from, to) {
@@ -3032,6 +3441,7 @@ function renderSetup(view) {
         <tr><th>Jobs</th><td>${DB.projects.length}</td></tr>
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
+        <tr><th>Cost lines</th><td>${DB.job_costs.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
         <tr><th>Version</th><td>${VERSION}${updateReady ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
       </table>
@@ -3124,7 +3534,8 @@ function renderSetup(view) {
       device: { name: S.name, role: S.role, localMode: S.localMode },
       waitingToSend: Outbox.all(),
       problem: Outbox.problem(),
-      projects: DB.projects, project_docs: DB.project_docs, diary_entries: DB.diary_entries
+      projects: DB.projects, project_docs: DB.project_docs,
+      diary_entries: DB.diary_entries, job_costs: DB.job_costs
     };
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -3162,7 +3573,7 @@ function renderSetup(view) {
     localStorage.removeItem(cacheKey());
     localStorage.removeItem('rckd.outbox');
     localStorage.removeItem('rckd.outbox.problem');
-    DB.projects = []; DB.project_docs = []; DB.diary_entries = [];
+    DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = [];
     refresh().then(render);
   };
 }
@@ -3200,10 +3611,10 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     if (document.hidden || route.path === '/screen') return;
-    const before = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length]);
+    const before = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length, DB.job_costs.length]);
     await refresh();
-    const after = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length]);
-    if (before !== after && ['/', '/today'].includes(route.path)) render();
+    const after = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length, DB.job_costs.length]);
+    if (before !== after && ['/', '/jobs', '/today'].includes(route.path)) render();
   }, 20000);
 }
 

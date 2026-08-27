@@ -43,7 +43,21 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
-- **⋮ → Director overview**: every job at once over a period — this month, last month, this
+- **The app opens on a landing page with two tools: Jobs, and Profit & loss.** Everyone gets
+  Jobs. P&L appears on Director devices only, and nothing hints at it otherwise.
+- **Costing a job**, on the job's own **Costing** screen: a line for each thing the job is
+  made of — asphalt, emulsion, concrete, materials, crew, trucking, plant and machinery,
+  transport, subcontractors, or anything you name yourself. Each line is a quantity, a unit
+  and a rate. **Maintenance is never typed in: it is always 10% of everything above it**, so
+  it moves when the lines move.
+- The office prices the job and enters the expected invoice. A **director** fills in the
+  actuals once it is done — quantity and rate again, line by line — plus the final invoice
+  and a note on why it landed where it did. The screen shows expected against actual, the
+  difference on every line, and how far ahead or behind the price the job came in.
+- **The job P&L prints** as one document: the money, every line with its variance, your note,
+  and every entry the supervisors wrote — because the reason a job went over is usually in
+  the diary rather than the spreadsheet.
+- **⋮ → Profit & loss**: every job at once over a period — this month, last month, this
   quarter, the financial year (1 April to 31 March), or dates you pick. Days on site, diary
   entries, issues, contract value, cost and margin, sorted by whichever of those you care
   about. Nothing on it is typed twice: it is added up from what the crews and the office
@@ -134,7 +148,9 @@ Android), then **Settings** → name, role, and the two values.
 | Create and edit jobs | | ✓ | ✓ |
 | Reopen a completed job | | ✓ | ✓ |
 | Enter a job's value and cost | | ✓ | ✓ |
-| **Overview across every job** | | | ✓ |
+| Price a job — cost lines and expected invoice | | ✓ | ✓ |
+| **See actuals, margin and the P&L** | | | ✓ |
+| **Enter the final invoice and actual costs** | | | ✓ |
 | **Archive a job** | | | ✓ |
 
 A diary entry written from a director's phone reads *· Director* in the record. Supervisors

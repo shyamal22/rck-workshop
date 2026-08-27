@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="app.css?v=1.4.0">
+<link rel="stylesheet" href="app.css?v=1.5.0">
 </head>
 <body>
 
@@ -29,11 +29,12 @@
 </header>
 
 <nav id="menu" hidden>
-  <button data-go="#/">Jobs</button>
+  <button data-go="#/">Home</button>
+  <button data-go="#/jobs">Jobs</button>
   <button data-go="#/today">Today on site</button>
   <button data-go="#/new">New job</button>
   <button data-go="#/reports">Reports</button>
-  <button data-go="#/overview" data-role="director">Director overview</button>
+  <button data-go="#/pnl" data-role="director">Profit &amp; loss</button>
   <button data-go="#/screen">Office screen</button>
   <hr>
   <button data-go="#/setup">Settings</button>
@@ -42,7 +43,7 @@
 <main id="view"></main>
 
 <nav id="tabbar">
-  <a href="#/" data-tab="board">
+  <a href="#/jobs" data-tab="board">
     <svg viewBox="0 0 24 24"><rect x="3.75" y="3.75" width="6.5" height="6.5" rx="2"/><rect x="13.75" y="3.75" width="6.5" height="6.5" rx="2"/><rect x="3.75" y="13.75" width="6.5" height="6.5" rx="2"/><rect x="13.75" y="13.75" width="6.5" height="6.5" rx="2"/></svg>
     <span>Jobs</span>
   </a>
@@ -62,7 +63,7 @@
 <!-- The ?v= must be bumped with VERSION in app.js. It is what makes a
      deploy reach a phone: these URLs have never been cached before, so
      no stale copy of the app can be served in their place. -->
-<script src="config.js?v=1.4.0"></script>
-<script src="app.js?v=1.4.0"></script>
+<script src="config.js?v=1.5.0"></script>
+<script src="app.js?v=1.5.0"></script>
 </body>
 </html>

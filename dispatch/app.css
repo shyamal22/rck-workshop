@@ -458,6 +458,93 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .quick button:active { background: var(--line); transform: scale(.97); }
 .quick button .swatch { width: 8px; height: 8px; }
 
+/* -------------------------------------------------------- the landing */
+/* Two tools behind one door. Big targets, because this is the first thing
+   a cold hand in a wet glove has to hit. */
+.tiles { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 4px; }
+.tile {
+  display: block; text-decoration: none; color: inherit;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 20px 20px 18px;
+  animation: riseIn var(--t) var(--ease) both;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
+}
+.tile:nth-child(2) { animation-delay: 60ms; }
+.tile:active { transform: scale(.985); box-shadow: var(--sh-1); }
+.tile .ti {
+  display: grid; place-items: center; width: 44px; height: 44px;
+  border-radius: 12px; background: var(--ink); color: #fff; margin-bottom: 13px;
+}
+.tile .ti svg { width: 23px; height: 23px; }
+.tile.money .ti { background: var(--green); }
+.tile b { display: block; font-size: 19px; letter-spacing: -.02em; }
+.tile .td { display: block; font-size: 13.5px; color: var(--ink-2); margin-top: 3px; }
+.tile .ts {
+  display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 11px;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+@media (min-width: 720px) {
+  .tiles { grid-template-columns: 1fr 1fr; }
+  .tile:hover { box-shadow: var(--sh-3); transform: translateY(-1px); }
+}
+
+/* ---------------------------------------------------------- costing */
+/* A line of what a job is made of. On a phone the quantity, unit and rate
+   sit in one row with the total on the end, so a whole costing is read
+   down a single column of money. */
+.costrow {
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 13px 14px 14px; margin-bottom: 10px;
+  animation: riseIn var(--t) var(--ease) both;
+}
+.costrow .ch { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.costrow .cname {
+  flex: 1; min-height: 38px; padding: 8px 10px; font-weight: 640; font-size: 14.5px;
+  background: transparent; border: 1.5px solid transparent; border-radius: var(--r-sm);
+}
+.costrow .cname:focus { background: var(--panel-2); border-color: var(--ink); }
+.costrow .cdel {
+  width: 36px; height: 36px; flex: none; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--panel-2); color: var(--ink-2); cursor: pointer;
+}
+.costrow .cdel:active { background: var(--line); transform: scale(.9); }
+.costrow .cdel svg { width: 16px; height: 16px; }
+
+.costrow .cg {
+  display: grid; grid-template-columns: 1fr .9fr 1fr auto; gap: 8px; align-items: end;
+}
+.costrow .cg label { display: block; min-width: 0; }
+.costrow .cg label > span {
+  display: block; font-size: 10.5px; font-weight: 640; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px;
+}
+.costrow .cg input { padding: 9px 10px; min-height: 40px; font-size: 14px; }
+.costrow .cu { display: block; font-size: 12.5px; color: var(--ink-3); padding: 11px 0; }
+.costrow .ctot { text-align: right; white-space: nowrap; padding-bottom: 2px; }
+.costrow .ctot span {
+  display: block; font-size: 10.5px; font-weight: 640; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px;
+}
+.costrow .ctot b { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.costrow .ctot em { display: block; font-style: normal; font-size: 11.5px; font-weight: 640; margin-top: 2px; }
+/* The actual row is the same shape, set back so the eye reads the price first. */
+.costrow .cg.actual {
+  margin-top: 11px; padding-top: 11px; border-top: 1px dashed var(--line-2);
+}
+
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+
+table.data.money td { text-align: right; font-variant-numeric: tabular-nums; }
+table.data.money th { width: auto; }
+table.data.money td.hd {
+  font-size: 10.5px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+table.data.money tr.tot th, table.data.money tr.tot td {
+  font-weight: 700; border-top: 1.5px solid var(--line-2);
+}
+
 /* ------------------------------------------------------------- stats */
 .stat { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
 .stat > div { text-align: left; }
