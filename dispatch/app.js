@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -191,6 +191,8 @@ function slug(text) {
 }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS_LONG = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
 function fmtDate(v) {
@@ -394,6 +396,7 @@ const ICONS = {
   play:     '<path d="M8 5.5l10 6.5-10 6.5z"/>',
   plus:     '<path d="M12 5.5v13M5.5 12h13"/>',
   clock:    '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>',
+  filter:   '<path d="M3.5 5.5h17L14 13v6l-4 2v-8z"/>',
   chart:    '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3.4" height="5"/><rect x="13.6" y="7.5" width="3.4" height="9.5"/>',
   money:    '<rect x="3" y="6.5" width="18" height="11" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 12h.01M17.5 12h.01"/>'
 };
@@ -728,92 +731,48 @@ function allDocsFor(projectId) {
   return DB.project_docs.filter(d => d.project_id === projectId);
 }
 
-/* RCK works nights, so a "day" in the diary is a shift, not a calendar day:
-   the crew comes on at 19:45 and goes off at 05:15, and both belong to the
-   shift that started on the 20th. Sorting on the clock alone would put the
-   05:15 first. So within one shift, anything logged in the small hours is
-   ordered after the evening — but only when the shift really did start in
-   the evening, which leaves an ordinary day shift completely untouched. */
-const NIGHT_UNTIL  = 9 * 60;    // 09:00
-const EVENING_FROM = 17 * 60;   // 17:00
+/* A day in the diary is the day on the calendar. An entry made at 01:30
+   belongs to the date it is made on, not to the shift that started the
+   evening before — a night job reads as two days, which is how a supervisor
+   talks about it and how the printed report sets it out. The date is still
+   editable on every entry for the rare case that is wrong. */
 
 function minutesOfDay(iso) {
   const d = new Date(iso);
   return isNaN(d) ? 0 : d.getHours() * 60 + d.getMinutes();
 }
-/** True when this shift's entries straddle midnight. */
-function isNightShift(list) {
-  const mins = list.map(e => minutesOfDay(e.at));
-  return mins.some(m => m >= EVENING_FROM) && mins.some(m => m < NIGHT_UNTIL);
-}
-/** One shift's entries in the order they actually happened. */
-function shiftOrder(list) {
-  const night = isNightShift(list);
-  const key = e => {
-    const m = minutesOfDay(e.at);
-    return night && m < NIGHT_UNTIL ? m + 1440 : m;
-  };
+/** One day's entries, earliest first. */
+function dayOrder(list) {
   return list.slice().sort((a, b) =>
-    key(a) - key(b) || (a.created_at || '').localeCompare(b.created_at || ''));
+    (a.at || '').localeCompare(b.at || '') || (a.created_at || '').localeCompare(b.created_at || ''));
 }
-/** How long the crew was on site that shift, as "9h 30m". */
-function shiftSpan(list) {
+/** How long the crew was on site that day, as "9h 30m". */
+function daySpan(list) {
   if (list.length < 2) return '';
-  const night = isNightShift(list);
-  const key = e => {
-    const m = minutesOfDay(e.at);
-    return night && m < NIGHT_UNTIL ? m + 1440 : m;
-  };
-  const ks = list.map(key);
-  const mins = Math.max.apply(null, ks) - Math.min.apply(null, ks);
-  if (mins <= 0) return '';
-  const h = Math.floor(mins / 60), m = mins % 60;
+  const mins = list.map(e => minutesOfDay(e.at));
+  const span = Math.max.apply(null, mins) - Math.min.apply(null, mins);
+  if (span <= 0) return '';
+  const h = Math.floor(span / 60), m = span % 60;
   return h ? `${h}h${m ? ' ' + m + 'm' : ''}` : `${m}m`;
 }
 
-/** Everything logged across every job on one shift date, latest first —
-    "latest" meaning latest in the shift, so a night crew's 01:30 comes
-    above the 19:45 that started the same shift. */
-function shiftFeed(day, limit) {
-  const byJob = {};
-  DB.diary_entries.filter(e => (e.entry_date || '') === day)
-    .forEach(e => { (byJob[e.project_id] = byJob[e.project_id] || []).push(e); });
-  const out = [];
-  Object.keys(byJob).forEach(id => {
-    const list = byJob[id];
-    const night = isNightShift(list);
-    list.forEach(e => {
-      const m = minutesOfDay(e.at);
-      out.push({ e, k: night && m < NIGHT_UNTIL ? m + 1440 : m });
-    });
-  });
-  return out.sort((a, b) => b.k - a.k).slice(0, limit).map(x => x.e);
-}
-
-/** The shift a new entry most likely belongs to. Logging at 01:30 on a job
-    whose crew came on last evening means last night's shift, not today. */
-function defaultShiftDate(projectId) {
-  const now = new Date();
-  if (now.getHours() * 60 + now.getMinutes() >= NIGHT_UNTIL) return today();
-  const y = new Date(now.getTime() - 86400000);
-  const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
-  const last = entriesFor(projectId, yStr);
-  if (!last.length) return today();
-  if (!isNightShift(last.concat([{ at: now.toISOString() }]))) return today();
-  // Once the crew has logged itself off site that shift is finished, and an
-  // early start the next morning is a new day — not more of last night.
-  return last.some(e => e.kind === 'offsite') ? today() : yStr;
+/** Everything logged across every job on one day, latest first. */
+function dayFeed(day, limit) {
+  return DB.diary_entries
+    .filter(e => (e.entry_date || '') === day)
+    .sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+    .slice(0, limit);
 }
 
 /** Diary entries for a job, in the order they happened. One shift when a
     date is given; otherwise every shift, oldest first. */
 function entriesFor(projectId, dateStr) {
   const all = DB.diary_entries.filter(e => e.project_id === projectId);
-  if (dateStr) return shiftOrder(all.filter(e => (e.entry_date || '') === dateStr));
+  if (dateStr) return dayOrder(all.filter(e => (e.entry_date || '') === dateStr));
   const byDay = {};
   all.forEach(e => { (byDay[e.entry_date || ''] = byDay[e.entry_date || ''] || []).push(e); });
   return Object.keys(byDay).sort()
-    .reduce((out, day) => out.concat(shiftOrder(byDay[day])), []);
+    .reduce((out, day) => out.concat(dayOrder(byDay[day])), []);
 }
 /** The dates a job has diary entries on, newest first. */
 function diaryDays(projectId) {
@@ -1971,7 +1930,7 @@ function renderDiary(view) {
 
     ${boxes.map(day => {
       const list = entriesFor(p.id, day);
-      const span = shiftSpan(list);
+      const span = daySpan(list);
       const isToday = day === today();
       return `
         <div class="dayhead${isToday ? ' today' : ''}">
@@ -2017,8 +1976,7 @@ function renderEntry(view) {
   const types = allEntryTypes();
   const wanted = editing ? editing.kind : (route.query.kind || 'note');
   const files = [];
-  const defDate = editing ? editing.entry_date : defaultShiftDate(p.id);
-  const nightRoll = !editing && defDate !== today();
+  const defDate = editing ? editing.entry_date : today();
 
   view.innerHTML = `
     <div class="card">
@@ -2030,15 +1988,12 @@ function renderEntry(view) {
         </select></label>
 
       <div class="row">
-        <label class="field grow"><span>${nightRoll ? 'Shift that started' : 'Date'}</span>
+        <label class="field grow"><span>Date</span>
           <input type="date" id="date" value="${esc(defDate)}"></label>
         <label class="field grow"><span>Time</span>
           <input type="text" id="time" value="${esc(editing ? fmtTime(editing.at) : nowTime())}"
             placeholder="07:15" inputmode="numeric" maxlength="5"></label>
       </div>
-
-      ${nightRoll ? `<p class="muted tiny" style="margin-top:-6px">You're on last night's shift, so this
-      goes under ${esc(fmtDayDate(defDate))}. Change the date if that's not right.</p>` : ''}
 
       <label class="field"><span>Comment</span>
         <textarea id="body" placeholder="What happened, what was decided, anything worth remembering.">${esc(editing ? editing.body : '')}</textarea></label>
@@ -2538,24 +2493,54 @@ function wireCosts(view, p) {
    supervisors and the office entered on the jobs themselves — nothing
    here is typed twice.
    ================================================================ */
-/* Active by default, because those are the jobs a decision can still be
-   made about. Completed is one tap away, and that is where the actuals are. */
-const pnlFilter = { view: 'active', client: 'all', from: '', to: '', sort: 'value' };
+/* The month you are in, every job in it. That is the question a director
+   opens the app with, so it is answered before a single choice is made.
+   Anything narrower sits behind one button. */
+function monthRange() {
+  const n = new Date(), y = n.getFullYear(), m = n.getMonth();
+  const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  return [iso(y, m, 1), iso(y, m, new Date(y, m + 1, 0).getDate())];
+}
+const pnlFilter = (() => {
+  const [from, to] = monthRange();
+  return { status: 'all', client: 'all', from, to, sort: 'value', open: false };
+})();
+function pnlIsDefault() {
+  const [from, to] = monthRange();
+  return pnlFilter.status === 'all' && pnlFilter.client === 'all'
+      && pnlFilter.from === from && pnlFilter.to === to;
+}
+function pnlReset() {
+  const [from, to] = monthRange();
+  Object.assign(pnlFilter, { status: 'all', client: 'all', from, to });
+}
+
+const PNL_STATUS = [
+  { key: 'all',       label: 'Every job' },
+  { key: 'planned',   label: 'Planned' },
+  { key: 'ongoing',   label: 'On site' },
+  { key: 'completed', label: 'Completed' }
+];
 
 function pnlJobs() {
   return DB.projects.filter(p => {
-    if (pnlFilter.view === 'active' && p.status === 'completed') return false;
-    if (pnlFilter.view === 'done' && p.status !== 'completed') return false;
+    if (pnlFilter.status !== 'all' && p.status !== pnlFilter.status) return false;
     if (pnlFilter.client !== 'all' && (p.client || '').trim() !== pnlFilter.client) return false;
     return jobInPeriod(p, pnlFilter.from, pnlFilter.to);
   });
 }
+/** What the figures on screen are of, in one line. */
 function pnlLabel() {
-  const who = pnlFilter.client === 'all' ? 'all clients' : pnlFilter.client;
-  const when = (pnlFilter.from || pnlFilter.to)
-    ? `${pnlFilter.from ? fmtDate(pnlFilter.from) : 'the beginning'} to ${pnlFilter.to ? fmtDate(pnlFilter.to) : 'today'}`
-    : 'all dates';
-  return `${pnlFilter.view === 'done' ? 'Completed jobs' : 'Planned and on site'} · ${who} · ${when}`;
+  const [mf, mt] = monthRange();
+  const n = new Date();
+  const when = (pnlFilter.from === mf && pnlFilter.to === mt)
+    ? `${MONTHS_LONG[n.getMonth()]} ${n.getFullYear()}`
+    : (pnlFilter.from || pnlFilter.to)
+      ? `${pnlFilter.from ? fmtDate(pnlFilter.from) : 'the beginning'} to ${pnlFilter.to ? fmtDate(pnlFilter.to) : 'today'}`
+      : 'All time';
+  const who = pnlFilter.client === 'all' ? '' : ` · ${pnlFilter.client}`;
+  const what = pnlFilter.status === 'all' ? '' : ` · ${PNL_STATUS.find(x => x.key === pnlFilter.status).label.toLowerCase()}`;
+  return when + who + what;
 }
 
 function renderPnl(view) {
@@ -2574,7 +2559,6 @@ function renderPnl(view) {
   const list = pnlJobs();
   const t = periodTotals(list);
   const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim()).filter(Boolean))).sort();
-  const done = pnlFilter.view === 'done';
 
   const mg = p => { const m = costing(p); return m.acMargin != null ? m.acMargin : m.exMargin; };
   const sorters = {
@@ -2586,43 +2570,43 @@ function renderPnl(view) {
   const sorted = list.slice().sort(sorters[pnlFilter.sort] || sorters.value);
 
   view.innerHTML = `
-    <div class="filters" id="viewChips">
-      <button class="chip" data-view="active" aria-pressed="${!done}">Planned &amp; on site</button>
-      <button class="chip" data-view="done" aria-pressed="${done}">Completed</button>
+    <div class="ledger">
+      <div class="lh">${esc(pnlLabel())}</div>
+      <div class="lrow"><span>Invoice</span><b>${esc(fmtMoney(t.value))}</b></div>
+      <div class="lrow"><span>Cost</span><b>${esc(fmtMoney(t.cost))}</b></div>
+      <div class="lrow tot"><span>Margin</span><b class="${
+        t.margin == null ? '' : t.margin < 0 ? 'neg' : 'pos'}">${
+        t.margin == null ? '—' : esc(fmtMoney(t.margin))}${
+        t.marginPct != null ? ` <em>${t.marginPct.toFixed(1)}%</em>` : ''}</b></div>
+      <div class="lf">${list.length} job${list.length === 1 ? '' : 's'} · ${t.valued} priced${
+        t.settled ? ` · ${t.settled} invoiced, ${esc(fmtMoney(t.acMargin))} actual` : ''}</div>
     </div>
 
-    <div class="card">
-      <label class="field" style="margin-bottom:10px"><span>Client</span>
-        <select id="client">
-          <option value="all">All clients</option>
+    <button class="btn wide filterbtn${pnlIsDefault() ? '' : ' on'}" id="filterBtn">
+      ${icon('filter')}${pnlIsDefault() ? 'Filter' : 'Filtered · ' + esc(pnlLabel())}
+    </button>
+
+    ${pnlFilter.open ? `
+    <div class="card filterpanel">
+      <label class="field"><span>Show</span>
+        <select id="fStatus">
+          ${PNL_STATUS.map(x => `<option value="${x.key}" ${pnlFilter.status === x.key ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>Client</span>
+        <select id="fClient">
+          <option value="all">Every client</option>
           ${clients.map(c => `<option value="${esc(c)}" ${pnlFilter.client === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
         </select></label>
       <div class="row">
-        <label class="field grow" style="margin-bottom:0"><span>From</span>
-          <input type="date" id="from" value="${esc(pnlFilter.from)}"></label>
-        <label class="field grow" style="margin-bottom:0"><span>To</span>
-          <input type="date" id="to" value="${esc(pnlFilter.to)}"></label>
+        <label class="field grow"><span>From</span><input type="date" id="fFrom" value="${esc(pnlFilter.from)}"></label>
+        <label class="field grow"><span>To</span><input type="date" id="fTo" value="${esc(pnlFilter.to)}"></label>
       </div>
-      ${(pnlFilter.from || pnlFilter.to || pnlFilter.client !== 'all')
-        ? '<button class="btn sm wide mt" id="clearF">Clear the filters</button>' : ''}
-    </div>
-
-    <div class="card">
-      <div class="stat">
-        <div><span class="n" style="font-size:19px">${esc(fmtMoney(done ? t.acValue : t.value))}</span>
-          <span class="l">${done ? 'Invoiced' : 'Invoice'}</span></div>
-        <div><span class="n" style="font-size:19px">${esc(fmtMoney(done ? t.acCost : t.cost))}</span>
-          <span class="l">Cost</span></div>
-        <div><span class="n" style="font-size:19px;color:${
-          (done ? t.acMargin : t.margin) == null ? 'inherit'
-          : (done ? t.acMargin : t.margin) < 0 ? 'var(--red)' : 'var(--green)'}">${
-          (done ? t.acMargin : t.margin) == null ? '—' : esc(fmtMoney(done ? t.acMargin : t.margin))}</span>
-          <span class="l">Margin${(done ? t.acMarginPct : t.marginPct) != null
-            ? ' · ' + (done ? t.acMarginPct : t.marginPct).toFixed(1) + '%' : ''}</span></div>
+      <div class="btn-row">
+        <button class="btn sm" id="fAll">All time</button>
+        <button class="btn sm" id="fReset">This month</button>
+        <button class="btn sm primary" id="fClose">Done</button>
       </div>
-      <p class="muted tiny mt" style="margin-bottom:0">${list.length} job${list.length === 1 ? '' : 's'}${
-        done ? `, ${t.settled} of them invoiced` : `, ${t.valued} priced`}.</p>
-    </div>
+    </div>` : ''}
 
     <div class="filters" id="sortChips">
       ${[['value','By value'],['margin','By margin'],['date','By date'],['name','By name']]
@@ -2650,28 +2634,66 @@ function renderPnl(view) {
           <div class="sub">
             <span><strong>${esc(fmtMoney(settled ? c.acInv : c.exInv))}</strong> invoice</span>
             <span>${esc(fmtMoney(settled ? c.acCost : c.exCost))} cost</span>
-            ${m != null ? `<span style="color:${m < 0 ? 'var(--red)' : 'var(--green)'};font-weight:640">${
+            ${m != null ? `<span class="${m < 0 ? 'neg' : 'pos'}" style="font-weight:640">${
               esc(fmtMoney(m))}${pct != null ? ' · ' + pct.toFixed(1) + '%' : ''}</span>` : ''}
           </div>
         </button>`;
-    }).join('') : `<div class="empty"><b>No jobs here</b>${
-      done ? 'Nothing completed matches these filters.' : 'Nothing planned or on site matches these filters.'}</div>`}
+    }).join('') : `<div class="empty"><b>No jobs here</b>Nothing matches this month.
+      Open the filter for a wider period.</div>`}
 
     <div class="card">
-      <button class="btn wide" id="print">${icon('printer')}Print this list</button>
+      <div class="btn-row">
+        <button class="btn" id="print">${icon('printer')}Print the report</button>
+        <button class="btn" id="csv">${icon('download')}Export to Excel</button>
+      </div>
+      <p class="muted tiny center mt" style="margin-bottom:0">Both cover exactly what is filtered above.</p>
     </div>`;
 
-  $$('#viewChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.view = b.dataset.view; render(); });
-  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.sort = b.dataset.sort; render(); });
-  $('#client', view).onchange = e => { pnlFilter.client = e.target.value; render(); };
-  $('#from', view).onchange = e => { pnlFilter.from = e.target.value; render(); };
-  $('#to', view).onchange = e => { pnlFilter.to = e.target.value; render(); };
-  const clr = $('#clearF', view);
-  if (clr) clr.onclick = () => { pnlFilter.client = 'all'; pnlFilter.from = ''; pnlFilter.to = ''; render(); };
+  $('#filterBtn', view).onclick = () => { pnlFilter.open = !pnlFilter.open; render(); };
+  const on = (id, fn) => { const el = $('#' + id, view); if (el) el.onchange = fn; };
+  on('fStatus', e => { pnlFilter.status = e.target.value; render(); });
+  on('fClient', e => { pnlFilter.client = e.target.value; render(); });
+  on('fFrom',   e => { pnlFilter.from = e.target.value; render(); });
+  on('fTo',     e => { pnlFilter.to = e.target.value; render(); });
+  const click = (id, fn) => { const el = $('#' + id, view); if (el) el.onclick = fn; };
+  click('fReset', () => { pnlReset(); render(); });
+  click('fAll',   () => { pnlFilter.from = ''; pnlFilter.to = ''; render(); });
+  click('fClose', () => { pnlFilter.open = false; render(); });
 
-  // Straight to the money, not the whole dispatch job page.
+  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.sort = b.dataset.sort; render(); });
   $$('.job-row', view).forEach(b => b.onclick = () => go('#/costs/' + b.dataset.id));
-  $('#print', view).onclick = () => printDirectorReport(pnlFilter.from, pnlFilter.to, list);
+  $('#print', view).onclick = () => printDirectorReport(sorted);
+  $('#csv', view).onclick = () => exportPnlCsv(sorted);
+}
+
+/** The filtered list as a spreadsheet — a client's month handed straight to
+    the accountant, with the same figures that are on the screen. */
+function exportPnlCsv(list) {
+  const r2 = v => v == null ? '' : Math.round(v * 100) / 100;
+  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Status', 'First day', 'Last day',
+    'Supervisor', 'Days on site', 'Issues',
+    'Expected invoice', 'Expected cost', 'Expected margin', 'Expected margin %',
+    'Final invoice', 'Actual cost', 'Actual margin', 'Actual margin %',
+    'Against the price', 'Note']];
+  list.forEach(p => {
+    const c = costing(p);
+    rows.push([
+      jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), statusLabel(p.status),
+      p.start_date || '', p.end_date || '', p.supervisor,
+      diaryDays(p.id).length, issueCount(p.id),
+      r2(c.exInv), r2(c.exCost), r2(c.exMargin), c.exPct == null ? '' : c.exPct.toFixed(1),
+      r2(c.acInv), r2(c.acCost), r2(c.acMargin), c.acPct == null ? '' : c.acPct.toFixed(1),
+      r2(c.swing), p.pnl_notes || ''
+    ]);
+  });
+  const t = periodTotals(list);
+  rows.push([]);
+  rows.push(['TOTAL', pnlLabel(), '', '', '', '', '', '', '', t.days, t.issues,
+    r2(t.value), r2(t.cost), r2(t.margin), t.marginPct == null ? '' : t.marginPct.toFixed(1),
+    r2(t.acValue), r2(t.acCost), r2(t.acMargin), t.acMarginPct == null ? '' : t.acMarginPct.toFixed(1), '', '']);
+  const tag = (pnlFilter.client === 'all' ? 'all-clients' : pnlFilter.client)
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  downloadCsv(`rck-pnl-${tag}-${pnlFilter.from || 'start'}-to-${pnlFilter.to || today()}.csv`, rows);
 }
 
 /* ================================================================
@@ -2880,41 +2902,38 @@ function jobFacts(p) {
     ${p.description ? `<p class="note">${esc(p.description)}</p>` : ''}`;
 }
 
-/** One shift, in the order it happened. Each entry is a block that cannot
-    be split across a page: a time with no comment under it, or a comment
+/** One day, in the order it happened. Each entry is a block that cannot be
+    split across a page: a time with no comment under it, or a comment
     orphaned from its time, is worse than a little white space. */
-function daySection(p, day, withPhotos) {
+function daySection(p, day, n, total) {
   const list = entriesFor(p.id, day);
   if (!list.length) return '';
   const first = list[0], last = list[list.length - 1];
-  const span = shiftSpan(list);
-  const photos = [];
-  list.forEach(e => (e.files || []).forEach(f => {
-    if (/^image\//.test(f.type || '')) photos.push({ f, e });
-  }));
+  const span = daySpan(list);
+  const shots = list.reduce((c, e) => c + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
 
   return `
-    <div class="day">
+    <section class="day">
       <div class="day-head">
+        ${n ? `<span class="dn">Day ${n}${total ? ' / ' + total : ''}</span>` : ''}
         <h3>${esc(fmtDayDate(day))}</h3>
-        ${span ? `<span class="span">${esc(fmtTime(first.at))} – ${esc(fmtTime(last.at))} · ${esc(span)} on site</span>` : ''}
+        <span class="span">${span ? `${esc(fmtTime(first.at))} – ${esc(fmtTime(last.at))} · ${esc(span)}` : esc(fmtTime(first.at))}</span>
       </div>
+      <div class="day-sub">${list.length} entr${list.length > 1 ? 'ies' : 'y'}${
+        shots ? ` · ${shots} photograph${shots > 1 ? 's' : ''}, at the back` : ''}</div>
       ${list.map(e => {
         const flag = e.kind === 'issue' || e.kind === 'delay';
-        const shots = (e.files || []).filter(f => /^image\//.test(f.type || '')).length;
         return `
           <div class="entry${flag ? ' flag' : ''}">
             <div class="e-time">${esc(fmtTime(e.at))}</div>
             <div class="e-body">
               <div class="e-kind">${esc(entryLabel(e))}</div>
               ${e.body ? `<div class="e-note">${esc(e.body)}</div>` : ''}
-              <div class="e-who">${esc(e.author || '')}${
-                shots ? ` · ${shots} photo${shots > 1 ? 's' : ''}` : ''}</div>
+              <div class="e-who">${esc(e.author || '')}</div>
             </div>
           </div>`;
       }).join('')}
-    </div>
-    ${withPhotos ? photoSheet(photos, fmtDayDate(day)) : ''}`;
+    </section>`;
 }
 
 /** Cut a caption at a word, not mid-syllable. */
@@ -2926,19 +2945,30 @@ function clip(text, max) {
   return (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '') + '…';
 }
 
-/** Photos two across and two down, so a page carries four and a job with
-    thirty of them is still a document somebody will open. */
-function photoSheet(photos, heading) {
-  if (!photos.length) return '';
+/** Every photograph on the job, gathered at the back rather than cut into
+    the middle of each day. Four to a page, each captioned with the day and
+    the entry it came from, so nothing is orphaned from its context. */
+function photoAppendix(p, days) {
+  const shots = [];
+  days.forEach((day, i) => entriesFor(p.id, day).forEach(e => (e.files || []).forEach(f => {
+    if (/^image\//.test(f.type || '')) shots.push({ f, e, day, n: i + 1 });
+  })));
+  if (!shots.length) return '';
+
   return `
-    <h2>Photos — ${esc(heading)}</h2>
+    <div class="page-break"></div>
+    <h2>Photographs</h2>
+    <p class="lede">${shots.length} photograph${shots.length > 1 ? 's' : ''} over
+      ${days.length} day${days.length > 1 ? 's' : ''} on site.</p>
     <div class="photos">
-      ${photos.map(({ f, e }) => `
-        <div class="photo">
+      ${shots.map(({ f, e, day, n }) => `
+        <figure class="photo">
           <img src="${esc(f.url)}" alt="">
-          <div class="cap"><b>${esc(fmtTime(e.at))} ${esc(entryLabel(e))}</b>${
-            e.body ? ' — ' + esc(clip(e.body, 105)) : ''}</div>
-        </div>`).join('')}
+          <figcaption>
+            <b>Day ${n} · ${esc(fmtShort(day))} · ${esc(fmtTime(e.at))}</b>
+            <span>${esc(entryLabel(e))}${e.body ? ' — ' + esc(clip(e.body, 90)) : ''}</span>
+          </figcaption>
+        </figure>`).join('')}
     </div>`;
 }
 
@@ -2995,8 +3025,10 @@ function printJobReport(p) {
 
     <h2>The job diary</h2>
     ${days.length
-      ? days.map(d => daySection(p, d, true)).join('')
+      ? days.map((d, i) => daySection(p, d, i + 1, days.length)).join('')
       : '<p>No diary entries were recorded.</p>'}
+
+    ${photoAppendix(p, days)}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
@@ -3013,7 +3045,7 @@ function printDayReport(p, day) {
     ${docHead('Daily job diary', p.name, `${jobNo(p)}${p.client ? ' · ' + p.client : ''} · ${fmtDayDate(day)}`)}
 
     <div class="figures">
-      <div><div class="n">${esc(shiftSpan(list) || '—')}</div><div class="l">On site</div></div>
+      <div><div class="n">${esc(daySpan(list) || '—')}</div><div class="l">On site</div></div>
       <div><div class="n">${list.length}</div><div class="l">Entries</div></div>
       <div><div class="n"${issues.length ? ' class="neg"' : ''}>${issues.length}</div><div class="l">Issues &amp; delays</div></div>
       <div><div class="n">${shots}</div><div class="l">Photos</div></div>
@@ -3022,7 +3054,9 @@ function printDayReport(p, day) {
     <h2>The job</h2>
     ${jobFacts(p)}
 
-    ${daySection(p, day, true) || '<p>No entries on this day.</p>'}
+    ${daySection(p, day) || '<p>No entries on this day.</p>'}
+
+    ${photoAppendix(p, [day])}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
@@ -3042,89 +3076,126 @@ function printDocRegister(p) {
 /** The director's report: the period's numbers, every job in it, and every
     issue and delay the crews logged — the supervisors' and the office's own
     entries added up, rather than a separate thing anyone has to write. */
-function printDirectorReport(from, to, only) {
-  const list = only || DB.projects.filter(p => jobInPeriod(p, from, to));
-  const t = periodTotals(list);
-  const sorted = list.slice().sort((a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1));
+/** The period, on paper. The numbers first, then how they split by client,
+    then a job at a time, then everything the crews flagged — so it reads
+    top-down from "how did we do" to "and why". */
+function printDirectorReport(list) {
+  const jobs = list || pnlJobs();
+  const t = periodTotals(jobs);
+  const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
+  const cls = v => v == null ? '' : v < 0 ? ' class="neg"' : ' class="pos"';
 
-  const inRange = d => !!d && (!from || d >= from) && (!to || d <= to);
+  // How the period splits by client — the cut a director asks for next.
+  const byClient = {};
+  jobs.forEach(p => {
+    const k = (p.client || '').trim() || 'No client named';
+    const c = costing(p);
+    const b = byClient[k] || (byClient[k] = { jobs: 0, inv: 0, cost: 0, priced: 0, days: 0, issues: 0 });
+    b.jobs++;
+    b.days += diaryDays(p.id).length;
+    b.issues += issueCount(p.id);
+    if (c.exInv != null)  { b.inv += c.exInv; b.priced++; }
+    if (c.exCost != null) { b.cost += c.exCost; }
+  });
+  const clients = Object.keys(byClient).sort((a, b) => byClient[b].inv - byClient[a].inv);
+
   const troubles = [];
-  list.forEach(p => entriesFor(p.id).forEach(e => {
-    if ((e.kind === 'issue' || e.kind === 'delay') && inRange(e.entry_date)) troubles.push({ p, e });
+  jobs.forEach(p => entriesFor(p.id).forEach(e => {
+    if ((e.kind === 'issue' || e.kind === 'delay') &&
+        (!pnlFilter.from || (e.entry_date || '') >= pnlFilter.from) &&
+        (!pnlFilter.to || (e.entry_date || '') <= pnlFilter.to)) troubles.push({ p, e });
   }));
   troubles.sort((a, b) => (a.e.entry_date || '').localeCompare(b.e.entry_date || ''));
 
   printDoc(`
-    ${docHead('Director\'s report', 'Jobs, days and margin', pnlLabel())}
+    ${docHead('Profit & loss', pnlLabel(), `${jobs.length} job${jobs.length === 1 ? '' : 's'}`)}
 
     <div class="figures">
-      <div><div class="n">${t.jobs}</div><div class="l">Jobs</div></div>
+      <div><div class="n">${money(t.value)}</div><div class="l">Invoice</div></div>
+      <div><div class="n">${money(t.cost)}</div><div class="l">Cost</div></div>
+      <div><div class="n"${cls(t.margin)}>${money(t.margin)}</div>
+        <div class="l">Margin${t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</div></div>
       <div><div class="n">${t.days}</div><div class="l">Days on site</div></div>
-      <div><div class="n"${t.issues ? ' class="neg"' : ''}>${t.issues}</div><div class="l">Issues</div></div>
-      <div><div class="n"${t.margin != null && t.margin < 0 ? ' class="neg"' : ' class="pos"'}>${
-        t.margin == null ? '—' : esc(fmtMoney(t.margin))}</div><div class="l">Margin</div></div>
     </div>
 
     <h2>The period</h2>
     <table class="kv">
       <tr><td>Jobs</td><td><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
         ${t.planned || 0} planned, ${t.completed || 0} completed</td></tr>
-      <tr><td>Days on site</td><td>${t.days}</td></tr>
+      <tr><td>Priced</td><td>${t.valued} of ${t.jobs}${
+        t.valued < t.jobs ? ' <em>— totals are a floor, not the whole picture</em>' : ''}</td></tr>
+      ${t.settled ? `<tr><td>Finished and invoiced</td><td>${t.settled} job(s) — invoiced
+        <strong>${money(t.acValue)}</strong> against <strong>${money(t.acCost)}</strong> of cost,
+        <strong${cls(t.acMargin)}>${money(t.acMargin)}</strong> actual margin${
+        t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}</td></tr>` : ''}
       <tr><td>Diary entries</td><td>${t.entries}</td></tr>
       <tr><td>Issues and delays</td><td>${t.issues}</td></tr>
-      <tr><td>Invoice (expected)</td><td><strong>${esc(fmtMoney(t.value))}</strong>${
-        t.valued < t.jobs ? ` <em>(on ${t.valued} of ${t.jobs} jobs)</em>` : ''}</td></tr>
-      <tr><td>Cost (expected)</td><td>${esc(fmtMoney(t.cost))}${
-        t.costed < t.jobs ? ` <em>(on ${t.costed} of ${t.jobs} jobs)</em>` : ''}</td></tr>
-      <tr><td>Margin (expected)</td><td><strong>${t.margin == null ? '—' : esc(fmtMoney(t.margin))}</strong>${
-        t.marginPct != null ? ` · ${t.marginPct.toFixed(1)}%` : ''}</td></tr>
-      ${t.settled ? `<tr><td>Finished and invoiced</td><td>${t.settled} job(s) —
-        <strong>${esc(fmtMoney(t.acMargin))}</strong> actual margin${
-        t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}</td></tr>` : ''}
     </table>
-    ${t.valued < t.jobs || t.costed < t.jobs
-      ? `<p style="font-size:10pt;color:#444">Totals count only the jobs carrying a figure, so they
-         are a floor rather than the whole picture.</p>` : ''}
 
-    <h2>Jobs</h2>
+    ${clients.length > 1 ? `
+    <h2>By client</h2>
+    <table>
+      <tr><th>Client</th><th style="width:14mm">Jobs</th><th style="width:14mm">Days</th>
+        <th style="width:26mm">Invoice</th><th style="width:26mm">Cost</th><th style="width:28mm">Margin</th></tr>
+      ${clients.map(k => {
+        const b = byClient[k];
+        const m = b.priced ? b.inv - b.cost : null;
+        const pct = marginPct(b.inv, m);
+        return `<tr class="avoid-break">
+          <td><strong>${esc(k)}</strong>${b.issues ? `<br><em>${b.issues} issue${b.issues > 1 ? 's' : ''}</em>` : ''}</td>
+          <td>${b.jobs}</td><td>${b.days}</td>
+          <td>${esc(fmtMoney(b.inv))}</td><td>${esc(fmtMoney(b.cost))}</td>
+          <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
+        </tr>`;
+      }).join('')}
+    </table>` : ''}
+
+    <h2>Job by job</h2>
     <table>
       <tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:22mm">Status</th>
-        <th style="width:13mm">Days</th><th style="width:13mm">Iss.</th>
-        <th style="width:24mm">Value</th><th style="width:24mm">Cost</th><th style="width:26mm">Margin</th></tr>
-      ${sorted.map(p => {
-        const m = jobMargin(p), pct = marginPct(p.contract_value, m);
+        <th style="width:12mm">Days</th><th style="width:24mm">Invoice</th>
+        <th style="width:24mm">Cost</th><th style="width:26mm">Margin</th></tr>
+      ${jobs.map(p => {
+        const c = costing(p);
+        const settled = c.acMargin != null;
+        const m = settled ? c.acMargin : c.exMargin;
+        const pct = settled ? c.acPct : c.exPct;
+        const iss = issueCount(p.id);
         return `<tr class="avoid-break">
-          <td><strong>${jobNo(p)}</strong></td>
+          <td><strong>${jobNo(p)}</strong>${settled ? '<br><em>final</em>' : ''}</td>
           <td>${esc(p.name)}${p.client ? `<br><em>${esc(p.client)}</em>` : ''}${
-            p.supervisor ? `<br>${esc(p.supervisor)}` : ''}</td>
-          <td>${esc(statusLabel(p.status))}${p.archived ? '<br><em>archived</em>' : ''}</td>
-          <td>${diaryDays(p.id).length}</td>
-          <td>${issueCount(p.id) || ''}</td>
-          <td>${esc(fmtMoney(p.contract_value))}</td>
-          <td>${esc(fmtMoney(p.actual_cost))}</td>
-          <td>${m == null ? '—' : esc(fmtMoney(m)) + (pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : '')}</td>
+            p.supervisor ? `<br>${esc(p.supervisor)} · ${esc(crewLabel(crewOf(p)))}` : ''}</td>
+          <td>${esc(statusLabel(p.status))}</td>
+          <td>${diaryDays(p.id).length}${iss ? `<br><em class="neg">${iss} iss.</em>` : ''}</td>
+          <td>${money(settled ? c.acInv : c.exInv)}</td>
+          <td>${money(settled ? c.acCost : c.exCost)}</td>
+          <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
         </tr>`;
-      }).join('') || '<tr><td colspan="8">No jobs in this period.</td></tr>'}
+      }).join('') || '<tr><td colspan="7">No jobs in this period.</td></tr>'}
     </table>
 
-    <h2>What went wrong on site</h2>
+    ${jobs.some(p => p.pnl_notes) ? `
+    <h2>Where the money went</h2>
+    ${jobs.filter(p => p.pnl_notes).map(p => `
+      <p class="note avoid-break"><strong>${jobNo(p)} ${esc(p.name)}</strong> — ${esc(p.pnl_notes)}</p>`).join('')}` : ''}
+
     ${troubles.length ? `
-      <table>
-        <tr><th style="width:24mm">Date</th><th style="width:22mm">Job</th>
-          <th>What happened</th><th style="width:26mm">Logged by</th></tr>
-        ${troubles.map(({ p, e }) => `<tr class="avoid-break">
-          <td>${esc(fmtShort(e.entry_date))} ${esc(fmtTime(e.at))}</td>
-          <td>${jobNo(p)}</td>
-          <td class="note"><strong>${esc(entryLabel(e))}</strong>${e.body ? ' — ' + esc(e.body) : ''}</td>
-          <td>${esc(e.author || '')}</td>
-        </tr>`).join('')}
-      </table>`
-      : '<p>Nothing was logged as an issue or a delay in this period.</p>'}
+    <h2>What the crews flagged</h2>
+    <table>
+      <tr><th style="width:26mm">Date</th><th style="width:22mm">Job</th>
+        <th>What happened</th><th style="width:26mm">Logged by</th></tr>
+      ${troubles.map(({ p, e }) => `<tr class="avoid-break">
+        <td>${esc(fmtShort(e.entry_date))} ${esc(fmtTime(e.at))}</td>
+        <td>${jobNo(p)}</td>
+        <td class="note"><strong>${esc(entryLabel(e))}</strong>${e.body ? ' — ' + esc(e.body) : ''}</td>
+        <td>${esc(e.author || '')}</td>
+      </tr>`).join('')}
+    </table>` : ''}
 
     <div class="sig">
       <div>Director &amp; date</div>
       <div>Reviewed &amp; date</div>
-    </div>`, `Director's report · ${pnlLabel()}`);
+    </div>`, `Profit & loss · ${pnlLabel()}`);
 }
 
 /** The job, end to end, in money: what it was priced at, what it came to,
@@ -3194,7 +3265,7 @@ function printJobPnl(p) {
 
     <h2>What happened on site</h2>
     ${days.length
-      ? days.map(d => daySection(p, d, false)).join('')
+      ? days.map((d, i) => daySection(p, d, i + 1, days.length)).join('')
       : '<p>No diary entries were recorded.</p>'}
 
     <div class="sig">
@@ -3265,7 +3336,7 @@ function renderKiosk(view) {
   const doneToday = jobs.filter(p => p.status === 'completed' && (p.completed_at || '').slice(0, 10) === day);
 
   // The last thing logged on any job today, newest first.
-  const feed = shiftFeed(day, 14);
+  const feed = dayFeed(day, 14);
 
   const clock = new Date();
   const time = `${String(clock.getHours()).padStart(2, '0')}:${String(clock.getMinutes()).padStart(2, '0')}`;
