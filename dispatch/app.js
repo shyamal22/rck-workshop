@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1890,23 +1890,58 @@ function renderUpload(view) {
    Screen — the job diary
    Every day the crew is on site, in the order it happened.
    ================================================================ */
+/** One entry on the timeline: the time in its own column, a dot on a rail
+    coloured for what happened, and the note beside it. */
 function diaryItem(e, i) {
   const files = Array.isArray(e.files) ? e.files : [];
   const photos = files.filter(f => /^image\//.test(f.type || ''));
   const others = files.filter(f => !/^image\//.test(f.type || ''));
   const pending = files.some(f => f.pending);
+  const flag = e.kind === 'issue' || e.kind === 'delay';
   return `
-    <div class="d-item ${entryMarked(e) ? 'mark' : ''} status-${entryTone(e)}" data-id="${e.id}" style="--i:${i}">
-      <div class="dt">${esc(fmtTime(e.at))}</div>
-      <div class="db">
-        <div class="dk">${esc(entryLabel(e))}</div>
-        ${e.body ? `<div class="dn">${esc(e.body)}</div>` : ''}
+    <div class="tl-e status-${entryTone(e)}${flag ? ' flag' : ''}${entryMarked(e) ? ' mark' : ''}"
+         data-id="${e.id}" style="--i:${i}">
+      <div class="tl-when">${esc(fmtTime(e.at))}</div>
+      <div class="tl-rail"><i></i></div>
+      <div class="tl-card">
+        <div class="tl-kind">${esc(entryLabel(e))}</div>
+        ${e.body ? `<div class="tl-note">${esc(e.body)}</div>` : ''}
         ${photos.length ? `<div class="thumbs">${photos.map(f =>
           `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}</div>` : ''}
         ${others.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('clip')}${esc(f.name || 'Attachment')}</a>`).join('')}
-        <div class="dw">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
+        <div class="tl-who">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
           pending ? ' · photos waiting for signal' : ''}</div>
       </div>
+    </div>`;
+}
+
+/** The quiet stretch between two entries. Seeing "3h 10m" on the rail is
+    what turns a list of times into a shape you can read — where the day
+    ran, and where it stopped. */
+function diaryGap(a, b) {
+  const mins = Math.round((new Date(b.at) - new Date(a.at)) / 60000);
+  if (!isFinite(mins) || mins < 25) return '';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `<div class="tl-gap"><span>${h ? h + 'h' + (m ? ' ' + m + 'm' : '') : m + 'm'}</span></div>`;
+}
+
+/** The whole day on one line: where each entry falls between the first and
+    the last, so the shape of the shift is visible before a word is read. */
+function dayStrip(list) {
+  if (list.length < 2) return '';
+  const t0 = new Date(list[0].at).getTime();
+  const t1 = new Date(list[list.length - 1].at).getTime();
+  if (!(t1 > t0)) return '';
+  return `
+    <div class="tl-strip">
+      <div class="bar">
+        ${list.map(e => {
+          const at = ((new Date(e.at).getTime() - t0) / (t1 - t0)) * 100;
+          return `<i class="status-${entryTone(e)}" style="left:${at.toFixed(2)}%"
+            title="${esc(fmtTime(e.at))} ${esc(entryLabel(e))}"></i>`;
+        }).join('')}
+      </div>
+      <div class="ends"><span>${esc(fmtTime(list[0].at))}</span><span>${esc(fmtTime(list[list.length - 1].at))}</span></div>
     </div>`;
 }
 
@@ -1941,7 +1976,9 @@ function renderDiary(view) {
         </div>
         <div class="card">
           ${list.length ? `
-            <div class="diary">${list.map(diaryItem).join('')}</div>
+            ${dayStrip(list)}
+            <div class="tl">${list.map((e, i) =>
+              (i ? diaryGap(list[i - 1], e) : '') + diaryItem(e, i)).join('')}</div>
             <div class="btn-row mt">
               <button class="btn sm" data-day="${day}">${icon('printer')}Print this day</button>
             </div>`
@@ -1950,7 +1987,7 @@ function renderDiary(view) {
         </div>`;
     }).join('') || `<div class="empty"><b>Nothing logged yet</b>The first entry starts the job.</div>`}`;
   $$('[data-day]', view).forEach(b => b.onclick = () => printDayReport(p, b.dataset.day));
-  $$('.d-item', view).forEach(el => el.onclick = ev => {
+  $$('.tl-e', view).forEach(el => el.onclick = ev => {
     if (ev.target.closest('a')) return;   // opening a photo isn't editing
     go(`#/entry/${p.id}?edit=${el.dataset.id}`);
   });
@@ -2881,30 +2918,40 @@ async function printDoc(html, running) {
   setTimeout(() => window.print(), 80);
 }
 
+/** The job's facts, two to a line. A summary should sit across the page,
+    not run down it — half the height, and no harder to read. */
 function jobFacts(p) {
   const tone = p.status === 'ongoing' ? 'on' : p.status === 'completed' ? 'done' : '';
-  return `
-    <table class="kv">
-      <tr><td>Job number</td><td><strong>${jobNo(p)}</strong></td></tr>
-      <tr><td>Client</td><td>${esc(p.client || '—')}</td></tr>
-      <tr><td>Site</td><td>${esc(p.site || '—')}</td></tr>
-      <tr><td>Crew</td><td>${esc(crewLabel(crewOf(p)))}</td></tr>
-      <tr><td>Type of work</td><td>${esc(typeLabel(typeOf(p)))}</td></tr>
-      <tr><td>Status</td><td><span class="badge ${tone}">${esc(statusLabel(p.status))}</span></td></tr>
-      <tr><td>Planned dates</td><td>${p.start_date ? fmtDate(p.start_date) : 'not set'}${
-        p.end_date && p.end_date !== p.start_date ? ' to ' + fmtDate(p.end_date) : ''}</td></tr>
-      <tr><td>Supervisor</td><td>${esc(p.supervisor || '—')}</td></tr>
-      ${p.contact ? `<tr><td>Client contact</td><td>${esc(p.contact)}</td></tr>` : ''}
-      ${p.started_at ? `<tr><td>Started on site</td><td>${fmtDateTime(p.started_at)}${p.started_by ? ' · ' + esc(p.started_by) : ''}</td></tr>` : ''}
-      ${p.completed_at ? `<tr><td>Completed</td><td>${fmtDateTime(p.completed_at)}${p.completed_by ? ' · ' + esc(p.completed_by) : ''}</td></tr>` : ''}
-      <tr><td>Days on site</td><td>${diaryDays(p.id).length}</td></tr>
-    </table>
-    ${p.description ? `<p class="note">${esc(p.description)}</p>` : ''}`;
+  const facts = [
+    ['Job', `<strong>${jobNo(p)}</strong>`],
+    ['Status', `<span class="badge ${tone}">${esc(statusLabel(p.status))}</span>`],
+    ['Client', esc(p.client || '—')],
+    ['Crew', esc(crewLabel(crewOf(p)))],
+    ['Site', esc(p.site || '—')],
+    ['Work', esc(typeLabel(typeOf(p)))],
+    ['Supervisor', esc(p.supervisor || '—')],
+    ['Dates', p.start_date ? fmtDate(p.start_date) + (p.end_date && p.end_date !== p.start_date
+      ? ' – ' + fmtDate(p.end_date) : '') : 'not set'],
+    ['Days on site', String(diaryDays(p.id).length)]
+  ];
+  if (p.contact) facts.push(['Client contact', esc(p.contact)]);
+  if (p.started_at) facts.push(['Started', fmtDateTime(p.started_at)]);
+  if (p.completed_at) facts.push(['Completed', fmtDateTime(p.completed_at)]);
+
+  const rows = [];
+  for (let i = 0; i < facts.length; i += 2) {
+    const a = facts[i], b = facts[i + 1];
+    rows.push(`<tr><td class="lbl">${esc(a[0])}</td><td class="val">${a[1]}</td>` +
+      (b ? `<td class="lbl">${esc(b[0])}</td><td class="val">${b[1]}</td>` : '<td></td><td></td>') + '</tr>');
+  }
+  return `<table class="kv two">${rows.join('')}</table>` +
+    (p.description ? `<p class="note">${esc(p.description)}</p>` : '');
 }
 
-/** One day, in the order it happened. Each entry is a block that cannot be
-    split across a page: a time with no comment under it, or a comment
-    orphaned from its time, is worse than a little white space. */
+/** One day, as a table. The heading lives in the thead, so a day that runs
+    on to the next page takes its heading with it — which is what stops the
+    orphaned headings and the half-empty pages that come of trying to keep a
+    whole day together. */
 function daySection(p, day, n, total) {
   const list = entriesFor(p.id, day);
   if (!list.length) return '';
@@ -2913,27 +2960,28 @@ function daySection(p, day, n, total) {
   const shots = list.reduce((c, e) => c + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
 
   return `
-    <section class="day">
-      <div class="day-head">
-        ${n ? `<span class="dn">Day ${n}${total ? ' / ' + total : ''}</span>` : ''}
-        <h3>${esc(fmtDayDate(day))}</h3>
-        <span class="span">${span ? `${esc(fmtTime(first.at))} – ${esc(fmtTime(last.at))} · ${esc(span)}` : esc(fmtTime(first.at))}</span>
-      </div>
-      <div class="day-sub">${list.length} entr${list.length > 1 ? 'ies' : 'y'}${
-        shots ? ` · ${shots} photograph${shots > 1 ? 's' : ''}, at the back` : ''}</div>
-      ${list.map(e => {
-        const flag = e.kind === 'issue' || e.kind === 'delay';
-        return `
-          <div class="entry${flag ? ' flag' : ''}">
-            <div class="e-time">${esc(fmtTime(e.at))}</div>
-            <div class="e-body">
-              <div class="e-kind">${esc(entryLabel(e))}</div>
-              ${e.body ? `<div class="e-note">${esc(e.body)}</div>` : ''}
-              <div class="e-who">${esc(e.author || '')}</div>
-            </div>
-          </div>`;
-      }).join('')}
-    </section>`;
+    <table class="dtable">
+      <thead>
+        <tr class="dayrow"><th colspan="4">
+          ${n ? `<span class="dn">Day ${n}${total ? '/' + total : ''}</span>` : ''}${esc(fmtDayDate(day))}
+          <span class="dmeta">${span ? `${esc(fmtTime(first.at))}–${esc(fmtTime(last.at))} · ${esc(span)} · ` : ''}${
+            list.length} entr${list.length > 1 ? 'ies' : 'y'}${shots ? ` · ${shots} photo${shots > 1 ? 's' : ''}` : ''}</span>
+        </th></tr>
+        <tr class="cols"><th>Time</th><th>Entry</th><th>Notes</th><th>By</th></tr>
+      </thead>
+      <tbody>
+        ${list.map(e => {
+          const flag = e.kind === 'issue' || e.kind === 'delay';
+          const n2 = (e.files || []).filter(f => /^image\//.test(f.type || '')).length;
+          return `<tr${flag ? ' class="flag"' : ''}>
+            <td class="dt">${esc(fmtTime(e.at))}</td>
+            <td class="dk">${esc(entryLabel(e))}</td>
+            <td class="dnote">${esc(e.body || '')}${n2 ? `<span class="ph"> · ${n2} photo${n2 > 1 ? 's' : ''}</span>` : ''}</td>
+            <td class="dby">${esc(e.author || '')}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
 }
 
 /** Cut a caption at a word, not mid-syllable. */
@@ -2945,9 +2993,10 @@ function clip(text, max) {
   return (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '') + '…';
 }
 
-/** Every photograph on the job, gathered at the back rather than cut into
-    the middle of each day. Four to a page, each captioned with the day and
-    the entry it came from, so nothing is orphaned from its context. */
+/** Every photograph, gathered at the back. Laid out as a table rather than
+    a grid, because browsers fragment grids across pages badly — which is
+    what put photographs half on one page and half on the next. Two across,
+    three down: six to a page, every page the same. */
 function photoAppendix(p, days) {
   const shots = [];
   days.forEach((day, i) => entriesFor(p.id, day).forEach(e => (e.files || []).forEach(f => {
@@ -2955,21 +3004,22 @@ function photoAppendix(p, days) {
   })));
   if (!shots.length) return '';
 
+  const cell = ({ f, e, day, n }) => `
+    <td><figure class="photo">
+      <img src="${esc(f.url)}" alt="">
+      <div class="cap"><b>Day ${n} · ${esc(fmtShort(day))} · ${esc(fmtTime(e.at))}</b>
+        ${esc(entryLabel(e))}${e.body ? ' — ' + esc(clip(e.body, 74)) : ''}</div>
+    </figure></td>`;
+
+  const rows = [];
+  for (let i = 0; i < shots.length; i += 2) {
+    rows.push(`<tr>${cell(shots[i])}${shots[i + 1] ? cell(shots[i + 1]) : '<td></td>'}</tr>`);
+  }
+
   return `
     <div class="page-break"></div>
-    <h2>Photographs</h2>
-    <p class="lede">${shots.length} photograph${shots.length > 1 ? 's' : ''} over
-      ${days.length} day${days.length > 1 ? 's' : ''} on site.</p>
-    <div class="photos">
-      ${shots.map(({ f, e, day, n }) => `
-        <figure class="photo">
-          <img src="${esc(f.url)}" alt="">
-          <figcaption>
-            <b>Day ${n} · ${esc(fmtShort(day))} · ${esc(fmtTime(e.at))}</b>
-            <span>${esc(entryLabel(e))}${e.body ? ' — ' + esc(clip(e.body, 90)) : ''}</span>
-          </figcaption>
-        </figure>`).join('')}
-    </div>`;
+    <h2>Photographs — ${shots.length} over ${days.length} day${days.length > 1 ? 's' : ''}</h2>
+    <table class="photos"><tbody>${rows.join('')}</tbody></table>`;
 }
 
 function docsTable(p, all) {
@@ -3120,16 +3170,16 @@ function printDirectorReport(list) {
 
     <h2>The period</h2>
     <table class="kv">
-      <tr><td>Jobs</td><td><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
+      <tr><td class="lbl">Jobs</td><td class="val" colspan="3"><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
         ${t.planned || 0} planned, ${t.completed || 0} completed</td></tr>
-      <tr><td>Priced</td><td>${t.valued} of ${t.jobs}${
+      <tr><td class="lbl">Priced</td><td class="val" colspan="3">${t.valued} of ${t.jobs}${
         t.valued < t.jobs ? ' <em>— totals are a floor, not the whole picture</em>' : ''}</td></tr>
-      ${t.settled ? `<tr><td>Finished and invoiced</td><td>${t.settled} job(s) — invoiced
+      ${t.settled ? `<tr><td class="lbl">Finished and invoiced</td><td class="val" colspan="3">${t.settled} job(s) — invoiced
         <strong>${money(t.acValue)}</strong> against <strong>${money(t.acCost)}</strong> of cost,
         <strong${cls(t.acMargin)}>${money(t.acMargin)}</strong> actual margin${
         t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}</td></tr>` : ''}
-      <tr><td>Diary entries</td><td>${t.entries}</td></tr>
-      <tr><td>Issues and delays</td><td>${t.issues}</td></tr>
+      <tr><td class="lbl">Diary entries</td><td class="val" colspan="3">${t.entries}</td></tr>
+      <tr><td class="lbl">Issues and delays</td><td class="val" colspan="3">${t.issues}</td></tr>
     </table>
 
     ${clients.length > 1 ? `
@@ -3252,11 +3302,11 @@ function printJobPnl(p) {
     </table>
 
     <table class="kv">
-      <tr><td>Invoice</td><td>${money(c.exInv, true)} expected${
+      <tr><td class="lbl">Invoice</td><td class="val" colspan="3">${money(c.exInv, true)} expected${
         c.acInv != null ? ` · <strong>${esc(fmtMoney(c.acInv, true))} final</strong>` : ''}</td></tr>
-      <tr><td>Total cost</td><td>${money(c.exCost, true)} expected${
+      <tr><td class="lbl">Total cost</td><td class="val" colspan="3">${money(c.exCost, true)} expected${
         c.acCost != null ? ` · <strong>${esc(fmtMoney(c.acCost, true))} actual</strong>` : ''}</td></tr>
-      <tr><td>Margin</td><td><strong${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
+      <tr><td class="lbl">Margin</td><td class="val" colspan="3"><strong${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
         money(c.acMargin != null ? c.acMargin : c.exMargin, true)}</strong>${
         c.acMargin != null && c.exMargin != null
           ? ` — priced at ${esc(fmtMoney(c.exMargin, true))}` : ''}</td></tr>
@@ -3342,29 +3392,29 @@ function renderKiosk(view) {
   const time = `${String(clock.getHours()).padStart(2, '0')}:${String(clock.getMinutes()).padStart(2, '0')}`;
 
   view.innerHTML = `
-    <div class="k">
-      <div class="k-head">
+    <div class="kboard">
+      <div class="kb-head">
         <h1>RCK — today on site</h1>
         <div class="grow muted">${esc(fmtDayDate(day))}</div>
-        <div class="k-clock">${time}</div>
+        <div class="kb-clock">${time}</div>
       </div>
 
-      <div class="k-tally">
+      <div class="kb-tally">
         <div class="status-ongoing"><span class="n">${onSite.length}</span><span class="l">On site now</span></div>
         <div class="status-planned"><span class="n">${planned.length}${dueNow.length
           ? `<em>${dueNow.length} due</em>` : ''}</span><span class="l">Planned</span></div>
         <div class="status-completed"><span class="n">${doneToday.length}</span><span class="l">Finished today</span></div>
       </div>
 
-      <div class="k-body">
-        <div class="k-col">
+      <div class="kb-body">
+        <div class="kb-col">
           <h2>On site</h2>
-          <div class="k-scroll">
+          <div class="kb-scroll">
             ${onSite.length ? onSite.slice(0, 9).map((p, i) => {
               const e = entriesFor(p.id, day);
               const last = e.length ? e[e.length - 1] : null;
               return `
-                <div class="k-job status-ongoing" style="--i:${i}">
+                <div class="kb-job status-ongoing" style="--i:${i}">
                   <div>
                     <div class="kcode">${jobNo(p)}</div>
                     <div class="kno">${esc(crewLabel(crewOf(p)).toUpperCase())}</div>
@@ -3379,12 +3429,12 @@ function renderKiosk(view) {
                   </div>
                 </div>`;
             }).join('') : `
-              <div class="k-allclear status-completed">
+              <div class="kb-allclear status-completed">
                 <div class="big">No crews out</div>
                 Nothing is running right now.
               </div>`}
             ${dueNow.length ? dueNow.slice(0, 3).map((p, i) => `
-              <div class="k-job status-planned" style="--i:${onSite.length + i}">
+              <div class="kb-job status-planned" style="--i:${onSite.length + i}">
                 <div><div class="kcode">${jobNo(p)}</div><div class="kno">DUE TO START</div></div>
                 <div><div class="kttl">${esc(p.name)}</div>
                   <div class="kmeta">${esc(p.site || '—')}${p.supervisor ? ' · ' + esc(p.supervisor) : ''}</div></div>
@@ -3393,22 +3443,22 @@ function renderKiosk(view) {
           </div>
         </div>
 
-        <div class="k-col">
+        <div class="kb-col">
           <h2>Logged today</h2>
-          <div class="k-scroll k-grid" style="grid-template-columns:1fr">
+          <div class="kb-scroll k-grid" style="grid-template-columns:1fr">
             ${feed.length ? feed.map((e, i) => {
               const p = jobById(e.project_id) || {};
               return `
-                <div class="k-chip status-${entryTone(e)}" style="--i:${i}">
+                <div class="kb-chip status-${entryTone(e)}" style="--i:${i}">
                   <div class="c">${esc(entryLabel(e))}<em>${esc(fmtTime(e.at))}</em></div>
                   <div class="s">${esc(jobNo(p))} ${esc(p.name || '')}${e.author ? ' · ' + esc(e.author) : ''}</div>
                 </div>`;
-            }).join('') : '<div class="k-chip status-completed"><div class="s">Nothing logged yet today.</div></div>'}
+            }).join('') : '<div class="kb-chip status-completed"><div class="s">Nothing logged yet today.</div></div>'}
           </div>
         </div>
       </div>
 
-      <div class="k-foot">
+      <div class="kb-foot">
         <span>${DB.projects.length} job(s) on file · refreshes every 20 seconds${
           connected() ? '' : ' · NOT CONNECTED'}</span>
         <span>
