@@ -223,3 +223,4 @@ Workshop in the same repository and GitHub Pages serves it from
 | `config.js` | Your Supabase URL and key |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
 | `sw.js` | Offline caching |
+| `check.mjs` | `node dispatch/check.mjs` — fails if any class the app writes has no rule in `app.css` |
