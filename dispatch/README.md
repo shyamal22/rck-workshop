@@ -196,9 +196,11 @@ Workshop in the same repository and GitHub Pages serves it from
   anything you'd mind an RCK phone seeing into the app, and don't publish the link.
 - **Practice mode** in Settings lets someone try the whole app without touching the
   shared data. Nothing entered in practice mode is visible to anyone else.
-- **Nothing is deleted by accident.** Archiving a job hides it from the board and keeps every
-  record, and only a director can do it; a completed job can be reopened by the office. There
-  is no permanent delete anywhere in the app, on purpose.
+- **Two ways to get rid of a job, and they are not the same.** **Archive** takes it off the
+  board and out of the profit and loss while keeping every record — that is the one for a job
+  that was cancelled, and it can be undone. **Delete** destroys the job with its diary, its
+  documents and its costing, for everyone, with no undo; it asks you to type the job number
+  first. Both are a director's call. A completed job can still be reopened by the office.
 - **The money is not a secret from the database.** Value and cost are hidden from site phones
   by the app, not by the database — same as the office-only documents. See the note on logins
   below before deciding what to put in those boxes.

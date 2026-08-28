@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.8.1';
+const VERSION = '1.9.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -944,6 +944,26 @@ async function startJob(p) {
   return jobById(p.id);
 }
 
+/** Delete a job and everything hanging off it. The database cascades on
+    its own; the copy on this device does not, and neither does the outbox —
+    a queued insert left behind would rebuild the job the moment there was
+    signal, which is the one way a delete could appear to fail. */
+async function deleteJob(p) {
+  const doomed = new Set([p.id]);
+  DB.project_docs.forEach(d => { if (d.project_id === p.id) doomed.add(d.id); });
+  DB.diary_entries.forEach(e => { if (e.project_id === p.id) doomed.add(e.id); });
+  DB.job_costs.forEach(l => { if (l.project_id === p.id) doomed.add(l.id); });
+
+  Outbox.save(Outbox.all().filter(op => !doomed.has(op.kind === 'insert' ? op.row.id : op.id)));
+
+  DB.project_docs = DB.project_docs.filter(d => d.project_id !== p.id);
+  DB.diary_entries = DB.diary_entries.filter(e => e.project_id !== p.id);
+  DB.job_costs = DB.job_costs.filter(l => l.project_id !== p.id);
+
+  await Store.remove('projects', p.id);   // saves the cache and tells the server
+  paintSync();
+}
+
 async function completeJob(p, notes) {
   await Store.patch('projects', p.id, {
     status: 'completed',
@@ -1654,9 +1674,13 @@ function renderJob(view) {
           ${p.status === 'completed' ? '<button class="btn sm" id="reopen">Reopen job</button>' : ''}
           ${isDirector() ? `<button class="btn sm" id="archive">${p.archived ? 'Restore' : 'Archive'}</button>` : ''}
         </div>
-        <p class="muted tiny mt" style="margin-bottom:0">${isDirector()
-          ? 'Archiving hides the job from the board and keeps every record. Nothing is ever deleted.'
-          : 'Archiving a job is a director\'s call. Nothing here is ever deleted.'}</p>
+        ${isDirector() ? `
+          <p class="muted tiny mt">Archiving takes the job off the board and out of the profit and
+          loss, and keeps every record of it. That is the one to use for a job that was cancelled.</p>
+          <button class="btn sm danger wide" id="del">${icon('trash')}Delete this job for good</button>
+          <p class="muted tiny mt" style="margin-bottom:0">Deleting destroys the diary, the documents
+          and the costing with it, for everyone. There is no undo.</p>`
+        : '<p class="muted tiny mt" style="margin-bottom:0">Archiving or deleting a job is a director\'s call.</p>'}
       </div>` : ''}`;
 
   const startBtn = $('#start', view);
@@ -1697,8 +1721,34 @@ function renderJob(view) {
   const archive = $('#archive', view);
   if (archive) archive.onclick = async () => {
     await Store.patch('projects', p.id, { archived: !p.archived });
-    toast(p.archived ? 'Restored' : 'Archived');
+    toast(p.archived ? 'Restored' : 'Archived — off the board and out of the P&L');
     render();
+  };
+
+  const del = $('#del', view);
+  if (del) del.onclick = async () => {
+    const ents = entriesFor(p.id).length;
+    const docs = allDocsFor(p.id).length;
+    const lines = costLinesFor(p.id).length;
+    const also = [
+      ents && `${ents} diary entr${ents > 1 ? 'ies' : 'y'}`,
+      docs && `${docs} document${docs > 1 ? 's' : ''}`,
+      lines && `${lines} cost line${lines > 1 ? 's' : ''}`
+    ].filter(Boolean);
+
+    // Typing the number is the guard. A job with a diary on it is somebody's
+    // week, and a mis-tap should not be able to take it.
+    const typed = prompt(
+      `Delete ${jobNo(p)} — ${p.name}?\n\n` +
+      (also.length ? `This destroys ${also.join(', ')} along with it. ` : '') +
+      `It goes for everyone and cannot be undone.\n\n` +
+      `Type ${jobNo(p)} to confirm.`);
+    if (typed == null) return;
+    if (typed.trim().toUpperCase() !== jobNo(p)) return toast('Not deleted — that job number did not match');
+
+    await deleteJob(p);
+    toast(`${jobNo(p)} deleted`);
+    go('#/jobs');
   };
 }
 
@@ -2561,6 +2611,9 @@ const PNL_STATUS = [
 
 function pnlJobs() {
   return DB.projects.filter(p => {
+    // An archived job is one that never really ran. It should not be sitting
+    // in a month's margin any more than it should be on the board.
+    if (p.archived) return false;
     if (pnlFilter.status !== 'all' && p.status !== pnlFilter.status) return false;
     if (pnlFilter.client !== 'all' && (p.client || '').trim() !== pnlFilter.client) return false;
     return jobInPeriod(p, pnlFilter.from, pnlFilter.to);
