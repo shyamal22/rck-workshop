@@ -72,11 +72,14 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 - Archiving a job is a director's call. Nothing in the app is ever deleted.
 
 **The reports**
-The full job report is the whole record in one document: the job's details, a summary, every
-issue and delay, the documents on file, then the diary set out as **Day 1, Day 2, Day 3** —
-and all the photographs together at the back, four to a page, each captioned with the day and
-entry it came from. Photographs are gathered rather than cut into the middle of each day, so
-nothing overflows and a thirty-photo job is still a document somebody will open.
+The full job report is the whole record in one document: the job's facts set two to a line,
+every issue and delay, the documents on file, then the diary as **Day 1, Day 2, Day 3** —
+each day a table that carries its own heading if it runs on to the next page, so there are no
+orphaned headings and no half-empty pages. All the photographs sit together at the back, six
+to a page, each captioned with the day and entry it came from.
+
+Everything on the page is laid out to be read across as well as down. A three-night job with
+eighteen photographs prints as five pages rather than eight.
 
 The director's **Profit & loss** report is the period's figures, then how they split by
 client, then a job at a time, then the note on each finished job and everything the crews
