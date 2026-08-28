@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -3445,7 +3445,7 @@ function renderKiosk(view) {
 
         <div class="kb-col">
           <h2>Logged today</h2>
-          <div class="kb-scroll k-grid" style="grid-template-columns:1fr">
+          <div class="kb-scroll kb-grid" style="grid-template-columns:1fr">
             ${feed.length ? feed.map((e, i) => {
               const p = jobById(e.project_id) || {};
               return `
