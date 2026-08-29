@@ -115,8 +115,8 @@ create unique index if not exists profile_sections_company_key_idx
 --
 -- `path` is a key into the private storage bucket, and is laid out as
 --   <staff|company>/<id>/<tile>/<file>
--- The tile has to be in the path so the storage rules below can keep a
--- supervisor out of the contract, which has the pay written inside it.
+-- so that everything belonging to one person sits together and it is
+-- obvious what a file is even when read straight out of the bucket.
 -- ---------------------------------------------------------------------
 create table if not exists profile_files (
   id          uuid primary key default gen_random_uuid(),
