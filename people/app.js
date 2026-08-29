@@ -1166,21 +1166,39 @@ function renderNeedsConfig(view) {
       <div class="gate-mark">${icon('lock')}</div>
       <h1>Not connected yet</h1>
       <p class="lede">The quickest way is to ask someone who already has RCK People for a
-        <b>setup link</b> — one tap and this phone is done. Otherwise enter the two details
+        <b>setup link</b> — one tap and this phone is done. Otherwise enter the details
         by hand.</p>
+
       <label class="field"><span>Project URL</span>
         <input type="text" id="cfgUrl" placeholder="https://abcdefgh.supabase.co" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Anon public key</span>
         <input type="text" id="cfgKey" placeholder="eyJhbGciOi…" autocapitalize="off" spellcheck="false"></label>
+
+      <label class="field"><span>Your name</span>
+        <input type="text" id="cfgName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
+      <label class="field"><span>You are</span>
+        <select id="cfgRole">
+          ${ROLES.map(r => `<option value="${r.key}"${r.key === 'director' ? ' selected' : ''}>${
+            esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
+        </select></label>
+
       <button class="btn primary wide" id="cfgSave">Save and continue</button>
       <p class="foot">Use the <b>anon public</b> key from Supabase → Settings → API.
         Never the service_role key.</p>
     </div></div>`;
 
+  /* Whoever is doing this has the Supabase details in front of them, so
+     they are the one setting the app up — Director is the right default.
+     Getting this wrong is what leaves somebody staring at a staff screen
+     with no way to add anybody. */
   $('#cfgSave').onclick = () => {
     const url = $('#cfgUrl').value.trim(), key = $('#cfgKey').value.trim();
+    const name = $('#cfgName').value.trim();
+    const role = $('#cfgRole').value;
     if (!url || !key) return toast('Both the URL and the key are needed.');
-    S.save({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key });
+    if (!name) return toast('Enter your name.');
+    if (!passesDirectorCheck(role)) return;
+    S.save({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, name, role });
     loaded = false;
     render();
   };
@@ -1672,8 +1690,12 @@ function renderStaff(view) {
       <button class="linkbtn" id="clearLevel" style="color:inherit">Show everyone</button></div>` : ''}
 
     ${list.length ? `<div class="tiles">${list.map(personTile).join('')}</div>`
-      : `<div class="empty"><b>Nobody here</b>${
-          all.length ? 'Nothing matches those filters.' : 'Add the first person with the + button.'}</div>`}
+      : all.length ? `<div class="empty"><b>Nobody here</b>Nothing matches those filters.</div>`
+      : canEdit() ? `<div class="empty"><b>Nobody on the books yet</b>
+          Add the first person with the + button, top right.</div>`
+      : `<div class="empty"><b>Nobody on the books yet</b>
+          This phone is in supervisor mode, which can look but not add.</div>
+         <button class="btn wide" id="toSettings">Switch this phone to Director / HR</button>`}
 
     ${finishedCount ? `<div class="center" style="margin-top:16px">
       <button class="linkbtn" id="finToggle">${staffFilter.finished
@@ -1704,6 +1726,9 @@ function renderStaff(view) {
   if (cl) cl.onclick = () => { staffFilter.level = ''; render(); };
   const ft = $('#finToggle');
   if (ft) ft.onclick = () => { staffFilter.finished = !staffFilter.finished; render(); };
+
+  const ts = $('#toSettings');
+  if (ts) ts.onclick = () => go('#/settings');
 
   wireFaces(view);
 }
@@ -1824,9 +1849,12 @@ function renderPersonEdit(view, args) {
   const p = isNew ? { worker_type: 'rck', status: 'active' } : staffById(args[0]);
   if (!p) return notFound(view, 'That person is no longer on file.');
   if (!canEdit()) {
-    view.innerHTML = `<div class="empty"><b>Read-only access</b>
-      Your account can see staff records but not change them.</div>
-      <button class="btn wide" onclick="history.back()">Back</button>`;
+    view.innerHTML = `<div class="empty"><b>Supervisor mode</b>
+      This phone can see staff records but not change them.</div>
+      <div class="btn-row">
+        <button class="btn ghost" onclick="history.back()">Back</button>
+        <button class="btn primary" onclick="location.hash='#/settings'">Switch to Director / HR</button>
+      </div>`;
     return;
   }
 
@@ -2429,11 +2457,17 @@ function renderCompanies(view) {
         <span class="pill ${statusClass(st.level)}">${st.level === 'green' ? 'Complete'
           : st.level === 'orange' ? 'Expiring' : 'Action'}</span>
       </button>`;
-    }).join('') : `<div class="empty"><b>No companies yet</b>
-      Add the first with the + button, then link people to it on their record.</div>`}`;
+    }).join('')
+      : canEdit() ? `<div class="empty"><b>No companies yet</b>
+          Add the first with the + button, then link people to it on their record.</div>`
+      : `<div class="empty"><b>No companies yet</b>
+          This phone is in supervisor mode, which can look but not add.</div>
+         <button class="btn wide" id="toSettings2">Switch this phone to Director / HR</button>`}`;
 
   const addCo = $('#addCo');
   if (addCo) addCo.onclick = () => editCompany(null);
+  const ts2 = $('#toSettings2');
+  if (ts2) ts2.onclick = () => go('#/settings');
   $$('[data-co]', view).forEach(b => { b.onclick = () => go('#/company/' + b.dataset.co); });
 }
 
