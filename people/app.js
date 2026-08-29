@@ -525,6 +525,44 @@ function icon(name, cls) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"${cls ? ` class="${cls}"` : ''}>${ICONS[name] || ''}</svg>`;
 }
 
+/* =====================================================================
+   Setup links
+
+   Nobody gets their own account. There are two shared accounts — one
+   director, one supervisor — and a phone joins by opening a link that
+   carries one of them.
+
+   The details ride in the URL's `#` fragment, which browsers never send
+   to the web server, so the link does not turn up in a server log
+   somewhere. That does not make it harmless: the link IS the password.
+   Anyone it is forwarded to gets in, which is why handing one out is
+   worded the way it is on screen.
+   ===================================================================== */
+function b64urlEncode(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  bytes.forEach(b => { bin += String.fromCharCode(b); });
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(s) {
+  const t = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(t + '='.repeat((4 - t.length % 4) % 4));
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+
+const Link = {
+  make(email, password) {
+    const payload = b64urlEncode(JSON.stringify({ v: 1, e: email, p: password }));
+    return location.origin + location.pathname + '#/join/' + payload;
+  },
+  read(arg) {
+    try {
+      const d = JSON.parse(b64urlDecode(arg));
+      return d && d.e && d.p ? d : null;
+    } catch (e) { return null; }
+  }
+};
+
 let toastTimer;
 function toast(msg) {
   const t = $('#toast');
@@ -637,28 +675,18 @@ const Auth = {
 
   async resetPassword(email) { await Auth.call('recover', { email: email.trim() }); },
 
-  async changePassword(password) {
-    const t = await Auth.token();
-    const res = await fetch(`${C.url}/auth/v1/user`, {
-      method: 'PUT',
-      headers: { apikey: C.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    if (!res.ok) {
-      let m = res.statusText;
-      try { m = (await res.json()).msg || m; } catch (e) {}
-      throw new Error(m);
-    }
-  },
+  /* There is deliberately no "change your password" here. The two
+     passwords are shared by everyone in that role, so changing one from
+     a phone would lock out every other phone using it. They are changed
+     in Supabase, on purpose, followed by handing out fresh links. */
 
   /** Clear everything held in memory and on the device. */
   wipe() {
     Auth.session = null;
     Auth.me = null;
     Auth.save();
-    DB.staff = []; DB.companies = []; DB.sections = []; DB.files = []; DB.audit = [];
-    Faces.forget();
-    loaded = false;
+    forgetData();
+    locked = false;
   },
 
   async signOut() {
@@ -673,15 +701,43 @@ const Auth = {
 };
 
 const signedIn = () => !!(Auth.session && Auth.me);
-const myRole   = () => (Auth.me && Auth.me.role) || 'viewer';
-const canEdit  = () => myRole() === 'hr' || myRole() === 'director';
+
+/**
+ * Two roles, and only two.
+ *
+ *   director    the director and the HR manager. Sees everything,
+ *               including pay, and can change everything.
+ *   supervisor  sees everything except pay, and changes nothing.
+ *
+ * Neither of these decides anything on its own — the database has
+ * already refused a supervisor's writes and already replaced the pay
+ * figures with HIDDEN before they reach this app. These two are here so
+ * a supervisor isn't shown a Save button that was never going to work,
+ * or an empty box where a wage they cannot see used to be.
+ */
+const myRole    = () => (Auth.me && Auth.me.role) || 'supervisor';
+const canEdit   = () => myRole() === 'director';
+const canSeePay = () => myRole() === 'director';
+const ROLE_LABEL = { director: 'Director', supervisor: 'Supervisor' };
+
+/* What the database sends in place of a figure a supervisor may not see. */
+const HIDDEN = '##hidden##';
+const isHidden = v => v === HIDDEN;
 
 /* =====================================================================
    Data, held in memory only
    ===================================================================== */
 const DB = { staff: [], companies: [], sections: [], files: [], audit: [] };
 let loaded = false;
+let locked = false;
 let lastError = '';
+
+/** Throw away every scrap of staff data held in memory. */
+function forgetData() {
+  DB.staff = []; DB.companies = []; DB.sections = []; DB.files = []; DB.audit = [];
+  Faces.forget();
+  loaded = false;
+}
 
 async function rest(path, opts) {
   const o = opts || {};
@@ -703,7 +759,10 @@ const Store = {
     const [staff, companies, sections, files] = await Promise.all([
       rest('staff?select=*&order=last_name.asc,first_name.asc'),
       rest('companies?select=*&order=name.asc'),
-      rest('profile_sections?select=*'),
+      // Read through the view, never the table: it is what replaces the
+      // pay figures with HIDDEN for a supervisor. Writes still go to the
+      // table itself, and only a director gets that far.
+      rest('profile_sections_v?select=*'),
       rest('profile_files?select=*&order=created_at.desc')
     ]);
     DB.staff = staff || [];
@@ -776,11 +835,19 @@ const Store = {
 
   /* ---------------------------------------------------- documents --- */
 
-  /** Puts a file in the private bucket and returns its storage path. */
-  async upload(owner, file) {
+  /**
+   * Puts a file in the private bucket and returns its storage path.
+   *
+   * The tile goes in the path — `staff/<id>/contract/…` — because the
+   * storage rules read the third folder to decide who may open it. The
+   * pay is written inside a signed contract, so hiding the wage field
+   * from a supervisor while leaving them the PDF would prove nothing.
+   */
+  async upload(owner, sectionKey, file) {
     const t = await Auth.token();
     const clean = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-90);
-    const path = `${owner.kind}/${owner.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${clean}`;
+    const tile = String(sectionKey || 'other').replace(/[^\w\-]+/g, '');
+    const path = `${owner.kind}/${owner.id}/${tile}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${clean}`;
     const res = await fetch(`${C.url}/storage/v1/object/staff-files/${encodePath(path)}`, {
       method: 'POST',
       headers: {
@@ -1149,9 +1216,25 @@ function render() {
 
   if (currentPath !== null) scrollMemory[currentPath] = window.scrollY;
 
-  // Nothing private is shown until both of these pass.
+  // Nothing private is shown until all of these pass.
   if (!configured()) return renderNeedsConfig(view);
+  if (joining)       return renderJoining(view);
+
+  // Opened with a setup link. Handled here rather than at start-up so it
+  // also works on the way out of the "not connected yet" screen.
+  //
+  // Paint the waiting screen BEFORE starting the work: a link that fails
+  // its first sanity check finishes without ever awaiting, so painting
+  // afterwards would wipe the error it just put on screen.
+  if (path === 'join' && args[0]) {
+    joining = true;
+    renderJoining(view);
+    joinWithLink(args[0]);
+    return;
+  }
+
   if (!signedIn())   return renderGate(view);
+  if (locked)        return renderLocked(view);
 
   $('#topbar').hidden = false;
 
@@ -1210,6 +1293,69 @@ function renderNeedsConfig(view) {
   };
 }
 
+/* =====================================================================
+   Joining with a link
+   ===================================================================== */
+let joining = false;
+let joinError = '';
+
+function renderJoining(view) {
+  $('#topbar').hidden = true;
+  $('#menu').hidden = true;
+  view.innerHTML = `
+    <div class="gate"><div class="gate-card center">
+      <div class="gate-mark" style="margin:0 auto 16px">${icon('spin', 'spin')}</div>
+      <h1>Setting up</h1>
+      <p class="lede">One moment — this only happens once on this phone.</p>
+    </div></div>`;
+}
+
+/**
+ * Sign this device in from the link it was opened with, then take the
+ * link back out of the address bar so it isn't left sitting in the
+ * browser history for the next person to find.
+ */
+async function joinWithLink(payload) {
+  joinError = '';          // `joining` is already set, and the waiting
+                           // screen already painted, by render()
+
+  const cleanUrl = () => {
+    try { history.replaceState(null, '', location.pathname + location.search + '#/'); }
+    catch (e) { location.hash = '#/'; }
+  };
+
+  const details = Link.read(payload);
+  if (!details) {
+    joining = false;
+    cleanUrl();
+    joinError = 'That link is damaged. Ask for a fresh one.';
+    render();
+    return;
+  }
+
+  try {
+    await Auth.signIn(details.e, details.p);
+    await Auth.loadMe();
+    cleanUrl();
+    joining = false;
+    locked = false;
+    loaded = false;
+    Idle.touch();
+    render();
+    toast('This phone is set up. ' + (ROLE_LABEL[myRole()] || '') + ' access.');
+  } catch (e) {
+    Auth.wipe();
+    joining = false;
+    cleanUrl();
+    joinError = e.notMember
+      ? 'That link works but its account is not on the staff list. Ask whoever set this up.'
+      : /invalid login/i.test(e.message || '')
+        ? 'That link has been replaced. Ask for the current one.'
+        : (e.message || 'Could not set this phone up.');
+    render();
+  }
+}
+
 let gateMode = 'signin';   // signin | reset
 
 function renderGate(view) {
@@ -1224,8 +1370,14 @@ function renderGate(view) {
       <div class="gate-mark">${icon('people')}</div>
       <h1>RCK People</h1>
       <p class="lede">${reset
-        ? 'Enter your email and we will send you a link to set a new password.'
-        : 'Staff information and compliance. Sign in with your RCK account.'}</p>
+        ? 'Enter the account email and we will send a link to set a new password.'
+        : 'Staff information and compliance.'}</p>
+
+      ${joinError ? `<div class="banner status-red">${esc(joinError)}</div>` : ''}
+
+      ${reset ? '' : `<div class="banner info">Most people never see this screen — you are
+        sent a link that sets your phone up in one tap. If you were sent one, open it again.
+        This is for whoever set the app up.</div>`}
 
       <label class="field"><span>Email</span>
         <input type="email" id="gEmail" value="${esc(email)}" autocomplete="username"
@@ -1242,8 +1394,8 @@ function renderGate(view) {
         <button class="linkbtn" id="gSwap">${reset ? 'Back to sign in' : 'Forgotten your password?'}</button>
       </div>
 
-      <p class="foot">Accounts are created by whoever administers the Supabase project.
-        Only accounts on the staff list can open anything at all.</p>
+      <p class="foot">There are two accounts for the whole company — one director, one
+        supervisor — created in Supabase. Everyone else joins with a link.</p>
     </div></div>`;
 
   const err = m => { $('#gErr').innerHTML = `<div class="banner status-red" style="margin-top:12px">${esc(m)}</div>`; };
@@ -1252,7 +1404,8 @@ function renderGate(view) {
   const submit = async () => {
     const btn = $('#gGo');
     const emailV = $('#gEmail').value.trim();
-    if (!emailV) return err('Enter your email address.');
+    joinError = '';
+    if (!emailV) return err('Enter the account email.');
 
     btn.disabled = true;
     btn.textContent = reset ? 'Sending…' : 'Signing in…';
@@ -1313,11 +1466,42 @@ const Idle = {
   }
 };
 
+/**
+ * Clear the screen, without throwing anyone out.
+ *
+ * Nobody here has a password of their own to type back in — they joined
+ * with a link — so locking cannot mean "sign in again". What it does is
+ * take the staff data off the screen and out of memory, which is the
+ * thing that actually matters when a phone is left on a seat or a
+ * laptop is left open in the office. Carrying on is one tap, and fetches
+ * everything fresh.
+ */
 function lock(why) {
-  Auth.wipe();
-  gateMode = 'signin';
+  forgetData();
+  locked = true;
   render();
   if (why) toast(why);
+}
+
+function unlock() {
+  locked = false;
+  Idle.touch();
+  render();
+}
+
+function renderLocked(view) {
+  $('#topbar').hidden = true;
+  $('#menu').hidden = true;
+  view.innerHTML = `
+    <div class="gate"><div class="gate-card center">
+      <div class="gate-mark" style="margin:0 auto 16px">${icon('lock')}</div>
+      <h1>Locked</h1>
+      <p class="lede">Staff details are off the screen. Nothing was lost.</p>
+      <button class="btn primary wide" id="unlockBtn">Carry on</button>
+      <p class="foot">Locks itself again after a while with nothing happening.
+        To hand this phone to someone else for good, use Settings → Sign out.</p>
+    </div></div>`;
+  $('#unlockBtn').onclick = unlock;
 }
 
 /* =====================================================================
@@ -1366,7 +1550,7 @@ function lockDown(root) {
   $$('.savebar, [data-up], [data-rowup], [data-rowdel], [data-drop], #addRow', root)
     .forEach(el => { el.hidden = true; });
   root.insertAdjacentHTML('afterbegin',
-    `<div class="banner info">You have read-only access, so nothing here can be changed.</div>`);
+    `<div class="banner info">Supervisors can see everything here but not change it.</div>`);
 }
 
 function sheet(html, onOpen) {
@@ -1399,6 +1583,13 @@ function fieldHtml(f, value, opts) {
   const o = opts || {};
   const want = f.want && !o.noWant ? ' want' : '';
   const lab = `<span>${esc(f.label)}</span>`;
+
+  /* A figure this account is not allowed to see. Say so plainly rather
+     than showing an empty box, which would read as "nobody filled it in". */
+  if (isHidden(value)) {
+    return `<label class="field">${lab}
+      <span class="hidden-val">${icon('lock')} Recorded — directors only</span></label>`;
+  }
   const plain = f.plain ? ' autocapitalize="off" spellcheck="false"' : '';
   const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
 
@@ -1442,22 +1633,30 @@ function fieldHtml(f, value, opts) {
     <input type="${type}" data-f="${f.name}" value="${esc(value == null ? '' : value)}"${ph}${plain}></label>`;
 }
 
-/** Read a set of fields back out of the DOM, in the shape they are stored. */
+/**
+ * Read a set of fields back out of the DOM, in the shape they are stored.
+ *
+ * A field with no control on screen — a wage this account may not see —
+ * is left out of the result entirely rather than read as blank, so that
+ * saving the tile cannot quietly wipe a value that was never shown.
+ */
 function readFields(root, fields) {
   const out = {};
   fields.forEach(f => {
     if (f.type === 'picks') {
-      out[f.name] = $$(`input[data-pick="${f.name}"]`, root).filter(el => el.checked).map(el => el.value);
+      const boxes = $$(`input[data-pick="${f.name}"]`, root);
+      if (boxes.length) out[f.name] = boxes.filter(el => el.checked).map(el => el.value);
       return;
     }
     const el = $(`[data-f="${f.name}"]`, root);
-    out[f.name] = el ? el.value.trim() : '';
+    if (el) out[f.name] = el.value.trim();
   });
   return out;
 }
 
 /** Read a value back for display, in whatever form it was stored. */
 function showValue(f, value) {
+  if (isHidden(value)) return 'Recorded — directors only';
   if (!hasValue(value)) return '—';
   if (f.type === 'picks') {
     const list = Array.isArray(value) ? value : String(value).split(',');
@@ -2218,13 +2417,33 @@ function fileSlotHtml(owner, sectionKey, slot) {
   </div>`;
 }
 
+/**
+ * The two tiles whose documents have pay written inside them. The
+ * database will not hand a supervisor these files at all, so the app
+ * shows them as locked rather than offering a tap that fails.
+ */
+const PAY_TILES = ['contract', 'account'];
+const canOpenFilesOf = sectionKey => canSeePay() || PAY_TILES.indexOf(sectionKey) < 0;
+
 function fileLineHtml(f) {
   const size = fmtSize(f.file_size);
+  const meta = [size, f.added_by, fmtDate(f.created_at)].filter(Boolean).join(' · ');
+
+  if (!canOpenFilesOf(f.section_key)) {
+    return `<span class="slot locked">
+      ${icon('lock')}
+      <span class="grow">
+        <span class="ellip">On file</span>
+        <span class="sub">Only a director can open this one</span>
+      </span>
+    </span>`;
+  }
+
   return `<button class="slot" data-open="${esc(f.id)}">
     ${icon('file')}
     <span class="grow">
       <span class="ellip">${esc(f.file_name || 'Document')}</span>
-      <span class="sub">${[size, f.added_by, fmtDate(f.created_at)].filter(Boolean).join(' · ')}</span>
+      <span class="sub">${esc(meta)}</span>
     </span>
     <span class="icon-btn" data-drop="${esc(f.id)}" role="button" aria-label="Remove">${icon('trash')}</span>
   </button>`;
@@ -2256,7 +2475,7 @@ function pickAndUpload(owner, sectionKey, slot, accept, before) {
     toast('Uploading ' + file.name + '…');
     try {
       if (before) await before();
-      const path = await Store.upload(owner, file);
+      const path = await Store.upload(owner, sectionKey, file);
       await Store.insert('profile_files', {
         staff_id:   owner.kind === 'staff' ? owner.id : null,
         company_id: owner.kind === 'company' ? owner.id : null,
@@ -2491,17 +2710,29 @@ function renderSettings(view) {
   const mins = Number(SITE.idleLockMinutes);
   view.innerHTML = `
     <div class="card">
-      <h2>You</h2>
+      <h2>This phone</h2>
       <div class="kv" style="margin-top:12px">
-        <div><div class="k">Signed in as</div><div class="v small">${esc(whoAmI())}</div></div>
-        <div><div class="k">Email</div><div class="v small ellip">${esc((Auth.session || {}).email || '')}</div></div>
-        <div><div class="k">Access</div><div class="v small">${esc(myRole())}</div></div>
+        <div><div class="k">Access</div><div class="v small">${esc(ROLE_LABEL[myRole()] || myRole())}</div></div>
+        <div><div class="k">Account</div><div class="v small ellip">${esc((Auth.session || {}).email || '')}</div></div>
       </div>
+      <p class="sub" style="margin-top:10px">${canSeePay()
+        ? 'A director sees everything, pay included, and can change it.'
+        : 'A supervisor sees everything except pay, and cannot change anything.'}</p>
       <div class="btn-row" style="margin-top:14px">
-        <button class="btn sm ghost" id="pwBtn">Change password</button>
-        <button class="btn sm ghost" id="outBtn">Sign out</button>
+        <button class="btn sm ghost" id="outBtn">Sign out this phone</button>
       </div>
     </div>
+
+    ${canEdit() ? `<div class="card">
+      <h2>Set up someone's phone</h2>
+      <p class="sub" style="margin-top:4px">Make a link, send it to them, and one tap sets their
+        phone up — no password for them to type or lose. Make it once per role and reuse it:
+        the same supervisor link works for every supervisor.</p>
+      <div class="banner status-orange" style="margin-top:12px">The link is the password.
+        Anyone it reaches, and anyone they forward it to, gets in. Send it person to person,
+        never to a group everyone can read.</div>
+      <button class="btn wide" id="mkLink">${icon('link')} Make a setup link</button>
+    </div>` : ''}
 
     <div class="card">
       <h2>This device</h2>
@@ -2509,11 +2740,13 @@ function renderSettings(view) {
         in memory while the screen is unlocked and gone the moment you lock, sign out or reload.
         Documents are fetched through links that stop working after a few minutes.</p>
       <div class="kv" style="margin-top:12px">
-        <div><div class="k">Locks after</div><div class="v small">${
+        <div><div class="k">Clears the screen after</div><div class="v small">${
           Number.isFinite(mins) && mins > 0 ? plural(mins, 'minute') + ' idle' : 'never'}</div></div>
         <div><div class="k">Version</div><div class="v small">${esc(VERSION)}</div></div>
       </div>
-      <button class="btn sm ghost wide" id="lockNow" style="margin-top:14px">${icon('lock')} Lock now</button>
+      <p class="sub" style="margin-top:10px">Locking takes the staff details off the screen.
+        Carrying on afterwards is one tap — there is no password to type back in.</p>
+      <button class="btn sm ghost wide" id="lockNow" style="margin-top:12px">${icon('lock')} Lock now</button>
     </div>
 
     <div class="card">
@@ -2525,24 +2758,14 @@ function renderSettings(view) {
       ${SITE.supabaseUrl ? '' : `<button class="btn sm ghost wide" id="forget" style="margin-top:12px">Forget these details</button>`}
     </div>`;
 
-  $('#outBtn').onclick = async () => { await Auth.signOut(); render(); toast('Signed out.'); };
+  $('#outBtn').onclick = () => confirmSheet('Sign this phone out?',
+    'It will need a fresh setup link before it can be used again.', 'Sign out',
+    async () => { await Auth.signOut(); render(); toast('Signed out.'); });
+
   $('#lockNow').onclick = () => lock('Locked.');
 
-  $('#pwBtn').onclick = () => sheet(`
-    <h2>Change your password</h2>
-    <p class="sub">At least eight characters.</p>
-    ${fieldHtml({ name: 'pw', label: 'New password' }, '')}
-    <div class="btn-row"><button class="btn ghost" data-no>Cancel</button>
-    <button class="btn primary" data-yes>Change it</button></div>`, (el, close) => {
-    $('[data-f="pw"]', el).type = 'password';
-    $('[data-no]', el).onclick = close;
-    $('[data-yes]', el).onclick = async () => {
-      const pw = $('[data-f="pw"]', el).value;
-      if (pw.length < 8) return toast('Eight characters or more, please.');
-      try { await Auth.changePassword(pw); close(); toast('Password changed.'); }
-      catch (e) { toast('Could not change it: ' + e.message); }
-    };
-  });
+  const mk = $('#mkLink');
+  if (mk) mk.onclick = makeSetupLink;
 
   const forget = $('#forget');
   if (forget) forget.onclick = () => confirmSheet('Forget the connection details?',
@@ -2554,6 +2777,89 @@ function renderSettings(view) {
     });
 }
 
+/**
+ * Build the link that sets up somebody's phone.
+ *
+ * It asks for the shared account's email and password rather than
+ * remembering them, because the only safe place for that password is in
+ * the head of whoever set the app up — not in this repository, which is
+ * public, and not in a browser store on one director's laptop.
+ */
+function makeSetupLink() {
+  sheet(`
+    <h2>Make a setup link</h2>
+    <p class="sub">Enter one of the two shared accounts you created in Supabase. Whether the
+      person ends up a director or a supervisor is decided by which account you use.</p>
+    ${fieldHtml({ name: 'lEmail', label: 'Account email', plain: true,
+                  placeholder: 'rck-supervisor@rcknz.co.nz' }, '')}
+    ${fieldHtml({ name: 'lPass', label: 'That account\'s password', plain: true }, '')}
+    <div class="btn-row">
+      <button class="btn ghost" data-no>Cancel</button>
+      <button class="btn primary" data-yes>Make the link</button>
+    </div>
+    <div id="linkOut" style="margin-top:14px"></div>`, (el, close) => {
+    $('[data-no]', el).onclick = close;
+
+    $('[data-yes]', el).onclick = async () => {
+      const email = $('[data-f="lEmail"]', el).value.trim();
+      const pass  = $('[data-f="lPass"]', el).value;
+      if (!email || !pass) return toast('Both the email and the password are needed.');
+
+      const btn = $('[data-yes]', el);
+      btn.disabled = true;
+      btn.textContent = 'Checking…';
+
+      /* Check it actually works before handing it out, so nobody is sent
+         a link that fails on a job site. Done on a throwaway request so
+         this device stays signed in as whoever it already was. */
+      let role = null;
+      try {
+        const d = await Auth.call('token?grant_type=password', { email, password: pass });
+        const rows = await fetch(`${C.url}/rest/v1/staff_users?select=role&id=eq.${encodeURIComponent(d.user.id)}`, {
+          headers: { apikey: C.key, Authorization: 'Bearer ' + d.access_token }
+        }).then(r => r.json());
+        role = rows && rows[0] && rows[0].role;
+        if (!role) throw new Error('not-on-list');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Make the link';
+        return toast(/not-on-list/.test(e.message)
+          ? 'That account signs in but is not on the staff list. Run staff_grant for it first.'
+          : 'That email and password did not work.');
+      }
+
+      const url = Link.make(email, pass);
+      $('#linkOut', el).innerHTML = `
+        <div class="banner status-green">A <b>${esc(ROLE_LABEL[role] || role)}</b> link.
+          Anyone who opens it gets ${role === 'director'
+            ? 'full access, pay included' : 'everything except pay, read only'}.</div>
+        <label class="field"><span>The link</span>
+          <textarea id="linkText" rows="3" readonly>${esc(url)}</textarea></label>
+        <div class="btn-row">
+          <button class="btn" id="copyLink">Copy the link</button>
+          <button class="btn ghost" data-done>Done</button>
+        </div>`;
+
+      $('[data-done]', el).onclick = close;
+      $('#copyLink', el).onclick = async () => {
+        const box = $('#linkText', el);
+        try {
+          await navigator.clipboard.writeText(url);
+          toast('Copied. Send it to them directly.');
+        } catch (e) {
+          box.focus();
+          box.select();
+          toast('Press and hold to copy it.');
+        }
+      };
+      btn.disabled = false;
+      btn.textContent = 'Make another';
+    };
+
+    $('[data-f="lPass"]', el).type = 'password';
+  });
+}
+
 /* =====================================================================
    Printing one person's file
    ===================================================================== */
@@ -2561,16 +2867,17 @@ function printPersonFile(person) {
   sheet(`<h2>Print ${esc(fullName(person))}'s file</h2>
     <p class="sub">Everything on their record, ready for the printer. Choose <b>Save as PDF</b>
       in the print dialog to email or file it.</p>
-    <label class="na-bar" style="cursor:pointer">
+    ${canSeePay() ? `<label class="na-bar" style="cursor:pointer">
       <span class="grow"><b>Include pay</b><span>Left out by default, so it can be handed to a
-        manager as it is.</span></span>
+        supervisor as it is.</span></span>
       <span class="switch"><input type="checkbox" id="incPay"><span class="track"></span></span>
-    </label>
+    </label>` : `<p class="sub">Pay is left out — your account does not see it.</p>`}
     <div class="btn-row"><button class="btn ghost" data-no>Cancel</button>
     <button class="btn primary" data-yes>${icon('print')} Print</button></div>`, (el, close) => {
     $('[data-no]', el).onclick = close;
     $('[data-yes]', el).onclick = () => {
-      const pay = $('#incPay', el).checked;
+      const box = $('#incPay', el);
+      const pay = !!(box && box.checked);
       close();
       buildPersonDoc(person, pay);
       setTimeout(() => window.print(), 60);
@@ -2682,8 +2989,9 @@ async function start() {
     }
   }
 
+  // render() starts the first load itself when there is a session, so
+  // there is deliberately no boot() call here — two would fetch twice.
   render();
-  if (signedIn() && !loaded) boot();
 
   Idle.start();
   ['click', 'keydown', 'touchstart', 'scroll'].forEach(ev =>
@@ -2693,7 +3001,13 @@ async function start() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && signedIn()) {
       Idle.touch();
-      Auth.token().catch(() => lock('Session expired. Please sign in again.'));
+      // A refresh token that no longer works means the shared password has
+      // been changed. Locking would be no help — they need a fresh link.
+      Auth.token().catch(() => {
+        Auth.wipe();
+        joinError = 'This phone has been signed out. Ask for a fresh setup link.';
+        render();
+      });
     }
   });
 }

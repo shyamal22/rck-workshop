@@ -116,33 +116,95 @@ business, machinery, licence classes.
 
 ---
 
+## Who gets in, and what they see
+
+Nobody has an account of their own. There are **two accounts for the whole
+company**, and everyone joins by opening a link on their phone.
+
+| | Director | Supervisor |
+|---|---|---|
+| Everyone's record, tiles, documents, compliance | Yes | Yes |
+| Wage, salary, bank account, charge rates | Yes | **No** |
+| The signed contract and account paperwork | Yes | **No** — the pay is written inside them |
+| Adding people, filling tiles, uploading, deleting | Yes | **No** |
+
+**The director account** is for the director and the HR manager. It sees
+everything and can change everything.
+
+**The supervisor account** is for the supervisors. They see every person,
+every tile, every date and every compliance percentage — everything they need
+to know whether someone can be sent to a site — but no money, and they cannot
+change anything.
+
+A supervisor sees the contract tile, sees that it is complete, and sees the
+start date, role and sector on it. Where the wage would be, it says
+*Recorded — directors only*. The compliance percentage is identical for both
+roles, so nobody is looking at a different number.
+
+### Handing out the link
+
+In the app, as a director: **⋮ → Settings → Set up someone's phone**. Enter
+one of the two shared accounts, and it checks the password works before giving
+you a link. Send that link to whoever needs it, they open it once, and their
+phone is set up — no password for them to type, remember or lose.
+
+Make it once per role and reuse it. The same supervisor link works for every
+supervisor, this year and next.
+
+**The link is the password.** Anyone it reaches, and anyone they forward it
+to, gets that level of access. Send it person to person, not to a group chat
+everyone can scroll back through. The details ride in the part of the URL
+after the `#`, which browsers never send to a web server, so it will not turn
+up in a server log — but that is the only thing it protects against.
+
+**To cut somebody off** — a supervisor leaves, or a link goes astray — change
+that account's password in Supabase (**Authentication → Users**) and hand out
+a fresh link to everyone still in that role. There is no way to revoke one
+phone on its own; that is the trade for nobody having their own password.
+
+---
+
 ## How this is kept private
 
 This holds contracts, pay, bank accounts and dates of birth, so:
 
-- **Nothing opens without a sign-in.** Every person has their own email and
-  password. The anonymous key can read nothing at all.
+- **Nothing opens without one of the two accounts.** The anonymous key in
+  `config.js` reads nothing at all — a stranger who finds the page gets a
+  sign-in screen.
 - **Signing in is not enough.** The account must also be on the `staff_users`
-  list in the database — a list you add to by hand, in SQL. Nobody can grant
+  list in the database, which is only editable in SQL. Nobody can grant
   themselves access from inside the app.
-- **A `viewer` account genuinely cannot change anything.** The app hides the
-  buttons, but hiding a button is not a permission — the database refuses
-  their writes as well.
+- **A supervisor cannot see pay, and this is enforced in the database, not
+  the app.** Hiding a field in the browser would prove nothing: the page is
+  public and its key is readable, so anything the app can ask for, a
+  determined person could ask for too. Instead the figures never leave the
+  database — a supervisor's rows come back through a view that has already
+  replaced them with `##hidden##`, and the storage rules refuse them the
+  contract and account documents outright.
+- **A supervisor cannot change anything**, for the same reason: the database
+  refuses their writes. The app hiding the Save button is a courtesy, not the
+  control.
 - **Staff data is never written to the device.** There is no offline cache.
-  It lives in memory while the screen is unlocked and is gone the moment you
-  lock, sign out or reload.
+  It lives in memory while the screen is awake and is gone the moment it
+  locks, signs out or reloads.
 - **Uploaded documents sit in a private store.** There is no public URL. The
   app mints a link that works for a few minutes and then doesn't, fetches the
   file, shows it inside the app, and throws it away when you close it.
-- **The screen locks itself** after 20 minutes with nothing happening.
-  Change it in `config.js`.
+- **The screen clears itself** after 20 minutes with nothing happening, so a
+  phone left on a seat isn't showing somebody's file. Carrying on afterwards
+  is one tap — there is no password to retype. Change the timeout in
+  `config.js`.
 - **Pay is left out of a printed file** unless *Include pay* is ticked, so it
-  can be handed to a manager as it is.
+  can be handed to a supervisor as it is.
 - **Every change is recorded** against the person, with who made it and when.
 
-Because of that it is safe for this repository and the published page to be
-public. The key in `config.js` opens nothing on its own — a stranger with the
-link gets a sign-in screen.
+What this deliberately does **not** protect against: a phone that is unlocked
+and in the wrong hands, or a link forwarded to somebody who shouldn't have it.
+Both come with wanting no passwords, which is the right trade for a crew —
+but worth knowing.
+
+Because of all that it is safe for this repository and the published page to
+be public.
 
 ---
 
@@ -167,27 +229,30 @@ Three jobs, about half an hour, done once.
 
 The free tier is far more than this will ever need.
 
-### 2. The accounts
+### 2. The two accounts
 
-For each person who should have access:
+Done once, for the whole company. Nobody else ever needs an account.
 
-1. In Supabase, go to **Authentication → Users → Add user**.
-2. Enter their email and a starting password, tick **Auto Confirm User**.
-   (Or use **Invite** and let them set their own password by email.)
-3. Then open **SQL Editor** and run one line:
+1. In Supabase, go to **Authentication → Users → Add user**, and make two,
+   ticking **Auto Confirm User** on both. The addresses don't have to be real
+   mailboxes — nothing is ever emailed to them.
+
+   | Email | Password |
+   |---|---|
+   | `rck-director@rcknz.co.nz` | a long one — write it down somewhere safe |
+   | `rck-supervisor@rcknz.co.nz` | a different long one |
+
+2. Then open **SQL Editor** and run these two lines:
 
    ```sql
-   select staff_grant('jane@rcknz.co.nz', 'Jane Smith', 'hr');
+   select staff_grant('rck-director@rcknz.co.nz',   'Director',   'director');
+   select staff_grant('rck-supervisor@rcknz.co.nz', 'Supervisor', 'supervisor');
    ```
 
-   Use `'director'` for you and the director, `'viewer'` for read-only. It
-   tells you straight back whether it worked.
+   Each tells you straight back whether it worked.
 
-To take someone off later:
-
-```sql
-update staff_users set active = false where email = 'jane@rcknz.co.nz';
-```
+Keep both passwords. You need the director one to sign in the first time, and
+you need whichever one you're handing out to make a link.
 
 ### 3. The app
 
@@ -202,15 +267,20 @@ window.RCKP_CONFIG = {
 };
 ```
 
-Commit that and the site redeploys itself. Every device is then connected
-automatically — there is nothing for anyone to type in but their own password.
+Commit that and the site redeploys itself. Every phone is then connected
+automatically, with nothing for anyone to type in.
 
-If you'd rather not commit the key, leave `config.js` blank and each device
-asks for the URL and key once, on first open.
+Now open the app yourself, sign in with the director email and password, and
+go to **⋮ → Settings → Set up someone's phone** to make the two links you hand
+out. That sign-in screen is the only time anyone types a password, and only
+you ever see it.
 
 ---
 
 ## Filling it in
+
+Signed in as the director — a supervisor can see all of this but change none
+of it.
 
 1. **Companies first**, if you use labour hire or subcontractors — ⋮ →
    *Labour hire & subcontractors* → **+**. Then open each one and fill in its
@@ -257,6 +327,13 @@ It installs like a normal app.
 - **A new line has to be saved before a certificate can go on it** — there is
   nothing to attach it to until then. The tile says so.
 - **Reminders** are the colours and the counts; the app does not send email.
+- **Changing a shared password** signs out every phone using it. That is how
+  you cut someone off, but it means everyone in that role needs a fresh link
+  the same day.
+- **Adding a third kind of access** — someone who should see less than a
+  supervisor, say — means a new role in `staff_grant`, a rule for it in
+  `supabase-schema.sql`, and nothing in `app.js` beyond what to show. The
+  database is where access is decided.
 - **This is separate from [`../hr/`](../hr/)**, an earlier and differently
   shaped HR app in this repository. They share no data and no database
   tables. Use one or the other, not both.

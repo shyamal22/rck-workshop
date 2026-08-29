@@ -10,9 +10,10 @@
    links. A stranger with this key and the app URL gets a sign-in screen
    and nothing else.
 
-   That is the point of building it this way — you can hand the link to
-   whoever needs it and it just works, with no key to type in and nothing
-   confidential sitting in a public file.
+   What must NEVER go in this file is either of the two shared account
+   passwords. Those travel in the setup links you hand out, which is the
+   whole reason the app works that way — anything written here is on a
+   public web page.
 
      Supabase → Settings → API
        supabaseUrl = "Project URL"
@@ -22,8 +23,9 @@ window.RCKP_CONFIG = {
   supabaseUrl: '',
   supabaseKey: '',
 
-  // Lock the screen after this many minutes with nothing happening, so an
-  // open laptop doesn't leave staff files on display. Set to 0 to never lock.
+  // Clear the screen after this many minutes with nothing happening, so a
+  // phone left on a seat doesn't leave someone's file on display. Carrying
+  // on afterwards is one tap. Set to 0 to never clear it.
   idleLockMinutes: 20,
 
   // How many days before an expiry date something turns amber, for tiles
