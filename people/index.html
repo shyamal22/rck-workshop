@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="robots" content="noindex, nofollow">
+<title>RCK People</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header id="topbar" hidden>
+  <button id="backBtn" class="icon-btn" hidden aria-label="Back">
+    <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+  </button>
+  <div class="brand">
+    <strong id="title">RCK People</strong>
+    <span id="syncDot" class="dot" title="Connection"></span>
+  </div>
+  <button id="menuBtn" class="icon-btn" aria-label="Menu">
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/>
+    </svg>
+  </button>
+</header>
+
+<nav id="menu" hidden>
+  <button data-go="#/">Home</button>
+  <button data-go="#/staff">Staff information</button>
+  <button data-go="#/companies">Labour hire &amp; subcontractors</button>
+  <hr>
+  <button data-go="#/settings">Settings</button>
+  <button id="lockBtn">Lock now</button>
+</nav>
+
+<main id="view"></main>
+
+<div id="printArea" aria-hidden="true"></div>
+<div id="toast" hidden></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
