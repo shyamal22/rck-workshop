@@ -74,6 +74,18 @@ const PERSON_STATUS = [
   { key: 'finished', label: 'Finished' }
 ];
 
+/* Kinds of leave. Annual is the one this screen exists for; the rest are
+   here so a week off doesn't have to be filed as annual leave when it
+   wasn't. */
+const LEAVE_KINDS = [
+  { key: 'annual',      label: 'Annual leave' },
+  { key: 'sick',        label: 'Sick leave' },
+  { key: 'unpaid',      label: 'Unpaid leave' },
+  { key: 'bereavement', label: 'Bereavement' },
+  { key: 'parental',    label: 'Parental leave' },
+  { key: 'other',       label: 'Other' }
+];
+
 const COMPANY_KINDS = [
   { key: 'labour_hire',   label: 'Labour hire firm' },
   { key: 'subcontractor', label: 'Subcontractor company' }
@@ -509,6 +521,7 @@ const ICONS = {
   handshake: '<path d="M8.6 12.4l2.6-2.6a1.9 1.9 0 0 1 2.7 0l3.3 3.3"/><path d="M2.8 8.9l3.4-3.4 4 1.6 3.4-1.6 3.6 1.4 4 .6"/><path d="M2.8 8.9v5.2l4.5 4.5a1.7 1.7 0 0 0 2.4 0l.8-.8"/><path d="M10.5 17.8l1.6 1.6a1.7 1.7 0 0 0 2.4 0"/>',
   bank:      '<path d="M3.4 9.6L12 4.4l8.6 5.2"/><path d="M5.4 9.6v8M9.8 9.6v8M14.2 9.6v8M18.6 9.6v8"/><path d="M3 20.4h18"/>',
   building:  '<path d="M4.5 20.5V5.2A1.7 1.7 0 0 1 6.2 3.5h7.6a1.7 1.7 0 0 1 1.7 1.7v15.3"/><path d="M15.5 10.5h2.9a1.6 1.6 0 0 1 1.6 1.6v8.4"/><path d="M8 7.4h3.9M8 11h3.9M8 14.6h3.9"/><path d="M2.8 20.5h18.4"/>',
+  calendar:  '<rect x="3.4" y="5.4" width="17.2" height="15.2" rx="2.4"/><path d="M3.4 10.2h17.2"/><path d="M8.2 3.4v4M15.8 3.4v4"/><path d="M7.6 14h3M13.4 14h3"/>',
   print:     '<path d="M7 9V3.5h10V9"/><path d="M4 9h16v7h-3"/><path d="M7 16v4.5h10V16"/>',
   plus:      '<path d="M12 5.5v13M5.5 12h13"/>',
   up:        '<path d="M12 19.5V6.5"/><path d="M7 11.5L12 6.5l5 5"/><path d="M5 20.5h14"/>',
@@ -626,14 +639,15 @@ function setupLink() {
 /* =====================================================================
    Data, held in memory only
    ===================================================================== */
-const DB = { staff: [], companies: [], sections: [], files: [], audit: [] };
+const DB = { staff: [], companies: [], sections: [], files: [], leave: [], audit: [] };
 let loaded = false;
 let locked = false;
 let lastError = '';
 
 /** Throw away every scrap of staff data held in memory. */
 function forgetData() {
-  DB.staff = []; DB.companies = []; DB.sections = []; DB.files = []; DB.audit = [];
+  DB.staff = []; DB.companies = []; DB.sections = [];
+  DB.files = []; DB.leave = []; DB.audit = [];
   Faces.forget();
   loaded = false;
 }
@@ -655,16 +669,18 @@ async function rest(path, opts) {
 
 const Store = {
   async pull() {
-    const [staff, companies, sections, files] = await Promise.all([
+    const [staff, companies, sections, files, leave] = await Promise.all([
       rest('staff?select=*&order=last_name.asc,first_name.asc'),
       rest('companies?select=*&order=name.asc'),
       rest('profile_sections?select=*'),
-      rest('profile_files?select=*&order=created_at.desc')
+      rest('profile_files?select=*&order=created_at.desc'),
+      rest('staff_leave?select=*&order=starts_on.asc')
     ]);
     DB.staff = staff || [];
     DB.companies = companies || [];
     DB.sections = sections || [];
     DB.files = files || [];
+    DB.leave = leave || [];
     loaded = true;
   },
 
@@ -794,7 +810,8 @@ const Store = {
 const encodePath = p => p.split('/').map(encodeURIComponent).join('/');
 
 function localName(table) {
-  return { profile_sections: 'sections', profile_files: 'files', staff_audit: 'audit' }[table] || table;
+  return { profile_sections: 'sections', profile_files: 'files',
+           staff_leave: 'leave', staff_audit: 'audit' }[table] || table;
 }
 const whoAmI = () => S.name || ROLE_LABEL[S.role] || 'Someone';
 
@@ -1081,6 +1098,94 @@ function companyState(company) {
 }
 
 /* =====================================================================
+   Annual leave
+
+   Everything here is already approved — this is the register of what is
+   booked. Nothing has a status to set by hand: where a booking sits is
+   worked out from its dates every time the screen is drawn, so it moves
+   from "coming up" to "away now" to "taken" on its own as time passes.
+   ===================================================================== */
+
+/** Working days between two dates, counting Monday to Friday inclusive. */
+function workingDays(from, to) {
+  if (!from || !to) return 0;
+  const a = new Date(String(from).slice(0, 10) + 'T00:00:00');
+  const b = new Date(String(to).slice(0, 10) + 'T00:00:00');
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  let n = 0;
+  for (const d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) n++;
+  }
+  return n;
+}
+
+/** Where one booking sits relative to today. */
+function leaveState(row) {
+  const from = daysFromToday(row.starts_on);
+  const to   = daysFromToday(row.ends_on);
+  if (from === null || to === null) return { when: 'upcoming', level: 'grey', text: 'Dates unreadable' };
+
+  if (to < 0) {
+    return { when: 'past', level: 'grey', text: 'Taken' };
+  }
+  if (from <= 0) {
+    return { when: 'now', level: 'orange',
+             text: to === 0 ? 'Back tomorrow' : `Away — back in ${plural(to + 1, 'day')}` };
+  }
+  return {
+    when: 'upcoming',
+    level: from <= 14 ? 'orange' : 'green',
+    text: from === 1 ? 'Starts tomorrow' : `Starts in ${plural(from, 'day')}`
+  };
+}
+
+const leaveFor = staffId => DB.leave
+  .filter(l => l.staff_id === staffId)
+  .sort((a, b) => String(b.starts_on).localeCompare(String(a.starts_on)));
+
+/** Every booking, newest-first within its group, with its person attached. */
+function leaveRows(filter) {
+  const crew = (filter && filter.crew) || '';
+  return DB.leave
+    .map(l => ({ row: l, person: staffById(l.staff_id), state: leaveState(l) }))
+    .filter(x => x.person)
+    .filter(x => !crew || (x.person.crew || '') === crew)
+    .sort((a, b) => String(a.row.starts_on).localeCompare(String(b.row.starts_on)));
+}
+
+/**
+ * Anyone else off over the same dates. The point of the leave screen for
+ * a crew is not "who booked what" but "can I let this one go too", so
+ * this is what the add form warns on.
+ */
+function overlapping(startsOn, endsOn, ignoreId) {
+  if (!startsOn || !endsOn) return [];
+  return DB.leave
+    .filter(l => l.id !== ignoreId)
+    .filter(l => String(l.starts_on) <= String(endsOn) && String(l.ends_on) >= String(startsOn))
+    .map(l => ({ row: l, person: staffById(l.staff_id) }))
+    .filter(x => x.person && x.person.status !== 'finished');
+}
+
+/** The leave year, April to March, matching the financial year used elsewhere. */
+function leaveYearOf(dateStr) {
+  const d = new Date(String(dateStr || today()).slice(0, 10) + 'T00:00:00');
+  if (isNaN(d)) return null;
+  return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+}
+const leaveYearLabel = y => `${y}/${String(y + 1).slice(2)}`;
+
+/** Days booked by one person in a leave year — annual leave only. */
+function daysTaken(staffId, year, kind) {
+  return DB.leave
+    .filter(l => l.staff_id === staffId)
+    .filter(l => (kind ? l.kind === kind : true))
+    .filter(l => leaveYearOf(l.starts_on) === year)
+    .reduce((n, l) => n + (Number(l.days) || 0), 0);
+}
+
+/* =====================================================================
    Routing
    ===================================================================== */
 function parseHash() {
@@ -1105,6 +1210,7 @@ const SCREENS = {
   'person':    { title: 'Staff file',   render: renderPerson,  back: '#/staff' },
   'edit':      { title: 'Details',      render: renderPersonEdit, back: true },
   'tile':      { title: '',             render: renderStaffTile,  back: true },
+  'leave':     { title: 'Annual leave', render: renderLeave, back: '#/' },
   'companies': { title: 'Labour hire & subcontractors', render: renderCompanies, back: '#/' },
   'company':   { title: 'Company',      render: renderCompany, back: '#/companies' },
   'ctile':     { title: '',             render: renderCompanyTile, back: true },
@@ -1533,10 +1639,21 @@ function showValue(f, value) {
    is still an open question rather than a wrong answer.
    ===================================================================== */
 const SLOTS = [
-  { n: 2, name: 'Slot two' },
   { n: 3, name: 'Slot three' },
   { n: 4, name: 'Slot four' }
 ];
+
+/** What the leave card says on the landing page. */
+function leaveHeadline() {
+  const rows = leaveRows();
+  const away = rows.filter(x => x.state.when === 'now').length;
+  const soon = rows.filter(x => x.state.when === 'upcoming').length;
+  if (!rows.length) return 'Approved leave, booked ahead and already taken. Nothing booked yet.';
+  const bits = [];
+  if (away) bits.push(`${plural(away, 'person')} away now`);
+  if (soon) bits.push(`${soon} booked ahead`);
+  return bits.length ? bits.join(' · ') : 'All booked leave has been taken.';
+}
 
 function renderHome(view) {
   const list = onBooks();
@@ -1563,6 +1680,16 @@ function renderHome(view) {
           <b>Staff information</b>
           <span class="say">Everyone on the books, their compliance, and every document
             behind it. Filter by RCK, labour hire or subcontractor.</span>
+        </span>
+        <span class="chev">${icon('chev')}</span>
+      </button>
+
+      <button class="option" data-go="#/leave">
+        <span class="mark">${icon('calendar')}</span>
+        <span class="grow">
+          <span class="num">02</span>
+          <b>Annual leave</b>
+          <span class="say">${leaveHeadline()}</span>
         </span>
         <span class="chev">${icon('chev')}</span>
       </button>
@@ -1787,6 +1914,10 @@ function renderPerson(view, args) {
     <div class="sec-head"><h2>Compliance</h2><span class="sub">${c.done} of ${c.total}</span></div>
     <div class="stiles">${tiles.map(t => stileHtml(t, p)).join('')}</div>
 
+    <div class="sec-head"><h2>Annual leave</h2>
+      ${canEdit() ? `<button class="act" id="addLeaveHere">Book leave</button>` : ''}</div>
+    ${leavePersonCard(p)}
+
     ${firm ? `<div class="sec-head"><h2>Their company</h2></div>
       <button class="option" data-company="${esc(firm.id)}">
         <span class="mark">${icon('building')}</span>
@@ -1806,7 +1937,46 @@ function renderPerson(view, args) {
   $$('[data-tile]', view).forEach(b => { b.onclick = () => go('#/tile/' + p.id + '/' + b.dataset.tile); });
   $$('[data-company]', view).forEach(b => { b.onclick = () => go('#/company/' + b.dataset.company); });
   $('#histBtn').onclick = () => showHistory(p.id);
+  const al = $('#addLeaveHere');
+  if (al) al.onclick = () => editLeave(null, p.id);
+  $$('[data-leave]', view).forEach(b => {
+    b.onclick = () => {
+      const row = DB.leave.find(l => l.id === b.dataset.leave);
+      if (row) editLeave(row);
+    };
+  });
   wireFaces(view);
+}
+
+/**
+ * One person's leave: what is booked ahead, and how much they have taken
+ * this leave year. Deliberately not a balance — what they are entitled to
+ * lives in payroll, and guessing at it here would be worse than useless.
+ */
+function leavePersonCard(person) {
+  const mine = leaveFor(person.id).map(l => ({ row: l, person, state: leaveState(l) }));
+  const ahead = mine.filter(x => x.state.when !== 'past')
+    .sort((a, b) => String(a.row.starts_on).localeCompare(String(b.row.starts_on)));
+  const year = leaveYearOf(today());
+  const taken = daysTaken(person.id, year, 'annual');
+
+  return `<div class="card">
+    <div class="kv">
+      <div><div class="k">Annual leave taken ${esc(leaveYearLabel(year))}</div>
+           <div class="v">${taken ? `${taken} ${taken === 1 ? 'day' : 'days'}` : 'None'}</div></div>
+      <div><div class="k">Booked ahead</div>
+           <div class="v">${ahead.length ? plural(ahead.length, 'booking') : 'Nothing'}</div></div>
+    </div>
+    ${ahead.length ? `<div style="margin-top:12px">${ahead.map(x => `
+      <button class="slot" data-leave="${esc(x.row.id)}">
+        ${icon('calendar')}
+        <span class="grow">
+          <span>${fmtDate(x.row.starts_on)} → ${fmtDate(x.row.ends_on)}</span>
+          <span class="sub">${esc(labelOf(LEAVE_KINDS, x.row.kind))}${
+            x.row.days ? ` · ${x.row.days} working ${Number(x.row.days) === 1 ? 'day' : 'days'}` : ''} · ${esc(x.state.text)}</span>
+        </span>
+      </button>`).join('')}</div>` : ''}
+  </div>`;
 }
 
 /** One compliance tile on a person's page. */
@@ -2427,6 +2597,230 @@ function openFile(fileId) {
     }
   }, 500);
   return close;
+}
+
+/* =====================================================================
+   Screen — annual leave
+   ===================================================================== */
+const leaveFilter = { crew: '', showPast: false };
+
+function leaveLine(x, opts) {
+  const o = opts || {};
+  const st = x.state;
+  const kind = labelOf(LEAVE_KINDS, x.row.kind);
+  const days = Number(x.row.days) || 0;
+  return `<button class="option ${statusClass(st.level)}" data-leave="${esc(x.row.id)}">
+    ${o.noFace ? '' : faceHtml(x.person)}
+    <span class="grow">
+      <b>${esc(fullName(x.person))}</b>
+      <span class="say">${fmtDate(x.row.starts_on)} → ${fmtDate(x.row.ends_on)}</span>
+      <span class="say">${esc([
+        kind,
+        days ? `${days} working ${days === 1 ? 'day' : 'days'}` : '',
+        crewLabel(x.person.crew)
+      ].filter(Boolean).join(' · '))}</span>
+    </span>
+    <span class="pill">${esc(st.text)}</span>
+  </button>`;
+}
+
+function renderLeave(view) {
+  const rows = leaveRows(leaveFilter);
+  const away = rows.filter(x => x.state.when === 'now');
+  const soon = rows.filter(x => x.state.when === 'upcoming');
+  const past = rows.filter(x => x.state.when === 'past').reverse();
+  const year = leaveYearOf(today());
+
+  const crewsUsed = (() => {
+    const used = new Set(DB.leave.map(l => (staffById(l.staff_id) || {}).crew).filter(Boolean));
+    const known = CREWS.filter(c => used.has(c.key));
+    const extra = Array.from(used).filter(k => !CREWS.some(c => c.key === k)).sort();
+    return known.concat(extra.map(k => ({ key: k, label: k })));
+  })();
+
+  view.innerHTML = `
+    <div class="toolbar">
+      <div class="grow"><p class="sub">Approved leave. It sorts itself by the dates, so what is
+        coming up, who is away and what has been taken keep themselves right.</p></div>
+      ${canEdit() ? `<button class="btn primary" id="addLeave" aria-label="Book leave">${icon('plus')}</button>` : ''}
+    </div>
+
+    <div class="tally">
+      <button class="status-orange" data-jump="away"><span class="n">${away.length}</span><span class="l">Away now</span></button>
+      <button class="status-green"  data-jump="soon"><span class="n">${soon.length}</span><span class="l">Booked ahead</span></button>
+      <button class="status-grey"   data-jump="past"><span class="n">${past.length}</span><span class="l">Taken ${esc(leaveYearLabel(year))}</span></button>
+    </div>
+
+    ${crewsUsed.length > 1 ? `<div class="chips" style="margin-top:12px">
+      <button class="chip${!leaveFilter.crew ? ' on' : ''}" data-lcrew="">All crews</button>
+      ${crewsUsed.map(c => `<button class="chip${leaveFilter.crew === c.key ? ' on' : ''}" data-lcrew="${esc(c.key)}">${esc(c.label)}</button>`).join('')}
+    </div>` : ''}
+
+    <div class="sec-head" id="away"><h2>Away now</h2><span class="sub">${away.length}</span></div>
+    ${away.length ? away.map(x => leaveLine(x)).join('')
+      : `<div class="empty">Everyone is in.</div>`}
+
+    <div class="sec-head" id="soon"><h2>Booked ahead</h2><span class="sub">${soon.length}</span></div>
+    ${soon.length ? soon.map(x => leaveLine(x)).join('')
+      : `<div class="empty">Nothing booked yet.${canEdit() ? ' Add the first with the + button, top right.' : ''}</div>`}
+
+    <div class="sec-head" id="past"><h2>Already taken</h2>
+      ${past.length ? `<button class="act" id="pastToggle">${leaveFilter.showPast ? 'Hide' : 'Show'}</button>` : ''}</div>
+    ${!past.length ? `<div class="empty">Nothing yet.</div>`
+      : leaveFilter.showPast ? past.map(x => leaveLine(x)).join('')
+      : `<div class="empty">${plural(past.length, 'booking')} in the past.</div>`}`;
+
+  const add = $('#addLeave');
+  if (add) add.onclick = () => editLeave(null);
+
+  $$('[data-lcrew]', view).forEach(b => {
+    b.onclick = () => { leaveFilter.crew = b.dataset.lcrew; render(); };
+  });
+  $$('[data-leave]', view).forEach(b => {
+    b.onclick = () => {
+      const row = DB.leave.find(l => l.id === b.dataset.leave);
+      if (row) editLeave(row);
+    };
+  });
+  $$('[data-jump]', view).forEach(b => {
+    b.onclick = () => {
+      const el = $('#' + b.dataset.jump, view);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  });
+  const pt = $('#pastToggle');
+  if (pt) pt.onclick = () => { leaveFilter.showPast = !leaveFilter.showPast; render(); };
+
+  wireFaces(view);
+}
+
+/**
+ * Book leave, or change a booking.
+ *
+ * The working days fill themselves in from the dates but stay editable —
+ * a half day or a public holiday is the office's call. The clash warning
+ * is the part that earns its keep: on a crew, the question is never
+ * "what did they book" but "can I let this one go as well".
+ */
+function editLeave(row, presetStaffId) {
+  if (!canEdit()) return toast('Supervisor mode — leave is booked by the office.');
+
+  const people = DB.staff.filter(p => p.status !== 'finished' || (row && row.staff_id === p.id));
+  if (!people.length) return toast('Add somebody to the staff list first.');
+
+  const r = row || {
+    staff_id: presetStaffId || people[0].id,
+    kind: 'annual', starts_on: '', ends_on: '', days: '',
+    approved_by: whoAmI(), notes: ''
+  };
+
+  sheet(`
+    <h2>${row ? 'Change this leave' : 'Book approved leave'}</h2>
+    <p class="sub">Everything on this screen has already been approved.</p>
+
+    ${fieldHtml({ name: 'lStaff', label: 'Who', type: 'select', noBlank: true,
+                  options: people.map(p => ({ key: p.id,
+                    label: fullName(p) + (p.crew ? ' — ' + crewLabel(p.crew) : '') })) }, r.staff_id)}
+    ${fieldHtml({ name: 'lKind', label: 'Kind of leave', type: 'select', noBlank: true,
+                  options: LEAVE_KINDS }, r.kind)}
+    <div class="fields2">
+      ${fieldHtml({ name: 'lFrom', label: 'First day off', type: 'date' }, r.starts_on)}
+      ${fieldHtml({ name: 'lTo', label: 'Last day off', type: 'date' }, r.ends_on)}
+    </div>
+    ${fieldHtml({ name: 'lDays', label: 'Working days', placeholder: 'Counted for you' }, r.days)}
+    ${fieldHtml({ name: 'lBy', label: 'Approved by' }, r.approved_by)}
+    ${fieldHtml({ name: 'lNotes', label: 'Notes', type: 'textarea' }, r.notes)}
+
+    <div id="lClash"></div>
+
+    <div class="btn-row">
+      ${row ? '<button class="btn danger" data-del>Remove</button>' : ''}
+      <button class="btn ghost" data-no>Cancel</button>
+      <button class="btn primary" data-yes>${row ? 'Save' : 'Book it'}</button>
+    </div>`, (el, close) => {
+
+    const from = $('[data-f="lFrom"]', el);
+    const to   = $('[data-f="lTo"]', el);
+    const days = $('[data-f="lDays"]', el);
+    let daysTouched = !!(row && row.days);
+
+    days.oninput = () => { daysTouched = true; };
+
+    const recount = () => {
+      if (!daysTouched && from.value && to.value) days.value = workingDays(from.value, to.value) || '';
+      if (from.value && to.value && to.value < from.value) {
+        $('#lClash', el).innerHTML =
+          `<div class="banner status-red">The last day is before the first day.</div>`;
+        return;
+      }
+      const others = overlapping(from.value, to.value, row && row.id)
+        .filter(x => x.person.id !== $('[data-f="lStaff"]', el).value);
+      const mine = staffById($('[data-f="lStaff"]', el).value) || {};
+      const sameCrew = others.filter(x => (x.person.crew || '') === (mine.crew || '') && mine.crew);
+
+      $('#lClash', el).innerHTML = !others.length ? '' : `
+        <div class="banner ${sameCrew.length ? 'status-orange' : 'info'}">
+          ${sameCrew.length
+            ? `<b>${plural(sameCrew.length, 'other')} in ${esc(crewLabel(mine.crew))}</b> off over these dates: `
+            : `Also off over these dates: `}
+          ${others.map(x => esc(fullName(x.person))).join(', ')}.
+        </div>`;
+    };
+
+    from.onchange = recount;
+    to.onchange = recount;
+    $('[data-f="lStaff"]', el).onchange = recount;
+    recount();
+
+    $('[data-no]', el).onclick = close;
+
+    $('[data-yes]', el).onclick = async () => {
+      const v = {
+        staff_id: $('[data-f="lStaff"]', el).value,
+        kind: $('[data-f="lKind"]', el).value,
+        starts_on: from.value || null,
+        ends_on: to.value || null,
+        days: days.value === '' ? null : Number(days.value),
+        approved_by: $('[data-f="lBy"]', el).value.trim(),
+        notes: $('[data-f="lNotes"]', el).value.trim()
+      };
+      if (!v.starts_on || !v.ends_on) return toast('Both dates are needed.');
+      if (v.ends_on < v.starts_on) return toast('The last day is before the first day.');
+      if (v.days !== null && !Number.isFinite(v.days)) return toast('Working days must be a number.');
+
+      try {
+        const who = staffById(v.staff_id);
+        if (row) {
+          await Store.patch('staff_leave', row.id, v);
+          note(staffOwner(v.staff_id), 'leave', 'changed',
+               `Leave changed — ${fmtDate(v.starts_on)} to ${fmtDate(v.ends_on)}`);
+        } else {
+          const saved = await Store.insert('staff_leave', v);
+          note(staffOwner(v.staff_id), 'leave', 'booked',
+               `${labelOf(LEAVE_KINDS, saved.kind)} — ${fmtDate(v.starts_on)} to ${fmtDate(v.ends_on)}`);
+        }
+        close();
+        render();
+        toast(row ? 'Saved.' : `Booked for ${who ? fullName(who) : 'them'}.`);
+      } catch (e) { toast('Could not save: ' + e.message); }
+    };
+
+    const del = $('[data-del]', el);
+    if (del) del.onclick = () => {
+      close();
+      confirmSheet('Remove this leave?',
+        'It comes off the register for good. Only do this if it was entered in error or cancelled.',
+        'Remove', async () => {
+          try {
+            await Store.remove('staff_leave', row.id);
+            note(staffOwner(row.staff_id), 'leave', 'removed',
+                 `Leave removed — ${fmtDate(row.starts_on)} to ${fmtDate(row.ends_on)}`);
+            render();
+            toast('Removed.');
+          } catch (e) { toast('Could not remove: ' + e.message); }
+        });
+    };
+  });
 }
 
 /* =====================================================================

@@ -14,9 +14,9 @@ actually been filled in and uploaded, and from the dates on it.
 
 Three screens deep, and no deeper.
 
-**The landing page** — four options. The first is *Staff information*. The
-other three are marked-out slots, left empty on purpose until you say what
-belongs in them.
+**The landing page** — four options. *Staff information* and *Annual leave*
+are built; the last two are marked-out slots, left empty on purpose until you
+say what belongs in them.
 
 **Staff information** — everyone as a tile, showing their head shot, name,
 role, crew and a ring with their compliance percentage. Filter by
@@ -30,6 +30,43 @@ to be on file.
 
 **One tile, open** — the manual details typed in, the documents uploaded
 against it, and the switch that says it does not apply.
+
+---
+
+## Annual leave
+
+The register of leave that has **already been approved**. It is not a place to
+ask for leave; it is the record of what is booked.
+
+Nothing in it has a status anyone sets by hand. Where a booking sits is worked
+out from its dates every time the screen is drawn, so it moves from *booked
+ahead* to *away now* to *already taken* on its own as the weeks pass:
+
+- **Away now** — anyone off today, and when they are back.
+- **Booked ahead** — soonest first, amber inside a fortnight.
+- **Already taken** — hidden behind a *Show* until you want it.
+
+Filter by crew, and tap any booking to change it.
+
+**Booking leave** takes who, what kind, the first and last day off, and who
+approved it. The **working days count themselves** — Monday to Friday between
+the two dates — but stay editable, because a half day or a public holiday is
+the office's call and not something worth encoding.
+
+**Clashes are the point.** When the dates are picked, the form says who else is
+off over them, and says it louder when they are in the same crew. On a crew of
+six, the question is never *what did they book*, it is *can I let this one go
+as well*.
+
+Each person's own record shows their leave booked ahead, and how many days of
+annual leave they have taken this leave year (April to March, matching the
+financial year the costing app uses). It deliberately does **not** show a
+balance: what someone is entitled to lives in payroll, and guessing at it here
+would be worse than not showing it.
+
+Sick, unpaid, bereavement and parental leave can be recorded too, so a week off
+doesn't have to be filed as annual leave when it wasn't. Only annual leave
+counts towards the days-taken figure.
 
 ---
 

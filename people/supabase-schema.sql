@@ -16,6 +16,7 @@
 --   staff             the people
 --   profile_sections  one row per compliance tile, per person or company
 --   profile_files     the documents behind those tiles
+--   staff_leave       approved annual leave, planned and taken
 --   staff_audit       who changed what, and when
 --   storage bucket    "staff-files", private, reachable only by signed link
 -- =====================================================================
@@ -138,6 +139,35 @@ create index if not exists profile_files_staff_idx   on profile_files (staff_id,
 create index if not exists profile_files_company_idx on profile_files (company_id, section_key);
 
 -- ---------------------------------------------------------------------
+-- Approved annual leave
+--
+-- Everything in here has already been approved — this is the register of
+-- what is booked, not a place to ask for it. The app sorts it into who
+-- is away right now, what is coming up and what has been taken, purely
+-- from the dates, so it keeps itself up to date as time passes.
+--
+-- `days` is working days, counted Monday to Friday between the two dates
+-- and then editable, because a half day or a public holiday is a
+-- judgement the office makes, not something worth encoding here.
+-- ---------------------------------------------------------------------
+create table if not exists staff_leave (
+  id          uuid primary key default gen_random_uuid(),
+  staff_id    uuid not null references staff(id) on delete cascade,
+  kind        text not null default 'annual',      -- annual | sick | unpaid | bereavement | parental | other
+  starts_on   date not null,
+  ends_on     date not null,
+  days        numeric(5,2),
+  approved_by text default '',
+  notes       text default '',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint staff_leave_dates_ck check (ends_on >= starts_on)
+);
+
+create index if not exists staff_leave_staff_idx on staff_leave (staff_id, starts_on desc);
+create index if not exists staff_leave_when_idx  on staff_leave (starts_on, ends_on);
+
+-- ---------------------------------------------------------------------
 -- The trail
 -- ---------------------------------------------------------------------
 create table if not exists staff_audit (
@@ -176,6 +206,10 @@ create trigger companies_touch before update on companies
 
 drop trigger if exists profile_sections_touch on profile_sections;
 create trigger profile_sections_touch before update on profile_sections
+  for each row execute function touch_updated_at();
+
+drop trigger if exists staff_leave_touch on staff_leave;
+create trigger staff_leave_touch before update on staff_leave
   for each row execute function touch_updated_at();
 
 -- =====================================================================
@@ -217,12 +251,14 @@ alter table companies        enable row level security;
 alter table staff            enable row level security;
 alter table profile_sections enable row level security;
 alter table profile_files    enable row level security;
+alter table staff_leave      enable row level security;
 alter table staff_audit      enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['companies', 'staff', 'profile_sections', 'profile_files', 'staff_audit']
+  foreach t in array array['companies', 'staff', 'profile_sections', 'profile_files',
+                       'staff_leave', 'staff_audit']
   loop
     -- every policy name this file has ever used, so a re-run lands clean
     execute format('drop policy if exists %I on %I', t || '_all',    t);
