@@ -525,44 +525,6 @@ function icon(name, cls) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"${cls ? ` class="${cls}"` : ''}>${ICONS[name] || ''}</svg>`;
 }
 
-/* =====================================================================
-   Setup links
-
-   Nobody gets their own account. There are two shared accounts — one
-   director, one supervisor — and a phone joins by opening a link that
-   carries one of them.
-
-   The details ride in the URL's `#` fragment, which browsers never send
-   to the web server, so the link does not turn up in a server log
-   somewhere. That does not make it harmless: the link IS the password.
-   Anyone it is forwarded to gets in, which is why handing one out is
-   worded the way it is on screen.
-   ===================================================================== */
-function b64urlEncode(text) {
-  const bytes = new TextEncoder().encode(text);
-  let bin = '';
-  bytes.forEach(b => { bin += String.fromCharCode(b); });
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function b64urlDecode(s) {
-  const t = String(s).replace(/-/g, '+').replace(/_/g, '/');
-  const bin = atob(t + '='.repeat((4 - t.length % 4) % 4));
-  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
-}
-
-const Link = {
-  make(email, password) {
-    const payload = b64urlEncode(JSON.stringify({ v: 1, e: email, p: password }));
-    return location.origin + location.pathname + '#/join/' + payload;
-  },
-  read(arg) {
-    try {
-      const d = JSON.parse(b64urlDecode(arg));
-      return d && d.e && d.p ? d : null;
-    } catch (e) { return null; }
-  }
-};
-
 let toastTimer;
 function toast(msg) {
   const t = $('#toast');
@@ -573,156 +535,93 @@ function toast(msg) {
 }
 
 /* =====================================================================
-   Connection details
-   ===================================================================== */
-const Conn = {
-  read() {
-    let saved = {};
-    try { saved = JSON.parse(localStorage.getItem('rckp.conn') || '{}'); } catch (e) {}
-    return {
-      url: (SITE.supabaseUrl || saved.url || '').replace(/\/+$/, ''),
-      key: SITE.supabaseKey || saved.key || ''
-    };
-  },
-  write(url, key) {
-    localStorage.setItem('rckp.conn', JSON.stringify({ url: (url || '').replace(/\/+$/, ''), key: key || '' }));
-    C = Conn.read();
-  }
-};
-let C = Conn.read();
-const configured = () => !!C.url && !!C.key;
+   This device
 
-/* =====================================================================
-   Sign-in
+   No accounts, no passwords, exactly like RCK Workshop and RCK Dispatch.
+   Everything that makes this phone different from the next one lives
+   here: who is using it, whether it is in director mode, and the two
+   connection details.
 
-   Tokens are the only thing kept between visits. No staff data is ever
-   written to the device.
+   The key is the secret. config.js is left blank on purpose, because the
+   published page is public — each phone is given the key once, by a setup
+   link, and it is kept here and nowhere else.
    ===================================================================== */
-const Auth = {
-  session: null,          // { access_token, refresh_token, expires_at, email, user_id }
-  me: null,               // the row from staff_users
+const S = {
+  name: '', role: 'supervisor', supabaseUrl: '', supabaseKey: '',
 
   load() {
-    try { Auth.session = JSON.parse(localStorage.getItem('rckp.session') || 'null'); }
-    catch (e) { Auth.session = null; }
-  },
-  save() {
-    if (Auth.session) localStorage.setItem('rckp.session', JSON.stringify(Auth.session));
-    else localStorage.removeItem('rckp.session');
-  },
-  lastEmail() { return localStorage.getItem('rckp.lastEmail') || ''; },
-
-  async call(path, body, useToken) {
-    const headers = { apikey: C.key, 'Content-Type': 'application/json' };
-    if (useToken && Auth.session) headers.Authorization = 'Bearer ' + Auth.session.access_token;
-    const res = await fetch(`${C.url}/auth/v1/${path}`, {
-      method: 'POST', headers, body: JSON.stringify(body || {})
-    });
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch (e) {}
-    if (!res.ok) {
-      const msg = (data && (data.error_description || data.msg || data.message || data.error)) || res.statusText;
-      throw new Error(msg);
-    }
-    return data;
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('rckp.settings') || '{}'); } catch (e) {}
+    S.name = saved.name || '';
+    S.role = saved.role === 'director' ? 'director' : 'supervisor';
+    // config.js wins where it is filled in, so a site that does commit the
+    // key doesn't have to be set up phone by phone.
+    S.supabaseUrl = (SITE.supabaseUrl || saved.supabaseUrl || '').replace(/\/+$/, '');
+    S.supabaseKey = SITE.supabaseKey || saved.supabaseKey || '';
   },
 
-  async signIn(email, password) {
-    const d = await Auth.call('token?grant_type=password', { email: email.trim(), password });
-    Auth.session = {
-      access_token: d.access_token,
-      refresh_token: d.refresh_token,
-      expires_at: Date.now() + (d.expires_in || 3600) * 1000,
-      email: (d.user && d.user.email) || email.trim(),
-      user_id: d.user && d.user.id
-    };
-    Auth.save();
-    localStorage.setItem('rckp.lastEmail', Auth.session.email);
+  save(next) {
+    Object.assign(S, next || {});
+    localStorage.setItem('rckp.settings', JSON.stringify({
+      name: S.name, role: S.role,
+      supabaseUrl: S.supabaseUrl, supabaseKey: S.supabaseKey
+    }));
   },
 
-  async refresh() {
-    if (!Auth.session || !Auth.session.refresh_token) throw new Error('No session');
-    const d = await Auth.call('token?grant_type=refresh_token', { refresh_token: Auth.session.refresh_token });
-    Auth.session = Object.assign({}, Auth.session, {
-      access_token: d.access_token,
-      refresh_token: d.refresh_token,
-      expires_at: Date.now() + (d.expires_in || 3600) * 1000
-    });
-    Auth.save();
-  },
-
-  /** A valid token, refreshed if it is close to running out. */
-  async token() {
-    if (!Auth.session) throw new Error('Not signed in');
-    if (Date.now() > Auth.session.expires_at - 60000) await Auth.refresh();
-    return Auth.session.access_token;
-  },
-
-  /** Confirms this account is on the staff_users guest list. */
-  async loadMe() {
-    const id = Auth.session && Auth.session.user_id;
-    if (!id) throw new Error('No session');
-    const rows = await rest(`staff_users?select=*&id=eq.${encodeURIComponent(id)}`);
-    if (!rows || !rows.length) {
-      const e = new Error('not-a-member');
-      e.notMember = true;
-      throw e;
-    }
-    Auth.me = rows[0];
-    return Auth.me;
-  },
-
-  async resetPassword(email) { await Auth.call('recover', { email: email.trim() }); },
-
-  /* There is deliberately no "change your password" here. The two
-     passwords are shared by everyone in that role, so changing one from
-     a phone would lock out every other phone using it. They are changed
-     in Supabase, on purpose, followed by handing out fresh links. */
-
-  /** Clear everything held in memory and on the device. */
-  wipe() {
-    Auth.session = null;
-    Auth.me = null;
-    Auth.save();
-    forgetData();
-    locked = false;
-  },
-
-  async signOut() {
-    try {
-      const t = Auth.session && Auth.session.access_token;
-      if (t) await fetch(`${C.url}/auth/v1/logout`, {
-        method: 'POST', headers: { apikey: C.key, Authorization: 'Bearer ' + t }
-      });
-    } catch (e) { /* signing out locally matters more than telling the server */ }
-    Auth.wipe();
+  forget() {
+    localStorage.removeItem('rckp.settings');
+    S.load();
   }
 };
+S.load();
 
-const signedIn = () => !!(Auth.session && Auth.me);
+const configured = () => !!S.supabaseUrl && !!S.supabaseKey;
 
 /**
- * Two roles, and only two.
+ * Two modes a phone can be in.
  *
- *   director    the director and the HR manager. Sees everything,
- *               including pay, and can change everything.
- *   supervisor  sees everything except pay, and changes nothing.
+ *   supervisor  the default. Sees every person, every tile, every date —
+ *               everything needed to know whether someone can go to a
+ *               site — but no pay, and cannot change anything.
+ *   director    the director and the HR manager. Everything, and edits.
  *
- * Neither of these decides anything on its own — the database has
- * already refused a supervisor's writes and already replaced the pay
- * figures with HIDDEN before they reach this app. These two are here so
- * a supervisor isn't shown a Save button that was never going to work,
- * or an empty box where a wage they cannot see used to be.
+ * Be honest about what this is. It is the same kind of switch as the
+ * office code in RCK Dispatch: it keeps the screen simple and stops a
+ * site phone changing a record by accident. It is NOT secrecy. The code
+ * that unlocks it sits in config.js, and anyone holding the key can read
+ * the pay out of the database whatever this app shows them. The thing
+ * actually keeping staff details in is the key, which is why it is never
+ * published and only ever handed over in a setup link.
  */
-const myRole    = () => (Auth.me && Auth.me.role) || 'supervisor';
-const canEdit   = () => myRole() === 'director';
-const canSeePay = () => myRole() === 'director';
+const myRole    = () => S.role;
+const isDirector = () => S.role === 'director';
+const canEdit   = () => isDirector();
+const canSeePay = () => isDirector();
 const ROLE_LABEL = { director: 'Director', supervisor: 'Supervisor' };
+const ROLES = [
+  { key: 'supervisor', label: 'Supervisor', blurb: 'see everything except pay' },
+  { key: 'director',   label: 'Director / HR', blurb: 'everything, and can edit' }
+];
 
-/* What the database sends in place of a figure a supervisor may not see. */
-const HIDDEN = '##hidden##';
-const isHidden = v => v === HIDDEN;
+/**
+ * Ask for the director code, where one is set. Returns true to go ahead.
+ * A speed bump against accidents, and it is described as one on screen.
+ */
+function passesDirectorCheck(role) {
+  if (role !== 'director' || isDirector()) return true;
+  if (!SITE.directorPin) return true;
+  const given = prompt('Director code:');
+  if (given === null) return false;
+  if (given !== String(SITE.directorPin)) { toast('Wrong code'); return false; }
+  return true;
+}
+
+/** The link that sets up somebody else's phone, key and all. */
+function setupLink() {
+  return location.origin + location.pathname +
+    '#/join?u=' + encodeURIComponent(S.supabaseUrl) +
+    '&k=' + encodeURIComponent(S.supabaseKey);
+}
 
 /* =====================================================================
    Data, held in memory only
@@ -741,9 +640,9 @@ function forgetData() {
 
 async function rest(path, opts) {
   const o = opts || {};
-  const t = await Auth.token();
-  const headers = Object.assign({ apikey: C.key, Authorization: 'Bearer ' + t }, o.headers || {});
-  const res = await fetch(`${C.url}/rest/v1/${path}`, Object.assign({}, o, { headers }));
+  const headers = Object.assign(
+    { apikey: S.supabaseKey, Authorization: 'Bearer ' + S.supabaseKey }, o.headers || {});
+  const res = await fetch(`${S.supabaseUrl}/rest/v1/${path}`, Object.assign({}, o, { headers }));
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.json()).message || ''; } catch (e) {}
@@ -759,10 +658,7 @@ const Store = {
     const [staff, companies, sections, files] = await Promise.all([
       rest('staff?select=*&order=last_name.asc,first_name.asc'),
       rest('companies?select=*&order=name.asc'),
-      // Read through the view, never the table: it is what replaces the
-      // pay figures with HIDDEN for a supervisor. Writes still go to the
-      // table itself, and only a director gets that far.
-      rest('profile_sections_v?select=*'),
+      rest('profile_sections?select=*'),
       rest('profile_files?select=*&order=created_at.desc')
     ]);
     DB.staff = staff || [];
@@ -844,15 +740,14 @@ const Store = {
    * from a supervisor while leaving them the PDF would prove nothing.
    */
   async upload(owner, sectionKey, file) {
-    const t = await Auth.token();
     const clean = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-90);
     const tile = String(sectionKey || 'other').replace(/[^\w\-]+/g, '');
     const path = `${owner.kind}/${owner.id}/${tile}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${clean}`;
-    const res = await fetch(`${C.url}/storage/v1/object/staff-files/${encodePath(path)}`, {
+    const res = await fetch(`${S.supabaseUrl}/storage/v1/object/staff-files/${encodePath(path)}`, {
       method: 'POST',
       headers: {
-        apikey: C.key,
-        Authorization: 'Bearer ' + t,
+        apikey: S.supabaseKey,
+        Authorization: 'Bearer ' + S.supabaseKey,
         'Content-Type': file.type || 'application/octet-stream',
         'x-upsert': 'true'
       },
@@ -864,15 +759,15 @@ const Store = {
 
   /** A link that works for a few minutes and then stops working. */
   async signedUrl(storagePath, seconds) {
-    const t = await Auth.token();
-    const res = await fetch(`${C.url}/storage/v1/object/sign/staff-files/${encodePath(storagePath)}`, {
+    const res = await fetch(`${S.supabaseUrl}/storage/v1/object/sign/staff-files/${encodePath(storagePath)}`, {
       method: 'POST',
-      headers: { apikey: C.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+      headers: { apikey: S.supabaseKey, Authorization: 'Bearer ' + S.supabaseKey,
+                 'Content-Type': 'application/json' },
       body: JSON.stringify({ expiresIn: seconds || 300 })
     });
     if (!res.ok) throw new Error('Could not open that document');
     const d = await res.json();
-    return C.url + '/storage/v1' + d.signedURL;
+    return S.supabaseUrl + '/storage/v1' + d.signedURL;
   },
 
   /**
@@ -889,9 +784,9 @@ const Store = {
   },
 
   async removeFile(storagePath) {
-    const t = await Auth.token();
-    await fetch(`${C.url}/storage/v1/object/staff-files/${encodePath(storagePath)}`, {
-      method: 'DELETE', headers: { apikey: C.key, Authorization: 'Bearer ' + t }
+    await fetch(`${S.supabaseUrl}/storage/v1/object/staff-files/${encodePath(storagePath)}`, {
+      method: 'DELETE',
+      headers: { apikey: S.supabaseKey, Authorization: 'Bearer ' + S.supabaseKey }
     });
   }
 };
@@ -901,7 +796,7 @@ const encodePath = p => p.split('/').map(encodeURIComponent).join('/');
 function localName(table) {
   return { profile_sections: 'sections', profile_files: 'files', staff_audit: 'audit' }[table] || table;
 }
-const whoAmI = () => (Auth.me && Auth.me.name) || (Auth.session && Auth.session.email) || '';
+const whoAmI = () => S.name || ROLE_LABEL[S.role] || 'Someone';
 
 /** Records who changed what. Never blocks the change itself. */
 function note(owner, entity, action, summary) {
@@ -911,7 +806,7 @@ function note(owner, entity, action, summary) {
     body: JSON.stringify({
       id: uid(),
       actor: whoAmI(),
-      actor_email: (Auth.session && Auth.session.email) || '',
+      actor_email: '',
       staff_id:   owner && owner.kind === 'staff' ? owner.id : null,
       company_id: owner && owner.kind === 'company' ? owner.id : null,
       entity: entity || '', action: action || '', summary: summary || ''
@@ -1189,8 +1084,17 @@ function companyState(company) {
    Routing
    ===================================================================== */
 function parseHash() {
-  const raw = (location.hash || '#/').replace(/^#/, '');
-  const parts = raw.split('/').filter(Boolean).map(decodeURIComponent);
+  let raw = (location.hash || '#/').replace(/^#/, '');
+
+  // A setup link carries its details as `#/join?u=…&k=…`. Cut the query off
+  // before splitting, or the whole lot arrives as one path segment and the
+  // route never matches. joinDetails() reads those values separately.
+  const q = raw.indexOf('?');
+  if (q >= 0) raw = raw.slice(0, q);
+
+  const parts = raw.split('/').filter(Boolean).map(part => {
+    try { return decodeURIComponent(part); } catch (e) { return part; }
+  });
   return { path: parts[0] || '', args: parts.slice(1) };
 }
 function go(hash) { location.hash = hash; }
@@ -1216,24 +1120,11 @@ function render() {
 
   if (currentPath !== null) scrollMemory[currentPath] = window.scrollY;
 
-  // Nothing private is shown until all of these pass.
+  // A setup link, which carries the connection details. Checked before
+  // "am I connected", because this is how a phone gets connected.
+  if (path === 'join') return renderJoin(view);
+
   if (!configured()) return renderNeedsConfig(view);
-  if (joining)       return renderJoining(view);
-
-  // Opened with a setup link. Handled here rather than at start-up so it
-  // also works on the way out of the "not connected yet" screen.
-  //
-  // Paint the waiting screen BEFORE starting the work: a link that fails
-  // its first sanity check finishes without ever awaiting, so painting
-  // afterwards would wipe the error it just put on screen.
-  if (path === 'join' && args[0]) {
-    joining = true;
-    renderJoining(view);
-    joinWithLink(args[0]);
-    return;
-  }
-
-  if (!signedIn())   return renderGate(view);
   if (locked)        return renderLocked(view);
 
   $('#topbar').hidden = false;
@@ -1274,8 +1165,9 @@ function renderNeedsConfig(view) {
     <div class="gate"><div class="gate-card">
       <div class="gate-mark">${icon('lock')}</div>
       <h1>Not connected yet</h1>
-      <p class="lede">This app needs the Supabase project details before anyone can sign in.
-        Put them in <b>config.js</b>, or enter them here for this device.</p>
+      <p class="lede">The quickest way is to ask someone who already has RCK People for a
+        <b>setup link</b> — one tap and this phone is done. Otherwise enter the two details
+        by hand.</p>
       <label class="field"><span>Project URL</span>
         <input type="text" id="cfgUrl" placeholder="https://abcdefgh.supabase.co" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Anon public key</span>
@@ -1288,164 +1180,109 @@ function renderNeedsConfig(view) {
   $('#cfgSave').onclick = () => {
     const url = $('#cfgUrl').value.trim(), key = $('#cfgKey').value.trim();
     if (!url || !key) return toast('Both the URL and the key are needed.');
-    Conn.write(url, key);
+    S.save({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key });
+    loaded = false;
     render();
   };
 }
 
 /* =====================================================================
-   Joining with a link
-   ===================================================================== */
-let joining = false;
-let joinError = '';
+   Screen — one-tap setup from a link
 
-function renderJoining(view) {
-  $('#topbar').hidden = true;
-  $('#menu').hidden = true;
-  view.innerHTML = `
-    <div class="gate"><div class="gate-card center">
-      <div class="gate-mark" style="margin:0 auto 16px">${icon('spin', 'spin')}</div>
-      <h1>Setting up</h1>
-      <p class="lede">One moment — this only happens once on this phone.</p>
-    </div></div>`;
+   The connection details ride in the URL's hash, which browsers never
+   send to the web server, so the key stays off the published site even
+   while it is being passed around.
+   ===================================================================== */
+function joinDetails() {
+  // The hash looks like  #/join?u=...&k=...
+  const raw = (location.hash || '').replace(/^#/, '');
+  const q = raw.indexOf('?');
+  const out = {};
+  if (q < 0) return out;
+  raw.slice(q + 1).split('&').forEach(pair => {
+    const i = pair.indexOf('=');
+    if (i < 0) return;
+    try { out[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, ' ')); }
+    catch (e) { /* a mangled link, handled below */ }
+  });
+  return out;
 }
 
-/**
- * Sign this device in from the link it was opened with, then take the
- * link back out of the address bar so it isn't left sitting in the
- * browser history for the next person to find.
- */
-async function joinWithLink(payload) {
-  joinError = '';          // `joining` is already set, and the waiting
-                           // screen already painted, by render()
+function renderJoin(view) {
+  $('#topbar').hidden = true;
+  $('#menu').hidden = true;
 
-  const cleanUrl = () => {
-    try { history.replaceState(null, '', location.pathname + location.search + '#/'); }
-    catch (e) { location.hash = '#/'; }
-  };
+  const d = joinDetails();
+  const url = (d.u || '').replace(/\/+$/, '');
+  const key = d.k || '';
 
-  const details = Link.read(payload);
-  if (!details) {
-    joining = false;
-    cleanUrl();
-    joinError = 'That link is damaged. Ask for a fresh one.';
-    render();
+  if (!url || !key) {
+    view.innerHTML = `
+      <div class="gate"><div class="gate-card">
+        <div class="gate-mark">${icon('lock')}</div>
+        <h1>That link is incomplete</h1>
+        <p class="lede">Ask whoever sent it to share it again from
+          <b>Settings → Set up someone else's phone</b>, or enter the details by hand.</p>
+        <button class="btn wide" id="byHand">Enter them by hand</button>
+      </div></div>`;
+    $('#byHand').onclick = () => { location.hash = '#/'; };
     return;
   }
-
-  try {
-    await Auth.signIn(details.e, details.p);
-    await Auth.loadMe();
-    cleanUrl();
-    joining = false;
-    locked = false;
-    loaded = false;
-    Idle.touch();
-    render();
-    toast('This phone is set up. ' + (ROLE_LABEL[myRole()] || '') + ' access.');
-  } catch (e) {
-    Auth.wipe();
-    joining = false;
-    cleanUrl();
-    joinError = e.notMember
-      ? 'That link works but its account is not on the staff list. Ask whoever set this up.'
-      : /invalid login/i.test(e.message || '')
-        ? 'That link has been replaced. Ask for the current one.'
-        : (e.message || 'Could not set this phone up.');
-    render();
-  }
-}
-
-let gateMode = 'signin';   // signin | reset
-
-function renderGate(view) {
-  $('#topbar').hidden = true;
-  $('#menu').hidden = true;
-
-  const email = Auth.lastEmail();
-  const reset = gateMode === 'reset';
 
   view.innerHTML = `
     <div class="gate"><div class="gate-card">
       <div class="gate-mark">${icon('people')}</div>
-      <h1>RCK People</h1>
-      <p class="lede">${reset
-        ? 'Enter the account email and we will send a link to set a new password.'
-        : 'Staff information and compliance.'}</p>
+      <h1>Set up RCK People</h1>
+      <p class="lede">This links your phone to the shared staff records. You only do it once.</p>
 
-      ${joinError ? `<div class="banner status-red">${esc(joinError)}</div>` : ''}
+      <label class="field"><span>Your name</span>
+        <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
 
-      ${reset ? '' : `<div class="banner info">Most people never see this screen — you are
-        sent a link that sets your phone up in one tap. If you were sent one, open it again.
-        This is for whoever set the app up.</div>`}
+      <label class="field"><span>You are</span>
+        <select id="jRole">
+          ${ROLES.map(r => `<option value="${r.key}">${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
+        </select></label>
 
-      <label class="field"><span>Email</span>
-        <input type="email" id="gEmail" value="${esc(email)}" autocomplete="username"
-               autocapitalize="off" spellcheck="false" placeholder="you@rcknz.co.nz"></label>
+      <button class="btn primary wide" id="jGo">Connect</button>
+      <div id="jOut"></div>
 
-      ${reset ? '' : `
-      <label class="field"><span>Password</span>
-        <input type="password" id="gPass" autocomplete="current-password" placeholder="••••••••"></label>`}
-
-      <button class="btn primary wide" id="gGo">${reset ? 'Send reset link' : 'Sign in'}</button>
-      <div id="gErr"></div>
-
-      <div class="center" style="margin-top:14px">
-        <button class="linkbtn" id="gSwap">${reset ? 'Back to sign in' : 'Forgotten your password?'}</button>
-      </div>
-
-      <p class="foot">There are two accounts for the whole company — one director, one
-        supervisor — created in Supabase. Everyone else joins with a link.</p>
+      <p class="foot">Afterwards use <b>Add to Home Screen</b> in your browser's share menu,
+        and it opens like a normal app.</p>
     </div></div>`;
 
-  const err = m => { $('#gErr').innerHTML = `<div class="banner status-red" style="margin-top:12px">${esc(m)}</div>`; };
-  $('#gSwap').onclick = () => { gateMode = reset ? 'signin' : 'reset'; render(); };
+  $('#jGo').onclick = async function () {
+    const name = $('#jName').value.trim();
+    const role = $('#jRole').value;
+    if (!name) return toast('Enter your name');
+    if (!passesDirectorCheck(role)) return;
 
-  const submit = async () => {
-    const btn = $('#gGo');
-    const emailV = $('#gEmail').value.trim();
-    joinError = '';
-    if (!emailV) return err('Enter the account email.');
+    this.disabled = true;
+    this.textContent = 'Connecting…';
+    const out = $('#jOut');
 
-    btn.disabled = true;
-    btn.textContent = reset ? 'Sending…' : 'Signing in…';
     try {
-      if (reset) {
-        await Auth.resetPassword(emailV);
-        $('#gErr').innerHTML = `<div class="banner status-green" style="margin-top:12px">
-          If that address has an account, a reset link is on its way.</div>`;
-        btn.textContent = 'Send reset link';
-        btn.disabled = false;
-        return;
-      }
-      const pass = $('#gPass').value;
-      if (!pass) { btn.disabled = false; btn.textContent = 'Sign in'; return err('Enter your password.'); }
+      // Prove the details work before keeping them, so nobody is left with
+      // a phone that looks set up and isn't.
+      const res = await fetch(`${url}/rest/v1/staff?select=id&limit=1`, {
+        headers: { apikey: key, Authorization: 'Bearer ' + key }
+      });
+      if (!res.ok) throw new Error(res.status === 401 || res.status === 403
+        ? 'Those details were not accepted. Ask for a fresh link.'
+        : 'Could not reach the database (' + res.status + ').');
 
-      await Auth.signIn(emailV, pass);
-      await Auth.loadMe();
-      Idle.touch();
+      S.save({ name, role, supabaseUrl: url, supabaseKey: key });
       loaded = false;
-      go('#/');
+      locked = false;
+      history.replaceState(null, '', location.pathname + location.search + '#/');
       render();
+      toast('This phone is set up.');
     } catch (e) {
-      Auth.wipe();
-      btn.disabled = false;
-      btn.textContent = reset ? 'Send reset link' : 'Sign in';
-      if (e.notMember) {
-        err('That account exists but is not on the staff list. Ask whoever set this up to add you.');
-      } else if (/invalid login/i.test(e.message)) {
-        err('Wrong email or password.');
-      } else if (/email not confirmed/i.test(e.message)) {
-        err('That account has not been confirmed yet. Check your email for the invitation.');
-      } else {
-        err(e.message || 'Could not sign in.');
-      }
+      this.disabled = false;
+      this.textContent = 'Connect';
+      out.innerHTML = `<div class="banner status-red" style="margin-top:12px">${
+        esc(e.message || 'Could not connect. Check you have signal and try again.')}</div>`;
     }
   };
-
-  $('#gGo').onclick = submit;
-  view.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
-  setTimeout(() => { const f = email ? $('#gPass') : $('#gEmail'); if (f) f.focus(); }, 60);
 }
 
 /* =====================================================================
@@ -1460,21 +1297,19 @@ const Idle = {
     Idle.timer = setInterval(() => {
       const mins = Number(SITE.idleLockMinutes);
       if (!Number.isFinite(mins) || mins <= 0) return;
-      if (!signedIn()) return;
-      if (Date.now() - Idle.last > mins * 60000) lock('Locked after ' + plural(mins, 'minute') + ' idle.');
+      if (!configured() || locked) return;
+      if (Date.now() - Idle.last > mins * 60000) lock('Screen cleared after ' + plural(mins, 'minute') + ' idle.');
     }, 20000);
   }
 };
 
 /**
- * Clear the screen, without throwing anyone out.
+ * Clear the screen.
  *
- * Nobody here has a password of their own to type back in — they joined
- * with a link — so locking cannot mean "sign in again". What it does is
- * take the staff data off the screen and out of memory, which is the
- * thing that actually matters when a phone is left on a seat or a
- * laptop is left open in the office. Carrying on is one tap, and fetches
- * everything fresh.
+ * There is nobody to sign out — this app has no logins. What this does is
+ * take the staff details off the screen and out of memory, which is what
+ * actually matters when a phone is left face-up on a seat. Carrying on is
+ * one tap, and fetches everything fresh.
  */
 function lock(why) {
   forgetData();
@@ -1495,11 +1330,11 @@ function renderLocked(view) {
   view.innerHTML = `
     <div class="gate"><div class="gate-card center">
       <div class="gate-mark" style="margin:0 auto 16px">${icon('lock')}</div>
-      <h1>Locked</h1>
+      <h1>Screen cleared</h1>
       <p class="lede">Staff details are off the screen. Nothing was lost.</p>
       <button class="btn primary wide" id="unlockBtn">Carry on</button>
-      <p class="foot">Locks itself again after a while with nothing happening.
-        To hand this phone to someone else for good, use Settings → Sign out.</p>
+      <p class="foot">Clears itself again after a while with nothing happening.
+        To hand this phone on for good, use Settings → Disconnect this phone.</p>
     </div></div>`;
   $('#unlockBtn').onclick = unlock;
 }
@@ -1584,11 +1419,12 @@ function fieldHtml(f, value, opts) {
   const want = f.want && !o.noWant ? ' want' : '';
   const lab = `<span>${esc(f.label)}</span>`;
 
-  /* A figure this account is not allowed to see. Say so plainly rather
-     than showing an empty box, which would read as "nobody filled it in". */
-  if (isHidden(value)) {
+  /* A pay figure, on a phone that is not in director mode. Say it is on
+     file rather than showing an empty box, which would read as "nobody
+     filled it in" and would drag the tile red for no reason. */
+  if (f.sensitive && !canSeePay()) {
     return `<label class="field">${lab}
-      <span class="hidden-val">${icon('lock')} Recorded — directors only</span></label>`;
+      <span class="hidden-val">${icon('lock')} On file — director mode only</span></label>`;
   }
   const plain = f.plain ? ' autocapitalize="off" spellcheck="false"' : '';
   const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
@@ -1656,7 +1492,7 @@ function readFields(root, fields) {
 
 /** Read a value back for display, in whatever form it was stored. */
 function showValue(f, value) {
-  if (isHidden(value)) return 'Recorded — directors only';
+  if (f.sensitive && !canSeePay()) return 'On file — director mode only';
   if (!hasValue(value)) return '—';
   if (f.type === 'picks') {
     const list = Array.isArray(value) ? value : String(value).split(',');
@@ -2708,156 +2544,96 @@ function editCompany(co) {
    ===================================================================== */
 function renderSettings(view) {
   const mins = Number(SITE.idleLockMinutes);
+
   view.innerHTML = `
     <div class="card">
       <h2>This phone</h2>
-      <div class="kv" style="margin-top:12px">
-        <div><div class="k">Access</div><div class="v small">${esc(ROLE_LABEL[myRole()] || myRole())}</div></div>
-        <div><div class="k">Account</div><div class="v small ellip">${esc((Auth.session || {}).email || '')}</div></div>
+      <p class="sub" style="margin-top:4px">Your name goes against anything you change, so a
+        record shows who did what.</p>
+      <div style="margin-top:14px">
+        ${fieldHtml({ name: 'sName', label: 'Your name' }, S.name)}
+        ${fieldHtml({ name: 'sRole', label: 'You are', type: 'select', noBlank: true,
+                      options: ROLES.map(r => ({ key: r.key, label: r.label + ' — ' + r.blurb })) }, S.role)}
       </div>
-      <p class="sub" style="margin-top:10px">${canSeePay()
-        ? 'A director sees everything, pay included, and can change it.'
-        : 'A supervisor sees everything except pay, and cannot change anything.'}</p>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn sm ghost" id="outBtn">Sign out this phone</button>
-      </div>
+      <button class="btn primary wide" id="saveMe">Save</button>
+      <p class="sub" style="margin-top:12px">${isDirector()
+        ? 'Director mode: you see pay and can change records.'
+        : 'Supervisor mode: you see everything except pay, and cannot change records.'}</p>
     </div>
 
-    ${canEdit() ? `<div class="card">
-      <h2>Set up someone's phone</h2>
-      <p class="sub" style="margin-top:4px">Make a link, send it to them, and one tap sets their
-        phone up — no password for them to type or lose. Make it once per role and reuse it:
-        the same supervisor link works for every supervisor.</p>
-      <div class="banner status-orange" style="margin-top:12px">The link is the password.
-        Anyone it reaches, and anyone they forward it to, gets in. Send it person to person,
-        never to a group everyone can read.</div>
-      <button class="btn wide" id="mkLink">${icon('link')} Make a setup link</button>
-    </div>` : ''}
+    <div class="card">
+      <h2>Set up someone else's phone</h2>
+      <p class="sub" style="margin-top:4px">Send them this link. One tap connects their phone —
+        there is nothing for them to type.</p>
+      <label class="field" style="margin-top:12px"><span>Setup link</span>
+        <textarea id="sLink" rows="3" readonly onclick="this.select()">${esc(setupLink())}</textarea></label>
+      <div class="btn-row">
+        <button class="btn primary" id="copyLink">Copy the link</button>
+        <button class="btn ghost" id="shareLink">Share</button>
+      </div>
+      <div class="banner status-orange" style="margin-top:14px">This link carries the key to the
+        staff records. Treat it like a key to the office — send it person to person, and only to
+        RCK people. Anyone who has it is in.</div>
+    </div>
 
     <div class="card">
-      <h2>This device</h2>
-      <p class="sub" style="margin-top:4px">Staff data is never written to this device. It is held
-        in memory while the screen is unlocked and gone the moment you lock, sign out or reload.
-        Documents are fetched through links that stop working after a few minutes.</p>
+      <h2>Staff details on this device</h2>
+      <p class="sub" style="margin-top:4px">Nothing is written to this phone. Staff details are
+        held only while the screen is awake and are gone the moment it locks or you reload.</p>
       <div class="kv" style="margin-top:12px">
         <div><div class="k">Clears the screen after</div><div class="v small">${
           Number.isFinite(mins) && mins > 0 ? plural(mins, 'minute') + ' idle' : 'never'}</div></div>
         <div><div class="k">Version</div><div class="v small">${esc(VERSION)}</div></div>
       </div>
-      <p class="sub" style="margin-top:10px">Locking takes the staff details off the screen.
-        Carrying on afterwards is one tap — there is no password to type back in.</p>
-      <button class="btn sm ghost wide" id="lockNow" style="margin-top:12px">${icon('lock')} Lock now</button>
+      <button class="btn sm ghost wide" id="lockNow" style="margin-top:12px">${icon('lock')} Clear the screen now</button>
     </div>
 
     <div class="card">
       <h2>Connection</h2>
-      <p class="sub" style="margin-top:4px">${esc(C.url || 'Not set')}</p>
+      <p class="sub" style="margin-top:4px">${esc(S.supabaseUrl || 'Not set')}</p>
       <p class="sub" style="margin-top:8px">${SITE.supabaseUrl
-        ? 'Set in config.js, so every device is connected automatically.'
-        : 'Entered on this device. Put it in config.js to save doing it on each one.'}</p>
-      ${SITE.supabaseUrl ? '' : `<button class="btn sm ghost wide" id="forget" style="margin-top:12px">Forget these details</button>`}
+        ? 'Set in config.js, so every phone is connected automatically.'
+        : 'Entered on this phone, and kept here only — it is never on the published page.'}</p>
+      ${SITE.supabaseUrl ? '' : `<button class="btn sm ghost wide" id="forget" style="margin-top:12px">Disconnect this phone</button>`}
     </div>`;
 
-  $('#outBtn').onclick = () => confirmSheet('Sign this phone out?',
-    'It will need a fresh setup link before it can be used again.', 'Sign out',
-    async () => { await Auth.signOut(); render(); toast('Signed out.'); });
+  $('#saveMe').onclick = () => {
+    const name = $('[data-f="sName"]').value.trim();
+    const role = $('[data-f="sRole"]').value;
+    if (!name) return toast('Enter your name');
+    if (!passesDirectorCheck(role)) { $('[data-f="sRole"]').value = S.role; return; }
+    S.save({ name, role });
+    render();
+    toast('Saved.');
+  };
 
-  $('#lockNow').onclick = () => lock('Locked.');
+  $('#lockNow').onclick = () => lock('Screen cleared.');
 
-  const mk = $('#mkLink');
-  if (mk) mk.onclick = makeSetupLink;
+  $('#copyLink').onclick = async () => {
+    const box = $('#sLink');
+    try { await navigator.clipboard.writeText(setupLink()); toast('Copied. Send it to them directly.'); }
+    catch (e) { box.focus(); box.select(); toast('Press and hold to copy it.'); }
+  };
+
+  $('#shareLink').onclick = async () => {
+    const link = setupLink();
+    if (navigator.share) {
+      try { await navigator.share({ title: 'RCK People setup', text: 'Tap this to set up RCK People on your phone', url: link }); }
+      catch (e) { /* they backed out of the share sheet */ }
+    } else {
+      try { await navigator.clipboard.writeText(link); toast('Copied.'); }
+      catch (e2) { toast('Copy it from the box above.'); }
+    }
+  };
 
   const forget = $('#forget');
-  if (forget) forget.onclick = () => confirmSheet('Forget the connection details?',
-    'This device will ask for the Supabase URL and key again next time.', 'Forget them', () => {
-      localStorage.removeItem('rckp.conn');
-      Auth.wipe();
-      C = Conn.read();
+  if (forget) forget.onclick = () => confirmSheet('Disconnect this phone?',
+    'It will need a setup link again before it can show anything.', 'Disconnect', () => {
+      S.forget();
+      forgetData();
       render();
+      toast('Disconnected.');
     });
-}
-
-/**
- * Build the link that sets up somebody's phone.
- *
- * It asks for the shared account's email and password rather than
- * remembering them, because the only safe place for that password is in
- * the head of whoever set the app up — not in this repository, which is
- * public, and not in a browser store on one director's laptop.
- */
-function makeSetupLink() {
-  sheet(`
-    <h2>Make a setup link</h2>
-    <p class="sub">Enter one of the two shared accounts you created in Supabase. Whether the
-      person ends up a director or a supervisor is decided by which account you use.</p>
-    ${fieldHtml({ name: 'lEmail', label: 'Account email', plain: true,
-                  placeholder: 'rck-supervisor@rcknz.co.nz' }, '')}
-    ${fieldHtml({ name: 'lPass', label: 'That account\'s password', plain: true }, '')}
-    <div class="btn-row">
-      <button class="btn ghost" data-no>Cancel</button>
-      <button class="btn primary" data-yes>Make the link</button>
-    </div>
-    <div id="linkOut" style="margin-top:14px"></div>`, (el, close) => {
-    $('[data-no]', el).onclick = close;
-
-    $('[data-yes]', el).onclick = async () => {
-      const email = $('[data-f="lEmail"]', el).value.trim();
-      const pass  = $('[data-f="lPass"]', el).value;
-      if (!email || !pass) return toast('Both the email and the password are needed.');
-
-      const btn = $('[data-yes]', el);
-      btn.disabled = true;
-      btn.textContent = 'Checking…';
-
-      /* Check it actually works before handing it out, so nobody is sent
-         a link that fails on a job site. Done on a throwaway request so
-         this device stays signed in as whoever it already was. */
-      let role = null;
-      try {
-        const d = await Auth.call('token?grant_type=password', { email, password: pass });
-        const rows = await fetch(`${C.url}/rest/v1/staff_users?select=role&id=eq.${encodeURIComponent(d.user.id)}`, {
-          headers: { apikey: C.key, Authorization: 'Bearer ' + d.access_token }
-        }).then(r => r.json());
-        role = rows && rows[0] && rows[0].role;
-        if (!role) throw new Error('not-on-list');
-      } catch (e) {
-        btn.disabled = false;
-        btn.textContent = 'Make the link';
-        return toast(/not-on-list/.test(e.message)
-          ? 'That account signs in but is not on the staff list. Run staff_grant for it first.'
-          : 'That email and password did not work.');
-      }
-
-      const url = Link.make(email, pass);
-      $('#linkOut', el).innerHTML = `
-        <div class="banner status-green">A <b>${esc(ROLE_LABEL[role] || role)}</b> link.
-          Anyone who opens it gets ${role === 'director'
-            ? 'full access, pay included' : 'everything except pay, read only'}.</div>
-        <label class="field"><span>The link</span>
-          <textarea id="linkText" rows="3" readonly>${esc(url)}</textarea></label>
-        <div class="btn-row">
-          <button class="btn" id="copyLink">Copy the link</button>
-          <button class="btn ghost" data-done>Done</button>
-        </div>`;
-
-      $('[data-done]', el).onclick = close;
-      $('#copyLink', el).onclick = async () => {
-        const box = $('#linkText', el);
-        try {
-          await navigator.clipboard.writeText(url);
-          toast('Copied. Send it to them directly.');
-        } catch (e) {
-          box.focus();
-          box.select();
-          toast('Press and hold to copy it.');
-        }
-      };
-      btn.disabled = false;
-      btn.textContent = 'Make another';
-    };
-
-    $('[data-f="lPass"]', el).type = 'password';
-  });
 }
 
 /* =====================================================================
@@ -2977,19 +2753,8 @@ async function boot() {
   render();
 }
 
-async function start() {
-  Auth.load();
-
-  if (configured() && Auth.session) {
-    try {
-      await Auth.token();     // refreshes if it has gone stale
-      await Auth.loadMe();
-    } catch (e) {
-      Auth.wipe();            // expired, revoked, or taken off the list
-    }
-  }
-
-  // render() starts the first load itself when there is a session, so
+function start() {
+  // render() starts the first load itself once the phone is connected, so
   // there is deliberately no boot() call here — two would fetch twice.
   render();
 
@@ -2997,18 +2762,8 @@ async function start() {
   ['click', 'keydown', 'touchstart', 'scroll'].forEach(ev =>
     window.addEventListener(ev, Idle.touch, { passive: true }));
 
-  // Re-check the session when the tab comes back after being away.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && signedIn()) {
-      Idle.touch();
-      // A refresh token that no longer works means the shared password has
-      // been changed. Locking would be no help — they need a fresh link.
-      Auth.token().catch(() => {
-        Auth.wipe();
-        joinError = 'This phone has been signed out. Ask for a fresh setup link.';
-        render();
-      });
-    }
+    if (document.visibilityState === 'visible') Idle.touch();
   });
 }
 
@@ -3033,7 +2788,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $$('#menu [data-go]').forEach(b => {
     b.onclick = () => { $('#menu').hidden = true; go(b.dataset.go); };
   });
-  $('#lockBtn').onclick = () => { $('#menu').hidden = true; lock('Locked.'); };
+  $('#lockBtn').onclick = () => { $('#menu').hidden = true; lock('Screen cleared.'); };
 
   start();
 });

@@ -118,99 +118,99 @@ business, machinery, licence classes.
 
 ## Who gets in, and what they see
 
-Nobody has an account of their own. There are **two accounts for the whole
-company**, and everyone joins by opening a link on their phone.
+No logins, no accounts, no passwords — the same arrangement as
+[RCK Workshop](../) and [RCK Dispatch](../dispatch/). Every phone shares one
+key, and a phone is set up by tapping a link.
 
-| | Director | Supervisor |
+Each phone is in one of two modes, chosen when it is set up and changeable in
+Settings:
+
+| | Supervisor | Director / HR |
 |---|---|---|
 | Everyone's record, tiles, documents, compliance | Yes | Yes |
-| Wage, salary, bank account, charge rates | Yes | **No** |
-| The signed contract and account paperwork | Yes | **No** — the pay is written inside them |
-| Adding people, filling tiles, uploading, deleting | Yes | **No** |
+| Wage, salary, bank account, charge rates | **No** | Yes |
+| The signed contract & account paperwork | **No** | Yes |
+| Adding people, filling tiles, uploading | **No** | Yes |
 
-**The director account** is for the director and the HR manager. It sees
-everything and can change everything.
+**Supervisor** is the default: every person, every tile, every date and every
+compliance percentage — everything needed to know whether someone can be sent
+to a site — but no money, and nothing can be changed. Where a wage would be,
+the tile says *On file — director mode only*. Both modes show the same
+compliance percentage, so nobody is working off a different number.
 
-**The supervisor account** is for the supervisors. They see every person,
-every tile, every date and every compliance percentage — everything they need
-to know whether someone can be sent to a site — but no money, and they cannot
-change anything.
+**Director** is for you and the HR manager. Everything, and editing.
 
-A supervisor sees the contract tile, sees that it is complete, and sees the
-start date, role and sector on it. Where the wage would be, it says
-*Recorded — directors only*. The compliance percentage is identical for both
-roles, so nobody is looking at a different number.
+### Be clear about what that split is
+
+It is a **speed bump, not secrecy** — exactly like the office code in RCK
+Dispatch, which does the same job for job margins.
+
+Switching to director mode asks for `directorPin` from `config.js`, if you set
+one. But that file is public, and there are no logins, so **anyone holding the
+setup link can read the pay straight out of the database** whatever this app
+chooses to show them. What the split actually buys you is a simple screen for
+the crew and no accidental edits from a site phone.
+
+**The key is the real protection.** That is why `config.js` is left blank and
+the key only ever travels in a setup link. Treat that link the way you would
+treat a key to the office.
+
+If pay must be genuinely secret from supervisors rather than merely out of
+sight, this needs one real account for the director, with the pay behind it.
+It is about thirty seconds of extra setup and the code for it is written; ask
+and it goes back in.
 
 ### Handing out the link
 
-In the app, as a director: **⋮ → Settings → Set up someone's phone**. Enter
-one of the two shared accounts, and it checks the password works before giving
-you a link. Send that link to whoever needs it, they open it once, and their
-phone is set up — no password for them to type, remember or lose.
+On a phone that already has the app: **⋮ → Settings → Set up someone else's
+phone → Copy the link** (or **Share**, which opens the phone's own share
+sheet). Send it to them, they tap it once, put in their name and whether they
+are a supervisor or a director, and they're done.
 
-Make it once per role and reuse it. The same supervisor link works for every
-supervisor, this year and next.
+Same link for everybody, and it keeps working. Only send it to RCK people, and
+person to person rather than into a group chat everyone can scroll back
+through.
 
-**The link is the password.** Anyone it reaches, and anyone they forward it
-to, gets that level of access. Send it person to person, not to a group chat
-everyone can scroll back through. The details ride in the part of the URL
-after the `#`, which browsers never send to a web server, so it will not turn
-up in a server log — but that is the only thing it protects against.
-
-**To cut somebody off** — a supervisor leaves, or a link goes astray — change
-that account's password in Supabase (**Authentication → Users**) and hand out
-a fresh link to everyone still in that role. There is no way to revoke one
-phone on its own; that is the trade for nobody having their own password.
+**To cut everyone off** — a link goes astray, someone leaves with a phone —
+generate a new anon key in Supabase (**Settings → API → rotate**), then send a
+fresh setup link round. There's no way to revoke one phone on its own; that's
+the trade for nobody having a password.
 
 ---
 
 ## How this is kept private
 
-This holds contracts, pay, bank accounts and dates of birth, so:
+- **The key never appears on the published page.** `config.js` is blank on
+  purpose. A stranger who finds the URL gets a *Not connected yet* screen and
+  nothing else.
+- **The setup link keeps the key after the `#`**, which browsers never send to
+  a web server, so it doesn't turn up in a server log.
+- **Staff details are never written to the phone.** There is no offline cache.
+  They live in memory while the screen is awake and are gone the moment it
+  clears or you reload. (Compare the workshop app, which caches everything so
+  it works with no signal — right for a truck, wrong for an HR file.)
+- **Documents sit in a private bucket.** There is no public URL. The app mints
+  a link that works for a few minutes and then doesn't, shows the file inside
+  the app, and throws it away when you close it. That keeps contracts off
+  search engines; it does not hide them from someone holding the key.
+- **The screen clears itself** after 20 minutes idle, so a phone left face-up
+  on a seat isn't showing somebody's file. Carrying on is one tap. Change the
+  timeout in `config.js`.
+- **Pay is left out of a printed file** unless *Include pay* is ticked.
+- **Every change is recorded** against the person, with who made it and when —
+  which is what the name on each phone is for.
 
-- **Nothing opens without one of the two accounts.** The anonymous key in
-  `config.js` reads nothing at all — a stranger who finds the page gets a
-  sign-in screen.
-- **Signing in is not enough.** The account must also be on the `staff_users`
-  list in the database, which is only editable in SQL. Nobody can grant
-  themselves access from inside the app.
-- **A supervisor cannot see pay, and this is enforced in the database, not
-  the app.** Hiding a field in the browser would prove nothing: the page is
-  public and its key is readable, so anything the app can ask for, a
-  determined person could ask for too. Instead the figures never leave the
-  database — a supervisor's rows come back through a view that has already
-  replaced them with `##hidden##`, and the storage rules refuse them the
-  contract and account documents outright.
-- **A supervisor cannot change anything**, for the same reason: the database
-  refuses their writes. The app hiding the Save button is a courtesy, not the
-  control.
-- **Staff data is never written to the device.** There is no offline cache.
-  It lives in memory while the screen is awake and is gone the moment it
-  locks, signs out or reloads.
-- **Uploaded documents sit in a private store.** There is no public URL. The
-  app mints a link that works for a few minutes and then doesn't, fetches the
-  file, shows it inside the app, and throws it away when you close it.
-- **The screen clears itself** after 20 minutes with nothing happening, so a
-  phone left on a seat isn't showing somebody's file. Carrying on afterwards
-  is one tap — there is no password to retype. Change the timeout in
-  `config.js`.
-- **Pay is left out of a printed file** unless *Include pay* is ticked, so it
-  can be handed to a supervisor as it is.
-- **Every change is recorded** against the person, with who made it and when.
-
-What this deliberately does **not** protect against: a phone that is unlocked
-and in the wrong hands, or a link forwarded to somebody who shouldn't have it.
-Both come with wanting no passwords, which is the right trade for a crew —
-but worth knowing.
-
-Because of all that it is safe for this repository and the published page to
-be public.
+What this does **not** protect against: anyone who has the setup link. There
+are no logins, so the link is the whole of it. That is the trade for a crew
+with nothing to remember, and it is the same trade the other two RCK apps
+already make — but those don't hold bank account numbers, so it is worth
+saying plainly here.
 
 ---
 
 ## Setting it up
 
-Three jobs, about half an hour, done once.
+Two jobs, about ten minutes, done once. There are no accounts to create.
 
 ### 1. The database
 
@@ -229,57 +229,24 @@ Three jobs, about half an hour, done once.
 
 The free tier is far more than this will ever need.
 
-### 2. The two accounts
+### 2. The first phone, then everyone else
 
-Done once, for the whole company. Nobody else ever needs an account.
+1. Open the app. It says **Not connected yet**. Paste in the Project URL and
+   the anon key, and it connects.
+2. Go to **⋮ → Settings**, put in your name, and set yourself to
+   **Director / HR**.
+3. Still in Settings, under **Set up someone else's phone**, copy the link and
+   send it to everyone who needs the app.
 
-1. In Supabase, go to **Authentication → Users → Add user**, and make two,
-   ticking **Auto Confirm User** on both. The addresses don't have to be real
-   mailboxes — nothing is ever emailed to them.
-
-   | Email | Password |
-   |---|---|
-   | `rck-director@rcknz.co.nz` | a long one — write it down somewhere safe |
-   | `rck-supervisor@rcknz.co.nz` | a different long one |
-
-2. Then open **SQL Editor** and run these two lines:
-
-   ```sql
-   select staff_grant('rck-director@rcknz.co.nz',   'Director',   'director');
-   select staff_grant('rck-supervisor@rcknz.co.nz', 'Supervisor', 'supervisor');
-   ```
-
-   Each tells you straight back whether it worked.
-
-Keep both passwords. You need the director one to sign in the first time, and
-you need whichever one you're handing out to make a link.
-
-### 3. The app
-
-Put the two values from step 1 into `config.js`:
-
-```js
-window.RCKP_CONFIG = {
-  supabaseUrl: 'https://abcdefgh.supabase.co',
-  supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…',
-  idleLockMinutes: 20,
-  defaultWarnDays: 60
-};
-```
-
-Commit that and the site redeploys itself. Every phone is then connected
-automatically, with nothing for anyone to type in.
-
-Now open the app yourself, sign in with the director email and password, and
-go to **⋮ → Settings → Set up someone's phone** to make the two links you hand
-out. That sign-in screen is the only time anyone types a password, and only
-you ever see it.
+That's it. If you want a code required before a phone can switch itself into
+director mode, set `directorPin` in `config.js` — read the note above first
+about what it does and doesn't do.
 
 ---
 
 ## Filling it in
 
-Signed in as the director — a supervisor can see all of this but change none
+On a phone in director mode — a supervisor can see all of this but change none
 of it.
 
 1. **Companies first**, if you use labour hire or subcontractors — ⋮ →
@@ -316,8 +283,6 @@ It installs like a normal app.
 
 ## Things worth knowing
 
-- **It needs a connection.** Unlike the workshop app there is no offline mode.
-  That is the trade for not leaving staff data on the device.
 - **Someone who leaves** should be set to **Finished**, not deleted. They drop
   off the counts and out of the list, but the record and the documents stay.
   Deleting is permanent and takes their documents with it.
@@ -327,13 +292,10 @@ It installs like a normal app.
 - **A new line has to be saved before a certificate can go on it** — there is
   nothing to attach it to until then. The tile says so.
 - **Reminders** are the colours and the counts; the app does not send email.
-- **Changing a shared password** signs out every phone using it. That is how
-  you cut someone off, but it means everyone in that role needs a fresh link
-  the same day.
-- **Adding a third kind of access** — someone who should see less than a
-  supervisor, say — means a new role in `staff_grant`, a rule for it in
-  `supabase-schema.sql`, and nothing in `app.js` beyond what to show. The
-  database is where access is decided.
+- **Nothing here is offline.** Unlike the workshop app there is no offline
+  cache, which is the trade for not leaving staff files on a phone.
+- **The name on each phone** is what goes against every change, so it is worth
+  everyone putting their own in rather than leaving it as someone else's.
 - **This is separate from [`../hr/`](../hr/)**, an earlier and differently
   shaped HR app in this repository. They share no data and no database
   tables. Use one or the other, not both.
@@ -345,6 +307,6 @@ It installs like a normal app.
 | `index.html` | Page shell |
 | `app.js` | The whole application, starting with the tile definitions |
 | `app.css` | Styling, including the printed file |
-| `config.js` | Your Supabase URL and key, and the lock timeout |
+| `config.js` | Left blank on purpose. The director code and the screen timeout |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
 | `sw.js` | Caches the app shell only — never any data |
