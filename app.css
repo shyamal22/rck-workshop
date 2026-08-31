@@ -453,6 +453,56 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 }
 
 /* =====================================================================
+   Maintenance crew
+   ===================================================================== */
+.crew-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+
+.crew-tile {
+  position: relative; overflow: hidden; text-align: left; width: 100%;
+  cursor: pointer; font: inherit; color: inherit; border: 0;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 14px 15px 15px;
+  animation: riseIn var(--t) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 16ms);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
+}
+.crew-tile::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--s);
+}
+.crew-tile:active { transform: scale(.975); box-shadow: var(--sh-1); }
+
+.avatar {
+  display: grid; place-items: center; width: 36px; height: 36px;
+  border-radius: 50%; background: var(--s-bg); color: var(--s);
+  font-size: 14px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 10px;
+}
+.avatar.big { width: 48px; height: 48px; font-size: 18px; margin: 0 14px 0 0; flex: none;
+  background: var(--panel-2); color: var(--ink); }
+
+.crew-tile .who  { display: block; font-size: 15.5px; font-weight: 700; letter-spacing: -.015em; }
+.crew-tile .load { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
+.crew-tile .flag {
+  display: inline-block; margin-top: 8px; padding: 3px 9px; border-radius: var(--r-pill);
+  background: var(--red-bg); color: var(--red); font-size: 11.5px; font-weight: 650;
+}
+.crew-tile .flag.amber { background: var(--yellow-bg); color: var(--yellow); }
+
+.crew-head { display: flex; align-items: center; }
+
+.unassigned-tile { text-align: left; }
+.unassigned-tile .ttl { font-size: 15px; }
+
+/* who holds a job, on the work order cards */
+.wo .sub .who {
+  font-weight: 650; color: var(--ink);
+  background: rgba(255, 255, 255, .72); padding: 3px 9px; border-radius: var(--r-pill);
+}
+.wo .sub .who.none { color: var(--ink-3); font-weight: 550; background: none; padding: 0; }
+
+/* the read-only counters on a person's page */
+.tally button[disabled] { opacity: 1; pointer-events: none; }
+
+/* =====================================================================
    The landing page, and the costs portal
    ===================================================================== */
 .hub { display: grid; gap: 14px; margin-top: 6vh; }

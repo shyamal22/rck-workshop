@@ -12,17 +12,33 @@ the last job is signed off the gear goes green again on its own.
 
 ---
 
-## Two sides, deliberately unconnected
+## Opening the app
 
-Opening the app lands on a choice:
+The landing page offers two doors:
 
 - **Maintenance** — gear status, damage reports, work orders, repair history.
-- **Costs** — planned and actual spend against each asset, with invoices.
+- **Maintenance crew** — who is managing which job, and how each of them is tracking.
 
-Nothing crosses between them. A repair cost recorded on a work order does **not**
-appear in the cost tracker, and a cost recorded against an asset does **not**
-change its colour or raise a work order. The only thing they share is the asset
-list itself. If a repair should show up in the cost tracker, enter it there too.
+**Costs** is still there, in the ⋮ menu rather than on the landing page. It records
+planned and actual spend per asset and stays deliberately unconnected to
+maintenance: a repair cost on a work order does **not** reach the cost tracker,
+and a cost never changes a machine's colour.
+
+## Maintenance crew
+
+Every work order has an RCK person accountable for it — **separately** from whether
+the spanners are RCK's or an external company's. A job sent to Hydraulink still has
+someone here chasing it.
+
+- The workshop sets **Managed by** on the work order. Six are preloaded — Milian,
+  Clint, Ryder, Sebastion, Lyndon and Barry — and anyone can be added, either from
+  the crew board or straight from the work order.
+- The **crew board** shows each person as a tile: open jobs, and a red flag if any
+  of them are overdue. Tapping one lists everything they hold and what they've fixed.
+- Jobs with nobody on them are pushed to the top of the crew board, since an
+  unowned job is the one that goes quiet.
+- Assigning changes nothing operationally — it doesn't touch gear colour or status.
+  It only answers who is on what.
 
 ## What it does
 

@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -187,6 +187,7 @@ const ICONS = {
   orders:  '<path d="M8 4h8a2 2 0 0 1 2 2v13.1a1 1 0 0 1-1.47.88L12 17.4l-4.53 2.58A1 1 0 0 1 6 19.1V6a2 2 0 0 1 2-2z"/><path d="M9.25 8.5h5.5"/>',
   chart:   '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   coin:    '<circle cx="12" cy="12" r="8.2"/><path d="M14.4 9.3a2.9 2.9 0 0 0-2.4-1.1c-1.5 0-2.5.8-2.5 1.9 0 2.6 5 1.3 5 3.9 0 1.1-1 1.9-2.5 1.9a2.9 2.9 0 0 1-2.5-1.2"/><path d="M12 6.6v10.8"/>',
+  people:  '<circle cx="9" cy="8" r="3.4"/><path d="M3.2 20a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.3a3.4 3.4 0 0 1 0 5.5"/><path d="M17.6 14.6A5.8 5.8 0 0 1 21 20"/>',
   spanner: '<path d="M15.5 8.5a3.8 3.8 0 0 0 4.6 4.6l-8 8a2.6 2.6 0 0 1-3.7-3.7l8-8a3.8 3.8 0 0 0-4.6-4.6l3 3-1.9 1.9-3-3a3.8 3.8 0 0 0 5.6 1.8z"/>'
 };
 function icon(name) {
@@ -196,6 +197,61 @@ function icon(name) {
 /** Set when the database has no costs table yet, so the app can say so
     rather than looking empty and broken. */
 let costsTableMissing = false;
+let crewTableMissing = false;
+
+/** The crew RCK started with. Anyone can be added later. */
+const CREW_SEED = ['Milian', 'Clint', 'Ryder', 'Sebastion', 'Lyndon', 'Barry'];
+
+/** Everyone who can manage a job: the crew list, the built-in six as a
+    fallback before the database is migrated, and anyone already holding a
+    job who somehow isn't on either list — so no work can go invisible. */
+function crewNames() {
+  const out = [];
+  const seen = new Set();
+  const add = n => {
+    const k = String(n || '').trim();
+    if (k && !seen.has(k.toLowerCase())) { seen.add(k.toLowerCase()); out.push(k); }
+  };
+  DB.crew.filter(c => c.active !== false).forEach(c => add(c.name));
+  CREW_SEED.forEach(add);
+  DB.work_orders.forEach(o => add(o.assigned_to));
+  return out;
+}
+
+const matchCrew = name => {
+  const n = String(name || '').trim().toLowerCase();
+  return crewNames().find(x => x.toLowerCase() === n) || null;
+};
+
+const assignedTo = o => String(o.assigned_to || '').trim();
+
+function ordersFor(name) {
+  const n = name.toLowerCase();
+  return DB.work_orders.filter(o => assignedTo(o).toLowerCase() === n);
+}
+
+/** How one person is tracking: what they hold, and what is slipping. */
+function crewStats(name) {
+  const mine = ordersFor(name);
+  const open = mine.filter(isOpen);
+  return {
+    open: open.length,
+    red: open.filter(o => o.severity === 'red').length,
+    overdue: open.filter(o => { const d = daysFromToday(o.target_date); return d !== null && d < 0; }).length,
+    noDate: open.filter(o => !o.target_date).length,
+    done: mine.filter(o => o.status === 'complete').length,
+    oldest: open.map(o => o.reported_at).filter(Boolean).sort()[0] || null
+  };
+}
+
+const unassignedOrders = () => activeOrders().filter(o => !assignedTo(o));
+
+async function addCrewMember(name) {
+  const clean = String(name || '').trim();
+  if (!clean || matchCrew(clean)) return;
+  await Store.insert('crew', { id: uid(), name: clean, active: true, created_at: new Date().toISOString() });
+}
+
 
 function money(n) {
   const v = Number(n) || 0;
@@ -253,7 +309,7 @@ const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 /* ================================================================
    Local cache — the app opens instantly and stays readable offline
    ================================================================ */
-const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], localSeq: 0 };
+const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], crew: [], localSeq: 0 };
 
 function cacheKey() { return 'rckw.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -265,6 +321,7 @@ function loadCache() {
       DB.work_orders = raw.work_orders || [];
       DB.wo_updates = raw.wo_updates || [];
       DB.costs = raw.costs || [];
+      DB.crew = raw.crew || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -313,19 +370,22 @@ async function rest(path, opts) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [gear, orders, updates, costs] = await Promise.all([
+    const [gear, orders, updates, costs, crew] = await Promise.all([
       rest('gear?select=*&order=code.asc', { headers: restHeaders() }),
       rest('work_orders?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }),
       // The cost table may not exist yet on an older database; the rest of
       // the app must keep working if it doesn't.
-      rest('costs?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }).catch(() => null)
+      rest('costs?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }).catch(() => null),
+      rest('crew?select=*&order=created_at.asc', { headers: restHeaders() }).catch(() => null)
     ]);
     DB.gear = gear || [];
     DB.work_orders = orders || [];
     DB.wo_updates = (updates || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     if (costs) { DB.costs = costs; costsTableMissing = false; }
     else costsTableMissing = true;
+    if (crew) { DB.crew = crew; crewTableMissing = false; }
+    else crewTableMissing = true;
     saveCache();
   },
 
@@ -639,6 +699,7 @@ function go(hash) { location.hash = hash; }
 function sectionOf(path) {
   if (path === '/') return 'hub';
   if (path === '/screen') return 'kiosk';
+  if (path.startsWith('/crew')) return 'crew';
   if (path.startsWith('/costs')) return 'costs';
   return 'maintenance';
 }
@@ -671,6 +732,8 @@ function paintTabs(section, path) {
 const SCREENS = {
   '/':          { title: 'RCK Workshop',  render: renderHub },
   '/gear':      { title: 'Gear',          render: renderBoard },
+  '/crew':           { title: 'Maintenance crew', render: renderCrewBoard },
+  '/crew-unassigned': { title: 'Unassigned jobs',  render: renderUnassigned, back: true },
   '/costs':          { title: 'Costs',        render: renderCostsBoard },
   '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
   '/costs/summary':  { title: 'Cost tracker', render: renderCostSummary },
@@ -704,7 +767,8 @@ function render() {
   let back = false;
   if (screen) { /* an exact route always wins over the patterns below */ }
 
-  if (!screen && route.path.startsWith('/costs/edit/')) { screen = { title: 'Edit cost', render: renderCostForm }; back = true; }
+  if (!screen && route.path.startsWith('/crew/')) { screen = { title: 'Crew', render: renderCrewPerson }; back = true; }
+  else if (!screen && route.path.startsWith('/costs/edit/')) { screen = { title: 'Edit cost', render: renderCostForm }; back = true; }
   else if (!screen && route.path.startsWith('/costs/')) { screen = { title: 'Costs', render: renderCostsAsset }; back = true; }
   else if (!screen && route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
   else if (!screen && route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
@@ -719,7 +783,7 @@ function render() {
   const section = sectionOf(route.path);
   document.body.classList.toggle('in-costs', section === 'costs');
   paintTabs(section, route.path);
-  $('#homeBtn').hidden = !(section === 'costs' || section === 'maintenance') || (back || screen.back);
+  $('#homeBtn').hidden = !['costs', 'maintenance', 'crew'].includes(section) || (back || screen.back);
 
   const view = $('#view');
   view.innerHTML = '';
@@ -1020,6 +1084,7 @@ function woCard(o, i) {
           ? `<span>Completed ${fmtDate(o.completed_at)}</span>`
           : `<span class="${due.late ? 'overdue' : ''}">${due.none ? 'No fix date set' : due.text}</span>`}
         ${o.repairer === 'external' ? `<span>External${o.external_company ? ' · ' + esc(o.external_company) : ''}</span>` : ''}
+        ${assignedTo(o) ? `<span class="who">${esc(assignedTo(o))}</span>` : `<span class="who none">Unassigned</span>`}
       </div>
     </button>`;
 }
@@ -1244,6 +1309,9 @@ function renderWorkOrder(view) {
     <div class="card">
       <table class="data">
         <tr><th>Status</th><td>${statusLabel(o.status)}</td></tr>
+        <tr><th>Managed by</th><td>${assignedTo(o)
+          ? `<a href="#/crew/${encodeURIComponent(assignedTo(o))}">${esc(assignedTo(o))}</a>`
+          : '<span class="muted">nobody yet</span>'}</td></tr>
         <tr><th>Reported</th><td>${esc(o.reported_by || '—')} · ${fmtDateTime(o.reported_at)}</td></tr>
         <tr><th>Location</th><td>${esc(o.location_at_report || g.location || '—')}</td></tr>
         <tr><th>Back in service</th><td>${o.target_date
@@ -1329,6 +1397,15 @@ function workshopPanel(o) {
         </label>
       </div>
 
+      <label class="field"><span>Managed by</span>
+        <select id="wAssign">
+          <option value="">Nobody yet</option>
+          ${crewNames().map(n =>
+            `<option value="${esc(n)}" ${assignedTo(o).toLowerCase() === n.toLowerCase() ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+          <option value="__new">+ Add someone…</option>
+        </select>
+      </label>
+
       <label class="field"><span>Expected back in service</span>
         <input type="date" id="wTarget" value="${esc((o.target_date || '').slice(0, 10))}">
       </label>
@@ -1379,9 +1456,35 @@ function wireWorkshopPanel(view, o) {
     repairer.onchange = () => { $('#extBox', view).hidden = repairer.value !== 'external'; };
   }
 
+  const assign = $('#wAssign', view);
+  if (assign) {
+    let previous = assign.value;
+    assign.onchange = async () => {
+      if (assign.value !== '__new') { previous = assign.value; return; }
+      const typed = (prompt('Who is managing this job?\n\nEnter their name to add them to the crew.') || '').trim();
+      if (!typed) { assign.value = previous; return; }
+      const existing = matchCrew(typed);
+      const name = existing || typed;
+      if (existing) {
+        toast(`${existing} is already on the crew`);
+      } else {
+        await addCrewMember(name);
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        assign.insertBefore(opt, assign.querySelector('option[value="__new"]'));
+      }
+      assign.value = name;
+      previous = name;
+    };
+  }
+
   const save = $('#wSave', view);
   if (save) save.onclick = async function () {
+    const assign = $('#wAssign', view).value;
+    if (assign === '__new') return toast('Name the person first');
+
     const patch = {
+      assigned_to: assign,
       status: $('#wStatus', view).value,
       severity: $('#wSeverity', view).value,
       target_date: $('#wTarget', view).value || null,
@@ -1393,6 +1496,11 @@ function wireWorkshopPanel(view, o) {
     };
 
     const notes = [];
+    if (patch.assigned_to !== assignedTo(o)) {
+      notes.push(patch.assigned_to
+        ? `Assigned to ${patch.assigned_to}`
+        : `Unassigned${assignedTo(o) ? ' (was ' + assignedTo(o) + ')' : ''}`);
+    }
     if (patch.status !== o.status) notes.push(`Status: ${statusLabel(o.status)} → ${statusLabel(patch.status)}`);
     if (patch.severity !== o.severity) notes.push(`Now ${STATUS_TEXT[patch.severity].toLowerCase()}`);
     if ((patch.target_date || '') !== (o.target_date || '')) {
@@ -1711,15 +1819,15 @@ function renderReports(view) {
 
 function exportCsv() {
   const head = ['Work order', 'Gear', 'Name', 'Type', 'Fault', 'Detail', 'Usable', 'Status',
-    'Reported by', 'Reported', 'Location', 'Expected back', 'Repairer', 'Company', 'Their ref',
-    'Cost', 'Completed', 'Completed by', 'Work done', 'Days down'];
+    'Managed by', 'Reported by', 'Reported', 'Location', 'Expected back', 'Repairer', 'Company',
+    'Their ref', 'Cost', 'Completed', 'Completed by', 'Work done', 'Days down'];
   const rows = DB.work_orders
     .slice().sort((a, b) => (a.number || 0) - (b.number || 0))
     .map(o => {
       const g = gearById(o.gear_id) || {};
       return [woNo(o), g.code || '', g.name || '', catLabel(catOf(g)), o.title, o.description,
         o.severity === 'red' ? 'No — out of operation' : 'Yes — usable', statusLabel(o.status),
-        o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
+        assignedTo(o), o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
         o.repairer || '', o.external_company || '', o.external_ref || '', o.cost != null ? o.cost : '',
         o.completed_at ? fmtDateTime(o.completed_at) : '', o.completed_by || '', o.work_done || '',
         daysBetween(o.reported_at, o.completed_at) ?? ''];
@@ -1802,6 +1910,7 @@ function printWorkOrder(o) {
     <h2>Repair</h2>
     <table class="kv">
       <tr><td>Status</td><td>${statusLabel(o.status)}</td></tr>
+      <tr><td>Managed by</td><td>${esc(assignedTo(o) || 'Not assigned')}</td></tr>
       <tr><td>Expected back in service</td><td>${o.target_date ? fmtDate(o.target_date) : 'Not set'}</td></tr>
       <tr><td>Repaired by</td><td>${o.repairer === 'external'
         ? 'External — ' + esc(o.external_company || '—') : o.repairer === 'internal' ? 'RCK workshop crew' : 'Not decided'}</td></tr>
@@ -2010,7 +2119,8 @@ function renderKiosk(view) {
                     <div style="min-width:0">
                       <div class="kttl">${esc(o.title)}</div>
                       <div class="kmeta">${statusLabel(o.status)}${o.repairer === 'external'
-                        ? ' · ' + esc(o.external_company || 'external') : o.repairer === 'internal' ? ' · in-house' : ''}</div>
+                        ? ' · ' + esc(o.external_company || 'external') : o.repairer === 'internal' ? ' · in-house' : ''}${
+                        assignedTo(o) ? ' · ' + esc(assignedTo(o)) : ''}</div>
                     </div>
                     <div class="keta">
                       ${o.target_date
@@ -2069,11 +2179,7 @@ function renderHub(view) {
   const open = activeOrders().length;
   const red = gear.filter(g => gearStatus(g) === 'red').length;
 
-  const now = new Date();
-  const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  const monthActual = DB.costs
-    .filter(c => c.kind === 'actual' && costDate(c) >= from)
-    .reduce((t, c) => t + (Number(c.amount) || 0), 0);
+  const unassigned = unassignedOrders().length;
 
   view.innerHTML = `
     <div class="hub">
@@ -2084,16 +2190,138 @@ function renderHub(view) {
         <span class="hub-stat">${open} open work order${open === 1 ? '' : 's'}${red ? ` · ${red} out of action` : ''}</span>
       </a>
 
-      <a class="hub-card" href="#/costs">
-        <span class="hub-icon">${icon('coin')}</span>
-        <b>Costs</b>
-        <span class="hub-sub">Planned and actual spend against each asset</span>
-        <span class="hub-stat">${monthActual ? money(monthActual) + ' actual this month' : 'No costs recorded this month'}</span>
+      <a class="hub-card" href="#/crew">
+        <span class="hub-icon">${icon('people')}</span>
+        <b>Maintenance crew</b>
+        <span class="hub-sub">Who is managing which job, and how it is tracking</span>
+        <span class="hub-stat">${unassigned
+          ? `${unassigned} job${unassigned === 1 ? '' : 's'} not assigned to anyone`
+          : (open ? 'Every open job has someone on it' : 'Nothing outstanding')}</span>
       </a>
     </div>
 
-    <p class="muted small center mt">The two are kept separate — nothing recorded
-    on one side appears on the other.</p>`;
+    <p class="muted small center mt">Costs are still in the ⋮ menu.</p>`;
+}
+
+/* ================================================================
+   Maintenance crew — who is managing what
+   ================================================================ */
+function crewBanner() {
+  return crewTableMissing
+    ? `<div class="banner">The crew table isn't in the database yet, so anyone you
+       add here won't stick. Run the <strong>Maintenance crew</strong> section at the
+       end of <code>supabase-schema.sql</code> in Supabase, then reopen the app.
+       Assigning jobs still works meanwhile.</div>`
+    : '';
+}
+
+function renderCrewBoard(view) {
+  const names = crewNames();
+  const loose = unassignedOrders();
+
+  view.innerHTML = `
+    ${crewBanner()}
+    ${loose.length ? `
+      <button class="wo status-red unassigned-tile" id="looseTile">
+        <div class="ttl">${loose.length} job${loose.length === 1 ? '' : 's'} not assigned to anyone</div>
+        <div class="sub"><span>Nobody is accountable for these yet — tap to assign them</span></div>
+      </button>` : `
+      <div class="card muted small">Every open job has someone managing it.</div>`}
+
+    <div class="section-title">Crew (${names.length})</div>
+    <div class="crew-grid">
+      ${names.map((n, i) => {
+        const st = crewStats(n);
+        const tone = st.overdue ? 'status-red' : st.open ? 'status-orange' : 'status-green';
+        return `
+          <button class="crew-tile ${tone}" data-name="${esc(n)}" style="--i:${Math.min(i, 14)}">
+            <span class="avatar">${esc(initials(n))}</span>
+            <span class="who">${esc(n)}</span>
+            <span class="load">${st.open === 0 ? 'No open jobs'
+              : `${st.open} open job${st.open === 1 ? '' : 's'}`}</span>
+            ${st.overdue ? `<span class="flag">${st.overdue} overdue</span>`
+              : st.red ? `<span class="flag amber">${st.red} out of action</span>` : ''}
+          </button>`;
+      }).join('')}
+    </div>
+
+    <button class="btn wide mt" id="addCrew">${icon('plus')}Add someone to the crew</button>`;
+
+  const loose_ = $('#looseTile', view);
+  if (loose_) loose_.onclick = () => go('#/crew-unassigned');
+  $$('[data-name]', view).forEach(b => b.onclick = () => go('#/crew/' + encodeURIComponent(b.dataset.name)));
+
+  $('#addCrew', view).onclick = async () => {
+    const typed = (prompt('Name of the person to add to the maintenance crew:') || '').trim();
+    if (!typed) return;
+    if (matchCrew(typed)) return toast(`${matchCrew(typed)} is already on the crew`);
+    await addCrewMember(typed);
+    toast(`${typed} added`);
+    render();
+  };
+}
+
+/** "Sebastion" → "S", "Jo Baker" → "JB" */
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function renderUnassigned(view) {
+  const loose = unassignedOrders();
+  $('#title').textContent = 'Unassigned jobs';
+  view.innerHTML = loose.length
+    ? `<p class="muted small">Open the job and set <strong>Managed by</strong> in the workshop panel.</p>
+       ${loose.map(woCard).join('')}`
+    : `<div class="empty"><b>Nothing unassigned</b>Every open job has someone on it.</div>`;
+  wireWoCards(view);
+}
+
+function renderCrewPerson(view) {
+  const name = decodeURIComponent(route.path.split('/')[2] || '');
+  if (!name) { view.innerHTML = `<div class="empty"><b>Nobody selected</b></div>`; return; }
+
+  const st = crewStats(name);
+  const mine = ordersFor(name);
+  const open = mine.filter(isOpen).sort((a, b) => {
+    if (a.severity !== b.severity) return a.severity === 'red' ? -1 : 1;
+    return String(a.reported_at || '').localeCompare(String(b.reported_at || ''));
+  });
+  const done = mine.filter(o => !isOpen(o))
+    .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
+
+  $('#title').textContent = name;
+
+  view.innerHTML = `
+    <div class="card crew-head">
+      <span class="avatar big">${esc(initials(name))}</span>
+      <div class="grow">
+        <h2 style="font-size:20px">${esc(name)}</h2>
+        <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}</div>
+      </div>
+    </div>
+
+    <div class="tally">
+      <button class="status-orange" disabled><span class="n">${st.open}</span><span class="l">Open</span></button>
+      <button class="status-red" disabled><span class="n">${st.overdue}</span><span class="l">Overdue</span></button>
+      <button class="status-green" disabled><span class="n">${st.done}</span><span class="l">Fixed</span></button>
+    </div>
+
+    ${st.noDate ? `<div class="banner">${st.noDate} of these ${st.noDate === 1 ? 'has' : 'have'} no
+      back-in-service date set, so nobody can tell if ${st.noDate === 1 ? 'it is' : 'they are'} slipping.</div>` : ''}
+
+    <div class="section-title">Open jobs (${open.length})</div>
+    ${open.length ? open.map(woCard).join('')
+      : `<div class="card muted small">Nothing outstanding.</div>`}
+
+    <div class="section-title">Completed (${done.length})</div>
+    ${done.length ? done.slice(0, 10).map(woCard).join('')
+      : `<div class="card muted small">Nothing completed yet.</div>`}
+    ${done.length > 10 ? `<p class="muted small center">Showing the 10 most recent.</p>` : ''}`;
+
+  wireWoCards(view);
 }
 
 /* ================================================================

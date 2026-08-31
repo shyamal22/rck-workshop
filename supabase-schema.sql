@@ -149,3 +149,34 @@ create trigger costs_touch before update on costs
 alter table costs enable row level security;
 drop policy if exists costs_all on costs;
 create policy costs_all on costs for all to anon, authenticated using (true) with check (true);
+
+-- =====================================================================
+--  Maintenance crew — who is managing each work order
+--
+--  Separate from `repairer`, which says whether the spanners are RCK's or
+--  an external company's. Every job has an RCK person accountable for it
+--  either way.
+-- =====================================================================
+alter table work_orders add column if not exists assigned_to text not null default '';
+create index if not exists work_orders_assigned_idx on work_orders (assigned_to);
+
+create table if not exists crew (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null unique,
+  active     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table crew enable row level security;
+drop policy if exists crew_all on crew;
+create policy crew_all on crew for all to anon, authenticated using (true) with check (true);
+
+-- The starting crew. Re-running this never duplicates or renames anyone.
+insert into crew (name, created_at) values
+  ('Milian',    now()),
+  ('Clint',     now() + interval '1 second'),
+  ('Ryder',     now() + interval '2 seconds'),
+  ('Sebastion', now() + interval '3 seconds'),
+  ('Lyndon',    now() + interval '4 seconds'),
+  ('Barry',     now() + interval '5 seconds')
+on conflict (name) do nothing;
