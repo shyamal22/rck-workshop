@@ -691,23 +691,49 @@ async function rest(path, opts) {
   return text ? JSON.parse(text) : null;
 }
 
+/**
+ * What gets loaded, and into which list.
+ *
+ * Each one is fetched independently and on purpose. An earlier version
+ * asked for all six at once and took the first failure as the answer for
+ * everything — so a table that had not been created yet emptied the whole
+ * app, and forty staff records looked like they had been deleted. One
+ * table missing should cost you that one table and nothing else.
+ */
+const TABLES = [
+  { key: 'staff',     table: 'staff',            q: 'staff?select=*&order=last_name.asc,first_name.asc' },
+  { key: 'companies', table: 'companies',        q: 'companies?select=*&order=name.asc' },
+  { key: 'sections',  table: 'profile_sections', q: 'profile_sections?select=*' },
+  { key: 'files',     table: 'profile_files',    q: 'profile_files?select=*&order=created_at.desc' },
+  { key: 'leave',     table: 'staff_leave',      q: 'staff_leave?select=*&order=starts_on.asc' },
+  { key: 'breaches',  table: 'staff_breaches',   q: 'staff_breaches?select=*&order=raised_at.desc' }
+];
+
+/** A 404 from PostgREST means the table isn't there, not that we're offline. */
+const looksMissing = err =>
+  /could not find the table|does not exist|^404\b/i.test((err && err.message) || '');
+
 const Store = {
+  /**
+   * Loads everything it can and reports what it couldn't, rather than
+   * throwing the lot away because one part is missing.
+   */
   async pull() {
-    const [staff, companies, sections, files, leave, breaches] = await Promise.all([
-      rest('staff?select=*&order=last_name.asc,first_name.asc'),
-      rest('companies?select=*&order=name.asc'),
-      rest('profile_sections?select=*'),
-      rest('profile_files?select=*&order=created_at.desc'),
-      rest('staff_leave?select=*&order=starts_on.asc'),
-      rest('staff_breaches?select=*&order=raised_at.desc')
-    ]);
-    DB.staff = staff || [];
-    DB.companies = companies || [];
-    DB.sections = sections || [];
-    DB.files = files || [];
-    DB.leave = leave || [];
-    DB.breaches = breaches || [];
+    const results = await Promise.allSettled(TABLES.map(t => rest(t.q)));
+    const missing = [], broken = [];
+
+    results.forEach((r, i) => {
+      const t = TABLES[i];
+      if (r.status === 'fulfilled') {
+        DB[t.key] = r.value || [];
+      } else {
+        DB[t.key] = [];
+        (looksMissing(r.reason) ? missing : broken).push(t.table);
+      }
+    });
+
     loaded = true;
+    return { missing, broken };
   },
 
   async pullAudit(staffId) {
@@ -1351,6 +1377,14 @@ function render() {
   }
 
   screen.render(view, args);
+
+  /* A toast disappears; something this consequential should stay on
+     screen until it is fixed. */
+  if (lastError) {
+    view.insertAdjacentHTML('afterbegin',
+      `<div class="banner status-orange">${esc(lastError)}</div>`);
+  }
+
   currentPath = path + '/' + args.join('/');
   const y = scrollMemory[currentPath];
   requestAnimationFrame(() => window.scrollTo(0, y || 0));
@@ -3636,8 +3670,25 @@ function paintDot() {
    ===================================================================== */
 async function boot() {
   try {
-    await Store.pull();
-    lastError = '';
+    const { missing, broken } = await Store.pull();
+
+    if (broken.length && broken.length === TABLES.length) {
+      lastError = 'Could not reach the database. Check the phone has signal.';
+    } else if (missing.length === TABLES.length) {
+      lastError = 'None of the tables exist yet. Run supabase-schema.sql in ' +
+                  'Supabase → SQL Editor, then reload.';
+    } else if (missing.length) {
+      lastError = `The database is missing ${plural(missing.length, 'table')}: ` +
+        missing.join(', ') + '. Everything else has loaded. Re-run ' +
+        'supabase-schema.sql in Supabase to add ' +
+        (missing.length === 1 ? 'it' : 'them') + ' — nothing already entered is touched.';
+    } else if (broken.length) {
+      lastError = 'Some of the data would not load: ' + broken.join(', ') + '.';
+    } else {
+      lastError = '';
+    }
+    // No toast: the banner render() puts at the top of every screen says
+    // the same thing and stays put until it is dealt with.
   } catch (e) {
     lastError = e.message || 'Connection problem';
     loaded = true;      // let the interface render so the error is visible
