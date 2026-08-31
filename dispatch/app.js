@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.3.1';
+const VERSION = '1.9.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -26,6 +26,30 @@ const JOB_STATUS = [
   { key: 'completed', label: 'Completed', short: 'Done',      tone: 'completed',
     blurb: 'Finished and signed off' }
 ];
+
+/* ------------------------------------------------------------- crews */
+/* Who is on the job. A short, fixed roster — this is the one thing the
+   board is filtered by, so it stays small enough to read at a glance.
+   Adding a fifth crew is one line here and nothing else. */
+const CREWS = [
+  { key: 'yellow', label: 'Yellow Crew', dot: '#d99b00' },
+  { key: 'subbie', label: 'Subbie Crew', dot: '#7a6ad4' },
+  { key: 'civil',  label: 'Civil Crew',  dot: '#2b76c9' },
+  { key: 'green',  label: 'Green Crew',  dot: '#1c8a4f' }
+];
+const UNCREWED = { key: '', label: 'Unassigned', dot: '#9aa2ab' };
+
+function crewOf(p) { return ((p && p.crew) || '').trim(); }
+function crewDef(key) { return CREWS.find(c => c.key === key) || UNCREWED; }
+function crewLabel(key) { return crewDef(key).label; }
+/** The coloured dot that makes a crew readable without reading. */
+function crewDot(key) {
+  return `<span class="crew-dot" style="background:${crewDef(key).dot}"></span>`;
+}
+function crewPill(p) {
+  const k = crewOf(p);
+  return `<span class="pill plain">${crewDot(k)}${esc(crewLabel(k))}</span>`;
+}
 
 /* ------------------------------------------------------- types of work */
 /* What RCK started with. Anyone can add more when creating a job — a type
@@ -62,6 +86,36 @@ const ROLES = [
 function roleDef(key) { return ROLES.find(r => r.key === key) || ROLES[0]; }
 function roleLabel(key) { return roleDef(key).label; }
 
+/* --------------------------------------------------------- job costing */
+/* What a job is built out of. Quantity times rate on each line, expected
+   when the office prices it and actual once it is done, so a job that went
+   over says exactly where it went. */
+const COST_KINDS = [
+  { key: 'asphalt',     label: 'Asphalt purchase',    unit: 'tonnes' },
+  { key: 'emulsion',    label: 'Emulsion purchase',   unit: 'litres' },
+  { key: 'concrete',    label: 'Concrete purchase',   unit: 'm³' },
+  { key: 'materials',   label: 'Materials purchase',  unit: 'items' },
+  { key: 'crew',        label: 'Crew',                unit: 'hours' },
+  { key: 'trucking',    label: 'Trucking',            unit: 'hours' },
+  { key: 'plant',       label: 'Plant and machinery', unit: 'hours' },
+  { key: 'transport',   label: 'Transport',           unit: 'loads' },
+  { key: 'subcontract', label: 'Subcontractors',      unit: 'items' },
+  { key: 'other',       label: 'Other',               unit: '' }
+];
+
+/* Maintenance is never typed in. It is a tenth of everything else, worked
+   out wherever it is shown, so it cannot drift out of step with the lines
+   above it — on the expected side and the actual side alike. */
+const MAINTENANCE_RATE = 0.10;
+
+function costKind(key) { return COST_KINDS.find(k => k.key === key) || COST_KINDS[COST_KINDS.length - 1]; }
+function costLabel(l) { return (l.label || '').trim() || costKind(l.kind).label; }
+
+function num(v) { const n = Number(v); return isFinite(n) ? n : 0; }
+function lineExpected(l) { return num(l.qty) * num(l.rate); }
+function lineActual(l)   { return num(l.actual_qty) * num(l.actual_rate); }
+function lineHasActual(l) { return hasMoney(l.actual_qty) || hasMoney(l.actual_rate); }
+
 /* ---------------------------------------------------------- documents */
 const DOC_KINDS = [
   { key: 'pmp',      label: 'PMP' },
@@ -90,23 +144,23 @@ const AUDIENCES = [
    them. `mark` gives the entry a coloured dot on the timeline, because it
    is a moment that matters rather than a passing note. */
 const ENTRY_TYPES = [
-  { key: 'onsite',        label: 'On site',            tone: 'green',  mark: true,  quick: true },
-  { key: 'prestart',      label: 'Prestart',           tone: 'green',  mark: true,  quick: true },
+  { key: 'onsite',        label: 'On site',            tone: 'green',  mark: true },
+  { key: 'prestart',      label: 'Prestart',           tone: 'green',  mark: true },
   { key: 'tm_setup',      label: 'Traffic management set up', tone: 'blue' },
-  { key: 'milling_start', label: 'Milling started',    tone: 'green',  mark: true,  quick: true },
+  { key: 'milling_start', label: 'Milling started',    tone: 'green',  mark: true },
   { key: 'milling_stop',  label: 'Milling stopped',    tone: 'blue',   mark: true },
-  { key: 'paving_start',  label: 'Paving started',     tone: 'green',  mark: true,  quick: true },
+  { key: 'paving_start',  label: 'Paving started',     tone: 'green',  mark: true },
   { key: 'paving_stop',   label: 'Paving stopped',     tone: 'blue',   mark: true },
   { key: 'delivery',      label: 'Delivery',           tone: 'blue' },
   { key: 'break',         label: 'Break',              tone: 'slate' },
-  { key: 'issue',         label: 'Issue',              tone: 'red',    mark: true,  quick: true },
+  { key: 'issue',         label: 'Issue',              tone: 'red',    mark: true },
   { key: 'delay',         label: 'Delay',              tone: 'yellow', mark: true },
   { key: 'weather',       label: 'Weather',            tone: 'yellow' },
   { key: 'visitor',       label: 'Visitor',            tone: 'blue' },
   { key: 'tm_down',       label: 'Traffic management removed', tone: 'blue' },
   { key: 'note',          label: 'Note',               tone: 'slate' },
   { key: 'photos',        label: 'Photos',             tone: 'slate' },
-  { key: 'offsite',       label: 'Off site',           tone: 'slate',  mark: true,  quick: true }
+  { key: 'offsite',       label: 'Off site',           tone: 'slate',  mark: true }
 ];
 
 /* ------------------------------------------------------- small tools */
@@ -137,6 +191,8 @@ function slug(text) {
 }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS_LONG = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
 function fmtDate(v) {
@@ -227,9 +283,11 @@ function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
 
 /** What a job made, or null when we don't know both halves. Guessing a
     margin from half the numbers is worse than showing nothing. */
+/** A job's margin — the settled one when the job is finished and invoiced,
+    otherwise what it was priced to make. */
 function jobMargin(p) {
-  if (!hasMoney(p.contract_value) || !hasMoney(p.actual_cost)) return null;
-  return Number(p.contract_value) - Number(p.actual_cost);
+  const c = costing(p);
+  return c.acMargin != null ? c.acMargin : c.exMargin;
 }
 function marginPct(value, margin) {
   const v = Number(value);
@@ -337,7 +395,10 @@ const ICONS = {
   check:    '<path d="M5 12.5l4.2 4.2L19 7"/>',
   play:     '<path d="M8 5.5l10 6.5-10 6.5z"/>',
   plus:     '<path d="M12 5.5v13M5.5 12h13"/>',
-  clock:    '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>'
+  clock:    '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.3l3.4 2"/>',
+  filter:   '<path d="M3.5 5.5h17L14 13v6l-4 2v-8z"/>',
+  chart:    '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3.4" height="5"/><rect x="13.6" y="7.5" width="3.4" height="9.5"/>',
+  money:    '<rect x="3" y="6.5" width="18" height="11" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 12h.01M17.5 12h.01"/>'
 };
 function icon(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -389,7 +450,7 @@ function whoami() { return S.name || 'Unnamed user'; }
    Local cache — the app opens instantly and stays readable on site
    with no signal, which is most of the time
    ================================================================ */
-const DB = { projects: [], project_docs: [], diary_entries: [], localSeq: 0 };
+const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], localSeq: 0 };
 
 function cacheKey() { return 'rckd.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -400,6 +461,7 @@ function loadCache() {
       DB.projects = raw.projects || [];
       DB.project_docs = raw.project_docs || [];
       DB.diary_entries = raw.diary_entries || [];
+      DB.job_costs = raw.job_costs || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -483,14 +545,16 @@ function reconcile(table, fromServer) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [projects, docs, entries] = await Promise.all([
+    const [projects, docs, entries, costs] = await Promise.all([
       rest('projects?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
-      rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() })
+      rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() }),
+      rest('job_costs?select=*&order=sort.asc&limit=20000', { headers: restHeaders() })
     ]);
     DB.projects = reconcile('projects', projects || []);
     DB.project_docs = reconcile('project_docs', docs || []);
     DB.diary_entries = reconcile('diary_entries', entries || []);
+    DB.job_costs = reconcile('job_costs', costs || []);
     saveCache();
   },
 
@@ -667,88 +731,48 @@ function allDocsFor(projectId) {
   return DB.project_docs.filter(d => d.project_id === projectId);
 }
 
-/* RCK works nights, so a "day" in the diary is a shift, not a calendar day:
-   the crew comes on at 19:45 and goes off at 05:15, and both belong to the
-   shift that started on the 20th. Sorting on the clock alone would put the
-   05:15 first. So within one shift, anything logged in the small hours is
-   ordered after the evening — but only when the shift really did start in
-   the evening, which leaves an ordinary day shift completely untouched. */
-const NIGHT_UNTIL  = 9 * 60;    // 09:00
-const EVENING_FROM = 17 * 60;   // 17:00
+/* A day in the diary is the day on the calendar. An entry made at 01:30
+   belongs to the date it is made on, not to the shift that started the
+   evening before — a night job reads as two days, which is how a supervisor
+   talks about it and how the printed report sets it out. The date is still
+   editable on every entry for the rare case that is wrong. */
 
 function minutesOfDay(iso) {
   const d = new Date(iso);
   return isNaN(d) ? 0 : d.getHours() * 60 + d.getMinutes();
 }
-/** True when this shift's entries straddle midnight. */
-function isNightShift(list) {
-  const mins = list.map(e => minutesOfDay(e.at));
-  return mins.some(m => m >= EVENING_FROM) && mins.some(m => m < NIGHT_UNTIL);
-}
-/** One shift's entries in the order they actually happened. */
-function shiftOrder(list) {
-  const night = isNightShift(list);
-  const key = e => {
-    const m = minutesOfDay(e.at);
-    return night && m < NIGHT_UNTIL ? m + 1440 : m;
-  };
+/** One day's entries, earliest first. */
+function dayOrder(list) {
   return list.slice().sort((a, b) =>
-    key(a) - key(b) || (a.created_at || '').localeCompare(b.created_at || ''));
+    (a.at || '').localeCompare(b.at || '') || (a.created_at || '').localeCompare(b.created_at || ''));
 }
-/** How long the crew was on site that shift, as "9h 30m". */
-function shiftSpan(list) {
+/** How long the crew was on site that day, as "9h 30m". */
+function daySpan(list) {
   if (list.length < 2) return '';
-  const night = isNightShift(list);
-  const key = e => {
-    const m = minutesOfDay(e.at);
-    return night && m < NIGHT_UNTIL ? m + 1440 : m;
-  };
-  const ks = list.map(key);
-  const mins = Math.max.apply(null, ks) - Math.min.apply(null, ks);
-  if (mins <= 0) return '';
-  const h = Math.floor(mins / 60), m = mins % 60;
+  const mins = list.map(e => minutesOfDay(e.at));
+  const span = Math.max.apply(null, mins) - Math.min.apply(null, mins);
+  if (span <= 0) return '';
+  const h = Math.floor(span / 60), m = span % 60;
   return h ? `${h}h${m ? ' ' + m + 'm' : ''}` : `${m}m`;
 }
 
-/** Everything logged across every job on one shift date, latest first —
-    "latest" meaning latest in the shift, so a night crew's 01:30 comes
-    above the 19:45 that started the same shift. */
-function shiftFeed(day, limit) {
-  const byJob = {};
-  DB.diary_entries.filter(e => (e.entry_date || '') === day)
-    .forEach(e => { (byJob[e.project_id] = byJob[e.project_id] || []).push(e); });
-  const out = [];
-  Object.keys(byJob).forEach(id => {
-    const list = byJob[id];
-    const night = isNightShift(list);
-    list.forEach(e => {
-      const m = minutesOfDay(e.at);
-      out.push({ e, k: night && m < NIGHT_UNTIL ? m + 1440 : m });
-    });
-  });
-  return out.sort((a, b) => b.k - a.k).slice(0, limit).map(x => x.e);
-}
-
-/** The shift a new entry most likely belongs to. Logging at 01:30 on a job
-    whose crew came on last evening means last night's shift, not today. */
-function defaultShiftDate(projectId) {
-  const now = new Date();
-  if (now.getHours() * 60 + now.getMinutes() >= NIGHT_UNTIL) return today();
-  const y = new Date(now.getTime() - 86400000);
-  const yStr = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
-  const last = entriesFor(projectId, yStr);
-  return last.length && isNightShift(last.concat([{ at: now.toISOString() }])) ? yStr : today();
+/** Everything logged across every job on one day, latest first. */
+function dayFeed(day, limit) {
+  return DB.diary_entries
+    .filter(e => (e.entry_date || '') === day)
+    .sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+    .slice(0, limit);
 }
 
 /** Diary entries for a job, in the order they happened. One shift when a
     date is given; otherwise every shift, oldest first. */
 function entriesFor(projectId, dateStr) {
   const all = DB.diary_entries.filter(e => e.project_id === projectId);
-  if (dateStr) return shiftOrder(all.filter(e => (e.entry_date || '') === dateStr));
+  if (dateStr) return dayOrder(all.filter(e => (e.entry_date || '') === dateStr));
   const byDay = {};
   all.forEach(e => { (byDay[e.entry_date || ''] = byDay[e.entry_date || ''] || []).push(e); });
   return Object.keys(byDay).sort()
-    .reduce((out, day) => out.concat(shiftOrder(byDay[day])), []);
+    .reduce((out, day) => out.concat(dayOrder(byDay[day])), []);
 }
 /** The dates a job has diary entries on, newest first. */
 function diaryDays(projectId) {
@@ -788,16 +812,8 @@ function isTodayJob(p) {
 }
 
 /* --------------------------------------------------------- periods */
-/* A director thinks in months and financial years, not in dates typed
-   twice. RCK's year runs 1 April to 31 March like everyone else's here. */
-const PERIODS = [
-  { key: 'month',   label: 'This month' },
-  { key: 'last',    label: 'Last month' },
-  { key: 'quarter', label: 'This quarter' },
-  { key: 'fy',      label: 'Financial year' },
-  { key: 'all',     label: 'All time' }
-];
-
+/* The only preset left, for the month's figure on the landing page. The
+   P&L itself takes the dates the director picks. */
 function periodRange(key) {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
@@ -810,13 +826,6 @@ function periodRange(key) {
                            return [iso(y, q, 1), iso(y, q + 2, lastDay(y, q + 2))]; }
   if (key === 'fy')      { const fy = m >= 3 ? y : y - 1; return [iso(fy, 3, 1), iso(fy + 1, 2, 31)]; }
   return ['', ''];
-}
-function periodLabel(key, from, to) {
-  const p = PERIODS.find(x => x.key === key);
-  if (p && key !== 'all') return `${p.label} — ${fmtDate(from)} to ${fmtDate(to)}`;
-  if (key === 'all') return 'All time';
-  if (from || to) return `${from ? fmtDate(from) : 'the beginning'} to ${to ? fmtDate(to) : 'today'}`;
-  return 'All time';
 }
 
 /** A job belongs to a period if it was actually on site in it, or was due
@@ -836,18 +845,64 @@ function jobInPeriod(p, from, to) {
 function periodTotals(list) {
   const t = { jobs: list.length, days: 0, entries: 0, issues: 0,
               value: 0, valued: 0, cost: 0, costed: 0,
+              acValue: 0, acCost: 0, settled: 0,
               ongoing: 0, planned: 0, completed: 0 };
   list.forEach(p => {
     t.days += diaryDays(p.id).length;
     t.entries += entriesFor(p.id).length;
     t.issues += issueCount(p.id);
-    if (hasMoney(p.contract_value)) { t.value += Number(p.contract_value); t.valued++; }
-    if (hasMoney(p.actual_cost))    { t.cost  += Number(p.actual_cost);    t.costed++; }
+    const c = costing(p);
+    if (c.exInv != null)  { t.value += c.exInv; t.valued++; }
+    if (c.exCost != null) { t.cost  += c.exCost; t.costed++; }
+    if (c.acMargin != null) { t.acValue += c.acInv; t.acCost += c.acCost; t.settled++; }
     t[p.status] = (t[p.status] || 0) + 1;
   });
   t.margin = (t.valued && t.costed) ? t.value - t.cost : null;
   t.marginPct = marginPct(t.value, t.margin);
+  t.acMargin = t.settled ? t.acValue - t.acCost : null;
+  t.acMarginPct = marginPct(t.acValue, t.acMargin);
   return t;
+}
+
+/* --------------------------------------------------- the money on a job */
+const costLinesFor = id => DB.job_costs
+  .filter(l => l.project_id === id)
+  .sort((a, b) => (a.sort || 0) - (b.sort || 0) || (a.created_at || '').localeCompare(b.created_at || ''));
+
+/** Everything the P&L needs about one job, worked out in one place so the
+    screen and the printed report can never disagree. */
+function costing(p) {
+  const lines = costLinesFor(p.id);
+
+  const exLines = lines.reduce((n, l) => n + lineExpected(l), 0);
+  const acLines = lines.reduce((n, l) => n + lineActual(l), 0);
+  const anyActual = lines.some(lineHasActual);
+
+  const exMaint = exLines * MAINTENANCE_RATE;
+  const acMaint = acLines * MAINTENANCE_RATE;
+
+  // A job priced before the costing existed still has its old single figure.
+  const legacy = !lines.length && hasMoney(p.actual_cost) ? Number(p.actual_cost) : null;
+
+  const exCost = lines.length ? exLines + exMaint : legacy;
+  const acCost = anyActual ? acLines + acMaint : null;
+
+  const exInv = hasMoney(p.contract_value) ? Number(p.contract_value) : null;
+  const acInv = hasMoney(p.actual_invoice) ? Number(p.actual_invoice) : null;
+
+  const margin = (inv, cost) => (inv == null || cost == null) ? null : inv - cost;
+
+  return {
+    lines, anyActual, legacy,
+    exLines, exMaint, exCost, acLines, acMaint, acCost, exInv, acInv,
+    exMargin: margin(exInv, exCost),
+    acMargin: margin(acInv, acCost),
+    exPct: marginPct(exInv, margin(exInv, exCost)),
+    acPct: marginPct(acInv, margin(acInv, acCost)),
+    // What the job did against what it was priced to do.
+    swing: (margin(acInv, acCost) == null || margin(exInv, exCost) == null)
+      ? null : margin(acInv, acCost) - margin(exInv, exCost)
+  };
 }
 
 /** Board order: on site first, then what starts soonest, then finished. */
@@ -887,6 +942,26 @@ async function startJob(p) {
     started_by: whoami()
   });
   return jobById(p.id);
+}
+
+/** Delete a job and everything hanging off it. The database cascades on
+    its own; the copy on this device does not, and neither does the outbox —
+    a queued insert left behind would rebuild the job the moment there was
+    signal, which is the one way a delete could appear to fail. */
+async function deleteJob(p) {
+  const doomed = new Set([p.id]);
+  DB.project_docs.forEach(d => { if (d.project_id === p.id) doomed.add(d.id); });
+  DB.diary_entries.forEach(e => { if (e.project_id === p.id) doomed.add(e.id); });
+  DB.job_costs.forEach(l => { if (l.project_id === p.id) doomed.add(l.id); });
+
+  Outbox.save(Outbox.all().filter(op => !doomed.has(op.kind === 'insert' ? op.row.id : op.id)));
+
+  DB.project_docs = DB.project_docs.filter(d => d.project_id !== p.id);
+  DB.diary_entries = DB.diary_entries.filter(e => e.project_id !== p.id);
+  DB.job_costs = DB.job_costs.filter(l => l.project_id !== p.id);
+
+  await Store.remove('projects', p.id);   // saves the cache and tells the server
+  paintSync();
 }
 
 async function completeJob(p, notes) {
@@ -1015,11 +1090,13 @@ function go(hash) { location.hash = hash; }
 function jobIdFromPath() { return route.path.split('/')[2] || ''; }
 
 const SCREENS = {
-  '/':        { title: 'Jobs',          render: renderBoard },
+  '/':        { title: 'RCK Dispatch',  render: renderHome },
+  '/jobs':    { title: 'Jobs',          render: renderBoard },
+  '/pnl':     { title: 'Profit & loss', render: renderPnl,    back: true },
   '/today':   { title: 'Today on site', render: renderToday },
   '/log':     { title: 'Log',           render: renderLogPicker, back: true },
   '/new':     { title: 'New job',       render: renderJobEdit, back: true },
-  '/overview':{ title: 'Overview',      render: renderOverview, back: true },
+
   '/reports': { title: 'Reports',       render: renderReports, back: true },
   '/setup':   { title: 'Settings',      render: renderSetup,   back: true },
   '/join':    { title: 'Set up',        render: renderJoin },
@@ -1031,7 +1108,7 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = path === '/' || path === '/today' || path.startsWith('/diary/');
+  const keepsPlace = path === '/jobs' || path === '/today' || path.startsWith('/diary/');
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
@@ -1052,6 +1129,8 @@ function render() {
   else if (route.path.startsWith('/diary/')) { screen = { title: 'Job diary', render: renderDiary };    back = true; }
   else if (route.path.startsWith('/entry/')) { screen = { title: 'Diary entry', render: renderEntry };  back = true; }
   else if (route.path.startsWith('/upload/')){ screen = { title: 'Add document', render: renderUpload }; back = true; }
+  else if (route.path.startsWith('/costs/')) { screen = { title: 'Costing', render: renderCosts }; back = true; }
+  else if (route.path === '/overview')       { go('#/pnl'); return; }   // the old name
 
   if (!screen) { go('#/'); return; }
 
@@ -1153,6 +1232,7 @@ function renderLogPicker(view) {
             <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span></div>
           <div class="ttl">${esc(p.name)}</div>
           <div class="sub">
+            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
             ${p.site ? `<span>${esc(p.site)}</span>` : ''}
             ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
             <span>${n ? n + ' logged today' : 'nothing logged today'}</span>
@@ -1174,6 +1254,7 @@ function jobHeader(p, tab) {
           <div class="tiny" style="color:var(--ink-3);letter-spacing:.04em;font-weight:700">${jobNo(p)}</div>
           <h2 style="font-size:19px;margin:2px 0 3px">${esc(p.name)}</h2>
           <div class="small muted">${esc(p.client || 'No client named')} · ${esc(typeLabel(typeOf(p)))}</div>
+          <div style="margin-top:7px">${crewPill(p)}</div>
         </div>
         <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
       </div>
@@ -1282,9 +1363,55 @@ function renderWelcome(view) {
 }
 
 /* ================================================================
-   Screen — job board (home)
+   Screen — the landing page
+   Two tools behind one door. Everyone gets the jobs; the money is
+   behind the Director role and nothing hints at it otherwise.
    ================================================================ */
-const boardFilter = { type: 'all', status: 'all', q: '' };
+function renderHome(view) {
+  const jobs = activeJobs();
+  const onSite = jobs.filter(p => p.status === 'ongoing').length;
+  const planned = jobs.filter(p => p.status === 'planned').length;
+
+  let money = '';
+  if (isDirector()) {
+    const [from, to] = periodRange('month');
+    const inMonth = DB.projects.filter(p => jobInPeriod(p, from, to));
+    const t = inMonth.reduce((acc, p) => {
+      const c = costing(p);
+      if (c.exInv != null) { acc.inv += c.exInv; acc.priced++; }
+      if (c.exMargin != null) { acc.margin += c.exMargin; acc.withMargin++; }
+      return acc;
+    }, { inv: 0, priced: 0, margin: 0, withMargin: 0 });
+    money = t.priced
+      ? `${esc(fmtMoney(t.inv))} invoiced this month${t.withMargin ? ' · ' + esc(fmtMoney(t.margin)) + ' margin' : ''}`
+      : 'No job priced this month yet';
+  }
+
+  view.innerHTML = `
+    <div class="tiles">
+      <a class="tile" href="#/jobs">
+        <span class="ti">${icon('book')}</span>
+        <b>Jobs</b>
+        <span class="td">Site paperwork and the daily job diary</span>
+        <span class="ts">${jobs.length} job${jobs.length === 1 ? '' : 's'} · ${onSite} on site · ${planned} planned</span>
+      </a>
+
+      ${isDirector() ? `
+      <a class="tile money" href="#/pnl">
+        <span class="ti">${icon('chart')}</span>
+        <b>Profit &amp; loss</b>
+        <span class="td">What each job was priced at, and what it did</span>
+        <span class="ts">${money}</span>
+      </a>` : ''}
+    </div>
+
+    ${isDirector() ? '<p class="muted tiny center mt">Profit &amp; loss is shown on Director devices only.</p>' : ''}`;
+}
+
+/* ================================================================
+   Screen — job board
+   ================================================================ */
+const boardFilter = { crew: 'all', status: 'all', q: '' };
 
 function jobCard(p, i) {
   const days = daysOnSite(p);
@@ -1304,8 +1431,8 @@ function jobCard(p, i) {
       ${p.supervisor ? `<div class="line">${icon('person')}${esc(p.supervisor)}</div>` : ''}
       <div class="foot">
         <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+        ${crewPill(p)}
         ${p._unsent ? '<span class="pill plain">Not sent yet</span>' : ''}
-        <span class="pill plain">${esc(typeLabel(typeOf(p)))}</span>
         ${issues ? `<span class="pill plain">${issues} issue${issues > 1 ? 's' : ''}</span>` : ''}
       </div>
     </button>`;
@@ -1333,7 +1460,9 @@ function renderBoard(view) {
   const counts = { planned: 0, ongoing: 0, completed: 0 };
   jobs.forEach(p => { counts[p.status] = (counts[p.status] || 0) + 1; });
 
-  const types = allTypeKeys().filter(k => jobs.some(p => typeOf(p) === k));
+  // The full roster always shows, in the same order, so a chip is where you
+  // last saw it. Unassigned only appears when there is something in it.
+  const crews = CREWS.concat(jobs.some(p => !crewOf(p)) ? [UNCREWED] : []);
 
   view.innerHTML = `
     <div class="tally">
@@ -1344,9 +1473,10 @@ function renderBoard(view) {
         </button>`).join('')}
     </div>
 
-    <div class="filters" id="typeChips">
-      <button class="chip" data-type="all" aria-pressed="${boardFilter.type === 'all'}">All work</button>
-      ${types.map(k => `<button class="chip" data-type="${esc(k)}" aria-pressed="${boardFilter.type === k}">${esc(typeLabel(k))}</button>`).join('')}
+    <div class="filters" id="crewChips">
+      <button class="chip" data-crew="all" aria-pressed="${boardFilter.crew === 'all'}">All crews</button>
+      ${crews.map(c => `<button class="chip" data-crew="${esc(c.key || 'none')}"
+        aria-pressed="${boardFilter.crew === (c.key || 'none')}">${crewDot(c.key)}${esc(c.label)}</button>`).join('')}
     </div>
 
     <label class="field"><input type="text" id="q" value="${esc(boardFilter.q)}"
@@ -1360,9 +1490,12 @@ function renderBoard(view) {
     const q = boardFilter.q.toLowerCase();
     const list = boardOrder(jobs.filter(p => {
       if (boardFilter.status !== 'all' && p.status !== boardFilter.status) return false;
-      if (boardFilter.type !== 'all' && typeOf(p) !== boardFilter.type) return false;
+      if (boardFilter.crew !== 'all') {
+        const want = boardFilter.crew === 'none' ? '' : boardFilter.crew;
+        if (crewOf(p) !== want) return false;
+      }
       if (!q) return true;
-      return [p.name, p.client, p.site, p.supervisor, jobNo(p), typeLabel(typeOf(p))]
+      return [p.name, p.client, p.site, p.supervisor, jobNo(p), crewLabel(crewOf(p)), typeLabel(typeOf(p))]
         .some(v => String(v || '').toLowerCase().includes(q));
     }));
 
@@ -1378,9 +1511,9 @@ function renderBoard(view) {
     paint();
   });
 
-  $$('#typeChips .chip', view).forEach(b => b.onclick = () => {
-    boardFilter.type = b.dataset.type;
-    $$('#typeChips .chip', view).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.type === boardFilter.type)));
+  $$('#crewChips .chip', view).forEach(b => b.onclick = () => {
+    boardFilter.crew = b.dataset.crew;
+    $$('#crewChips .chip', view).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.crew === boardFilter.crew)));
     paint();
   });
 
@@ -1421,6 +1554,7 @@ function renderToday(view) {
         </div>
         <div class="ttl">${esc(p.name)}</div>
         <div class="sub">
+          <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
           ${p.site ? `<span>${esc(p.site)}</span>` : ''}
           ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
           <span>${eToday.length ? eToday.length + ' entr' + (eToday.length > 1 ? 'ies' : 'y') + ' today' : 'nothing logged today'}</span>
@@ -1439,8 +1573,8 @@ function renderToday(view) {
           <div class="hdr"><span class="num">${jobNo(p)}</span>
             <span class="pill plain">${esc(startText(p.start_date).text)}</span></div>
           <div class="ttl">${esc(p.name)}</div>
-          <div class="sub">${p.site ? `<span>${esc(p.site)}</span>` : ''}
-            <span>${esc(typeLabel(typeOf(p)))}</span>
+          <div class="sub"><span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
+            ${p.site ? `<span>${esc(p.site)}</span>` : ''}
             ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}</div>
         </button>`).join('')}` : ''}`;
 
@@ -1482,6 +1616,7 @@ function renderJob(view) {
     <div class="card">
       <table class="data">
         <tr><th>Status</th><td>${statusLabel(p.status)} <span class="muted">— ${esc(statusDef(p.status).blurb)}</span></td></tr>
+        <tr><th>Crew</th><td>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</td></tr>
         <tr><th>Type of work</th><td>${esc(typeLabel(typeOf(p)))}</td></tr>
         <tr><th>Client</th><td>${esc(p.client || '—')}</td></tr>
         <tr><th>Site</th><td>${esc(p.site || '—')}</td></tr>
@@ -1497,20 +1632,7 @@ function renderJob(view) {
       </table>
     </div>
 
-    ${isOffice() && (hasMoney(p.contract_value) || hasMoney(p.actual_cost)) ? `
-      <div class="card">
-        <h2>Value and cost</h2>
-        <table class="data">
-          <tr><th>Contract value</th><td>${fmtMoney(p.contract_value, true)}</td></tr>
-          <tr><th>Cost to RCK</th><td>${fmtMoney(p.actual_cost, true)}</td></tr>
-          ${jobMargin(p) != null ? `<tr><th>Margin</th><td><strong style="color:${
-            jobMargin(p) < 0 ? 'var(--red)' : 'var(--green)'}">${fmtMoney(jobMargin(p), true)}${
-            marginPct(p.contract_value, jobMargin(p)) != null
-              ? ' · ' + marginPct(p.contract_value, jobMargin(p)).toFixed(1) + '%' : ''}</strong></td></tr>`
-            : '<tr><th>Margin</th><td class="muted">needs both numbers</td></tr>'}
-        </table>
-        <p class="muted tiny" style="margin:8px 0 0">Not visible to supervisors.</p>
-      </div>` : ''}
+
 
     ${p.status === 'planned' ? `
       <button class="btn primary wide" id="start">${icon('play')}Start job — crew is on site</button>
@@ -1525,6 +1647,14 @@ function renderJob(view) {
     ${p.status === 'completed' ? `
       <div class="banner info">This job is finished. The diary and documents stay exactly as they are.
       ${isOffice() ? ' Reopen it below if it was closed by mistake.' : ''}</div>` : ''}
+
+    ${isOffice() ? `
+      <a class="btn wide mb" href="#/costs/${p.id}">${icon('chart')}Costing${
+        costing(p).exInv != null || costing(p).lines.length
+          ? ` — ${esc(fmtMoney(costing(p).exInv))} invoice${
+              isDirector() && costing(p).exMargin != null
+                ? ', ' + esc(fmtMoney(costing(p).exMargin)) + ' margin' : ''}`
+          : ' — not priced yet'}</a>` : ''}
 
     <div class="section-title">Reports</div>
     <div class="card">
@@ -1544,9 +1674,13 @@ function renderJob(view) {
           ${p.status === 'completed' ? '<button class="btn sm" id="reopen">Reopen job</button>' : ''}
           ${isDirector() ? `<button class="btn sm" id="archive">${p.archived ? 'Restore' : 'Archive'}</button>` : ''}
         </div>
-        <p class="muted tiny mt" style="margin-bottom:0">${isDirector()
-          ? 'Archiving hides the job from the board and keeps every record. Nothing is ever deleted.'
-          : 'Archiving a job is a director\'s call. Nothing here is ever deleted.'}</p>
+        ${isDirector() ? `
+          <p class="muted tiny mt">Archiving takes the job off the board and out of the profit and
+          loss, and keeps every record of it. That is the one to use for a job that was cancelled.</p>
+          <button class="btn sm danger wide" id="del">${icon('trash')}Delete this job for good</button>
+          <p class="muted tiny mt" style="margin-bottom:0">Deleting destroys the diary, the documents
+          and the costing with it, for everyone. There is no undo.</p>`
+        : '<p class="muted tiny mt" style="margin-bottom:0">Archiving or deleting a job is a director\'s call.</p>'}
       </div>` : ''}`;
 
   const startBtn = $('#start', view);
@@ -1587,8 +1721,34 @@ function renderJob(view) {
   const archive = $('#archive', view);
   if (archive) archive.onclick = async () => {
     await Store.patch('projects', p.id, { archived: !p.archived });
-    toast(p.archived ? 'Restored' : 'Archived');
+    toast(p.archived ? 'Restored' : 'Archived — off the board and out of the P&L');
     render();
+  };
+
+  const del = $('#del', view);
+  if (del) del.onclick = async () => {
+    const ents = entriesFor(p.id).length;
+    const docs = allDocsFor(p.id).length;
+    const lines = costLinesFor(p.id).length;
+    const also = [
+      ents && `${ents} diary entr${ents > 1 ? 'ies' : 'y'}`,
+      docs && `${docs} document${docs > 1 ? 's' : ''}`,
+      lines && `${lines} cost line${lines > 1 ? 's' : ''}`
+    ].filter(Boolean);
+
+    // Typing the number is the guard. A job with a diary on it is somebody's
+    // week, and a mis-tap should not be able to take it.
+    const typed = prompt(
+      `Delete ${jobNo(p)} — ${p.name}?\n\n` +
+      (also.length ? `This destroys ${also.join(', ')} along with it. ` : '') +
+      `It goes for everyone and cannot be undone.\n\n` +
+      `Type ${jobNo(p)} to confirm.`);
+    if (typed == null) return;
+    if (typed.trim().toUpperCase() !== jobNo(p)) return toast('Not deleted — that job number did not match');
+
+    await deleteJob(p);
+    toast(`${jobNo(p)} deleted`);
+    go('#/jobs');
   };
 }
 
@@ -1780,23 +1940,58 @@ function renderUpload(view) {
    Screen — the job diary
    Every day the crew is on site, in the order it happened.
    ================================================================ */
+/** One entry on the timeline: the time in its own column, a dot on a rail
+    coloured for what happened, and the note beside it. */
 function diaryItem(e, i) {
   const files = Array.isArray(e.files) ? e.files : [];
   const photos = files.filter(f => /^image\//.test(f.type || ''));
   const others = files.filter(f => !/^image\//.test(f.type || ''));
   const pending = files.some(f => f.pending);
+  const flag = e.kind === 'issue' || e.kind === 'delay';
   return `
-    <div class="d-item ${entryMarked(e) ? 'mark' : ''} status-${entryTone(e)}" data-id="${e.id}" style="--i:${i}">
-      <div class="dt">${esc(fmtTime(e.at))}</div>
-      <div class="db">
-        <div class="dk">${esc(entryLabel(e))}</div>
-        ${e.body ? `<div class="dn">${esc(e.body)}</div>` : ''}
+    <div class="tl-e status-${entryTone(e)}${flag ? ' flag' : ''}${entryMarked(e) ? ' mark' : ''}"
+         data-id="${e.id}" style="--i:${i}">
+      <div class="tl-when">${esc(fmtTime(e.at))}</div>
+      <div class="tl-rail"><i></i></div>
+      <div class="tl-card">
+        <div class="tl-kind">${esc(entryLabel(e))}</div>
+        ${e.body ? `<div class="tl-note">${esc(e.body)}</div>` : ''}
         ${photos.length ? `<div class="thumbs">${photos.map(f =>
           `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}</div>` : ''}
         ${others.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('clip')}${esc(f.name || 'Attachment')}</a>`).join('')}
-        <div class="dw">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
+        <div class="tl-who">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
           pending ? ' · photos waiting for signal' : ''}</div>
       </div>
+    </div>`;
+}
+
+/** The quiet stretch between two entries. Seeing "3h 10m" on the rail is
+    what turns a list of times into a shape you can read — where the day
+    ran, and where it stopped. */
+function diaryGap(a, b) {
+  const mins = Math.round((new Date(b.at) - new Date(a.at)) / 60000);
+  if (!isFinite(mins) || mins < 25) return '';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `<div class="tl-gap"><span>${h ? h + 'h' + (m ? ' ' + m + 'm' : '') : m + 'm'}</span></div>`;
+}
+
+/** The whole day on one line: where each entry falls between the first and
+    the last, so the shape of the shift is visible before a word is read. */
+function dayStrip(list) {
+  if (list.length < 2) return '';
+  const t0 = new Date(list[0].at).getTime();
+  const t1 = new Date(list[list.length - 1].at).getTime();
+  if (!(t1 > t0)) return '';
+  return `
+    <div class="tl-strip">
+      <div class="bar">
+        ${list.map(e => {
+          const at = ((new Date(e.at).getTime() - t0) / (t1 - t0)) * 100;
+          return `<i class="status-${entryTone(e)}" style="left:${at.toFixed(2)}%"
+            title="${esc(fmtTime(e.at))} ${esc(entryLabel(e))}"></i>`;
+        }).join('')}
+      </div>
+      <div class="ends"><span>${esc(fmtTime(list[0].at))}</span><span>${esc(fmtTime(list[list.length - 1].at))}</span></div>
     </div>`;
 }
 
@@ -1805,42 +2000,44 @@ function renderDiary(view) {
   if (!p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
   $('#title').textContent = 'Job diary';
 
-  const days = diaryDays(p.id);
   const closed = p.status === 'completed';
-  const quick = ENTRY_TYPES.filter(t => t.quick);
+  // The day turns over whether or not anybody has written in it yet. Showing
+  // today's box empty is how a supervisor sees that it is a new day.
+  const days = diaryDays(p.id);
+  const showToday = !closed && !days.includes(today());
+  const boxes = showToday ? [today()].concat(days) : days;
 
   view.innerHTML = `
     ${jobHeader(p, 'diary')}
 
     ${closed ? '<div class="banner info">This job is completed — the diary is closed and kept as it is.</div>' : `
-      <div class="card">
-        <h2>Log something now</h2>
-        <div class="quick">
-          ${quick.map(t => `<button data-kind="${t.key}" class="status-${t.tone}">
-            <span class="swatch"></span>${esc(t.label)}</button>`).join('')}
-        </div>
-        <a class="btn wide mt" href="#/entry/${p.id}">${icon('plus')}Something else…</a>
-      </div>`}
+      <a class="btn primary wide logbtn" href="#/entry/${p.id}">${icon('plus')}Log something</a>`}
 
-    ${days.length ? days.map(day => {
+    ${boxes.map(day => {
       const list = entriesFor(p.id, day);
-      const span = shiftSpan(list);
+      const span = daySpan(list);
+      const isToday = day === today();
       return `
-        <div class="dayhead">
-          <h3>${esc(fmtDayDate(day))}</h3>
-          <span class="sub">${list.length} entr${list.length > 1 ? 'ies' : 'y'}${span ? ' · ' + esc(span) + ' on site' : ''}</span>
+        <div class="dayhead${isToday ? ' today' : ''}">
+          <h3>${esc(fmtDayDate(day))}${isToday ? '<em>Today</em>' : ''}</h3>
+          <span class="sub">${list.length
+            ? `${list.length} entr${list.length > 1 ? 'ies' : 'y'}${span ? ' · ' + esc(span) + ' on site' : ''}`
+            : 'nothing yet'}</span>
         </div>
         <div class="card">
-          <div class="diary">${list.map(diaryItem).join('')}</div>
-          <div class="btn-row mt">
-            <button class="btn sm" data-day="${day}">${icon('printer')}Print this day</button>
-          </div>
+          ${list.length ? `
+            ${dayStrip(list)}
+            <div class="tl">${list.map((e, i) =>
+              (i ? diaryGap(list[i - 1], e) : '') + diaryItem(e, i)).join('')}</div>
+            <div class="btn-row mt">
+              <button class="btn sm" data-day="${day}">${icon('printer')}Print this day</button>
+            </div>`
+          : `<p class="muted small" style="margin:0">Nothing logged for today yet.
+             <a href="#/entry/${p.id}">Start the day →</a></p>`}
         </div>`;
-    }).join('') : `<div class="empty"><b>Nothing logged yet</b>The first entry starts the job.</div>`}`;
-
-  $$('.quick button', view).forEach(b => b.onclick = () => go(`#/entry/${p.id}?kind=${encodeURIComponent(b.dataset.kind)}`));
+    }).join('') || `<div class="empty"><b>Nothing logged yet</b>The first entry starts the job.</div>`}`;
   $$('[data-day]', view).forEach(b => b.onclick = () => printDayReport(p, b.dataset.day));
-  $$('.d-item', view).forEach(el => el.onclick = ev => {
+  $$('.tl-e', view).forEach(el => el.onclick = ev => {
     if (ev.target.closest('a')) return;   // opening a photo isn't editing
     go(`#/entry/${p.id}?edit=${el.dataset.id}`);
   });
@@ -1866,8 +2063,7 @@ function renderEntry(view) {
   const types = allEntryTypes();
   const wanted = editing ? editing.kind : (route.query.kind || 'note');
   const files = [];
-  const defDate = editing ? editing.entry_date : defaultShiftDate(p.id);
-  const nightRoll = !editing && defDate !== today();
+  const defDate = editing ? editing.entry_date : today();
 
   view.innerHTML = `
     <div class="card">
@@ -1879,15 +2075,12 @@ function renderEntry(view) {
         </select></label>
 
       <div class="row">
-        <label class="field grow"><span>${nightRoll ? 'Shift that started' : 'Date'}</span>
+        <label class="field grow"><span>Date</span>
           <input type="date" id="date" value="${esc(defDate)}"></label>
         <label class="field grow"><span>Time</span>
           <input type="text" id="time" value="${esc(editing ? fmtTime(editing.at) : nowTime())}"
             placeholder="07:15" inputmode="numeric" maxlength="5"></label>
       </div>
-
-      ${nightRoll ? `<p class="muted tiny" style="margin-top:-6px">You're on last night's shift, so this
-      goes under ${esc(fmtDayDate(defDate))}. Change the date if that's not right.</p>` : ''}
 
       <label class="field"><span>Comment</span>
         <textarea id="body" placeholder="What happened, what was decided, anything worth remembering.">${esc(editing ? editing.body : '')}</textarea></label>
@@ -2057,26 +2250,18 @@ function renderJobEdit(view) {
           <input type="date" id="end" value="${esc(p.end_date || '')}"></label>
       </div>
 
+      <label class="field"><span>Crew</span>
+        <select id="crew">
+          <option value="" ${!crewOf(p) ? 'selected' : ''}>Not assigned yet</option>
+          ${CREWS.map(c => `<option value="${c.key}" ${crewOf(p) === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+        </select></label>
+
       <label class="field"><span>Supervisor on site</span>
         <input type="text" id="super" value="${esc(p.supervisor || '')}" placeholder="Name" list="supers">
         <datalist id="supers">${names.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist></label>
 
       <label class="field"><span>Client contact <span class="muted">(optional)</span></span>
         <input type="text" id="contact" value="${esc(p.contact || '')}" placeholder="Name and phone"></label>
-    </div>
-
-    <div class="card">
-      <h2>Value and cost</h2>
-      <p class="muted small">Never shown on a site phone. Leave either blank until somebody
-      knows the number — a margin is only worked out when both are filled in.</p>
-      <div class="row">
-        <label class="field grow"><span>Contract value (excl. GST)</span>
-          <input type="number" id="value" inputmode="decimal" step="0.01" min="0"
-            value="${esc(hasMoney(p.contract_value) ? p.contract_value : '')}" placeholder="e.g. 84000"></label>
-        <label class="field grow"><span>Cost to RCK</span>
-          <input type="number" id="cost" inputmode="decimal" step="0.01" min="0"
-            value="${esc(hasMoney(p.actual_cost) ? p.actual_cost : '')}" placeholder="e.g. 61500"></label>
-      </div>
     </div>
 
     ${editing ? `
@@ -2123,10 +2308,9 @@ function renderJobEdit(view) {
       description: $('#desc', view).value.trim(),
       start_date: start,
       end_date: end,
+      crew: $('#crew', view).value,
       supervisor: $('#super', view).value.trim(),
       contact: $('#contact', view).value.trim(),
-      contract_value: moneyField($('#value', view).value),
-      actual_cost: moneyField($('#cost', view).value)
     };
 
     this.disabled = true;
@@ -2162,137 +2346,444 @@ function renderJobEdit(view) {
 }
 
 /* ================================================================
+   Screen — costing one job
+   The office prices it: a line per thing the job is made of, quantity
+   times rate. A director fills in what it actually came to once the job
+   is done, and the difference speaks for itself.
+   ================================================================ */
+async function addCostLine(projectId, kind) {
+  const k = costKind(kind);
+  const existing = costLinesFor(projectId);
+  return Store.insert('job_costs', {
+    id: uid(),
+    project_id: projectId,
+    kind: k.key,
+    label: '',
+    unit: k.unit,
+    qty: null, rate: null, actual_qty: null, actual_rate: null,
+    sort: existing.length ? Math.max.apply(null, existing.map(l => l.sort || 0)) + 1 : 0,
+    created_at: new Date().toISOString(),
+    created_by: whoami()
+  });
+}
+
+function renderCosts(view) {
+  const p = jobById(jobIdFromPath());
+  if (!p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
+  if (!isOffice()) {
+    view.innerHTML = `
+      <div class="card">
+        <h2>Office and directors only</h2>
+        <p class="muted small">What a job costs is priced by the office and reviewed by a
+        director. Nothing about money is shown on a site phone.</p>
+        <a class="btn wide mt" href="#/job/${p.id}">Back to the job</a>
+      </div>`;
+    return;
+  }
+  $('#title').textContent = 'Costing';
+
+  const c = costing(p);
+  const showActual = isDirector();
+
+  view.innerHTML = `
+    <div class="card accent status-${statusTone(p.status)}">
+      <div class="row spread" style="align-items:flex-start">
+        <div class="grow">
+          <div class="tiny" style="color:var(--ink-3);letter-spacing:.04em;font-weight:700">${jobNo(p)}</div>
+          <h2 style="font-size:18px;margin:2px 0 3px">${esc(p.name)}</h2>
+          <div class="small muted">${esc(p.client || 'No client named')}</div>
+        </div>
+        <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+      </div>
+      <div class="sub" style="margin-top:9px;display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12.5px">
+        <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
+        ${p.site ? `<span>${esc(p.site)}</span>` : ''}
+        ${p.start_date ? `<span>${esc(fmtShort(p.start_date))}${
+          p.end_date && p.end_date !== p.start_date ? '–' + esc(fmtShort(p.end_date)) : ''}</span>` : ''}
+        ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="btn-row mb">
+      <a class="btn sm" href="#/diary/${p.id}">${icon('book')}Timeline${
+        entriesFor(p.id).length ? ` (${entriesFor(p.id).length})` : ''}</a>
+      <a class="btn sm" href="#/job/${p.id}">${icon('doc')}Full job</a>
+    </div>
+
+    <div class="card">
+      <h2>Invoice</h2>
+      <div class="row">
+        <label class="field grow"><span>Expected invoice (excl. GST)</span>
+          <input type="number" id="exInv" inputmode="decimal" step="0.01" min="0"
+            value="${esc(c.exInv == null ? '' : c.exInv)}" placeholder="e.g. 84000"></label>
+        ${showActual ? `
+        <label class="field grow"><span>Final invoice</span>
+          <input type="number" id="acInv" inputmode="decimal" step="0.01" min="0"
+            value="${esc(c.acInv == null ? '' : c.acInv)}" placeholder="once it is billed"></label>` : ''}
+      </div>
+    </div>
+
+    <div class="section-title">What the job is made of</div>
+    <div id="lines">${c.lines.map(l => costRow(l, showActual)).join('')
+      || '<div class="card"><p class="muted small" style="margin:0">Nothing priced yet. Add the first line below.</p></div>'}</div>
+
+    <div class="card">
+      <label class="field"><span>Add a cost</span>
+        <select id="addKind">
+          <option value="">Choose what to add…</option>
+          ${COST_KINDS.map(k => `<option value="${k.key}">${esc(k.label)}</option>`).join('')}
+        </select></label>
+      <p class="muted tiny" style="margin-bottom:0">Maintenance is added for you — always a tenth of
+      everything above it, so it moves when the lines move.</p>
+    </div>
+
+    ${costTotals(p, c, showActual)}
+
+    ${showActual ? `
+    <div class="card">
+      <label class="field"><span>How did it go?</span>
+        <textarea id="pnl" placeholder="Why it landed where it did — the wet week, the extra establishment, the variation that never got signed.">${esc(p.pnl_notes || '')}</textarea>
+      </label>
+      <button class="btn wide" id="saveNotes">Save note</button>
+    </div>
+
+    <div class="card">
+      <button class="btn primary wide" id="printPnl">${icon('printer')}Print the job P&amp;L</button>
+      <p class="muted tiny center mt" style="margin-bottom:0">The money, the variance, your note, and
+      every entry the supervisors wrote.</p>
+    </div>` : ''}`;
+
+  wireCosts(view, p);
+}
+
+/** One line: what it is, how much of it, at what rate — and, for a
+    director, what it actually came to. */
+function costRow(l, showActual) {
+  const ex = lineExpected(l);
+  const ac = lineActual(l);
+  const diff = lineHasActual(l) ? ac - ex : null;
+  return `
+    <div class="costrow" data-id="${l.id}">
+      <div class="ch">
+        <input type="text" class="cname" data-f="label" value="${esc(l.label || '')}"
+          placeholder="${esc(costKind(l.kind).label)}">
+        <button class="cdel" title="Remove">${icon('trash')}</button>
+      </div>
+      <div class="cg">
+        <label><span>Qty</span><input type="number" data-f="qty" inputmode="decimal" step="any"
+          value="${esc(l.qty == null ? '' : l.qty)}"></label>
+        <label><span>Unit</span><input type="text" data-f="unit" value="${esc(l.unit || '')}" placeholder="hours"></label>
+        <label><span>Rate</span><input type="number" data-f="rate" inputmode="decimal" step="any"
+          value="${esc(l.rate == null ? '' : l.rate)}"></label>
+        <div class="ctot"><span>Expected</span><b>${esc(fmtMoney(ex))}</b></div>
+      </div>
+      ${showActual ? `
+      <div class="cg actual">
+        <label><span>Actual qty</span><input type="number" data-f="actual_qty" inputmode="decimal" step="any"
+          value="${esc(l.actual_qty == null ? '' : l.actual_qty)}"></label>
+        <label><span></span><span class="cu">${esc(l.unit || '')}</span></label>
+        <label><span>Actual rate</span><input type="number" data-f="actual_rate" inputmode="decimal" step="any"
+          value="${esc(l.actual_rate == null ? '' : l.actual_rate)}"></label>
+        <div class="ctot"><span>Actual</span><b class="${diff == null ? '' : diff > 0 ? 'neg' : 'pos'}">${
+          lineHasActual(l) ? esc(fmtMoney(ac)) : '—'}</b>${
+          diff ? `<em class="${diff > 0 ? 'neg' : 'pos'}">${diff > 0 ? '+' : ''}${esc(fmtMoney(diff))}</em>` : ''}</div>
+      </div>` : ''}
+    </div>`;
+}
+
+/** The bottom line, expected against actual. */
+function costTotals(p, c, showActual) {
+  const row = (label, ex, ac, strong) => `
+    <tr${strong ? ' class="tot"' : ''}>
+      <th>${esc(label)}</th>
+      <td>${ex == null ? '—' : esc(fmtMoney(ex, true))}</td>
+      ${showActual ? `<td>${ac == null ? '—' : esc(fmtMoney(ac, true))}</td>` : ''}
+    </tr>`;
+  return `
+    <div class="card">
+      <h2>The bottom line</h2>
+      <table class="data money">
+        <tr><th></th><td class="hd">Expected</td>${showActual ? '<td class="hd">Actual</td>' : ''}</tr>
+        ${row('Invoice', c.exInv, c.acInv)}
+        ${row('Costs', c.lines.length ? c.exLines : c.legacy, c.anyActual ? c.acLines : null)}
+        ${c.lines.length ? row('Maintenance (10%)', c.exMaint, c.anyActual ? c.acMaint : null) : ''}
+        ${row('Total cost', c.exCost, c.acCost, true)}
+        <tr class="tot">
+          <th>Margin</th>
+          <td class="${c.exMargin == null ? '' : c.exMargin < 0 ? 'neg' : 'pos'}">${
+            c.exMargin == null ? '—' : esc(fmtMoney(c.exMargin, true)) + (c.exPct != null ? ` · ${c.exPct.toFixed(1)}%` : '')}</td>
+          ${showActual ? `<td class="${c.acMargin == null ? '' : c.acMargin < 0 ? 'neg' : 'pos'}">${
+            c.acMargin == null ? '—' : esc(fmtMoney(c.acMargin, true)) + (c.acPct != null ? ` · ${c.acPct.toFixed(1)}%` : '')}</td>` : ''}
+        </tr>
+      </table>
+      ${showActual && c.swing != null ? `<p class="small mt" style="margin-bottom:0">Against the price,
+        the job came in <strong class="${c.swing < 0 ? 'neg' : 'pos'}">${
+        esc(fmtMoney(Math.abs(c.swing)))} ${c.swing < 0 ? 'behind' : 'ahead'}</strong>.</p>` : ''}
+    </div>`;
+}
+
+function wireCosts(view, p) {
+  const save = (id, patch) => Store.patch('job_costs', id, patch);
+
+  $$('.costrow', view).forEach(rowEl => {
+    const id = rowEl.dataset.id;
+    $$('input', rowEl).forEach(inp => {
+      inp.onchange = async () => {
+        const f = inp.dataset.f;
+        const v = inp.type === 'number' ? moneyField(inp.value) : inp.value.trim();
+        await save(id, { [f]: v });
+        render();                       // totals and maintenance move together
+      };
+    });
+    $('.cdel', rowEl).onclick = async () => {
+      const l = DB.job_costs.find(x => x.id === id);
+      if (!confirm(`Remove "${l ? costLabel(l) : 'this line'}" from the costing?`)) return;
+      await Store.remove('job_costs', id);
+      render();
+    };
+  });
+
+  const add = $('#addKind', view);
+  if (add) add.onchange = async () => {
+    if (!add.value) return;
+    await addCostLine(p.id, add.value);
+    render();
+  };
+
+  const exInv = $('#exInv', view);
+  if (exInv) exInv.onchange = async () => {
+    await Store.patch('projects', p.id, { contract_value: moneyField(exInv.value) });
+    render();
+  };
+  const acInv = $('#acInv', view);
+  if (acInv) acInv.onchange = async () => {
+    await Store.patch('projects', p.id, { actual_invoice: moneyField(acInv.value) });
+    render();
+  };
+
+  const notes = $('#saveNotes', view);
+  if (notes) notes.onclick = async function () {
+    this.disabled = true;
+    await Store.patch('projects', p.id, { pnl_notes: $('#pnl', view).value.trim() });
+    toast('Saved');
+    render();
+  };
+
+  const pr = $('#printPnl', view);
+  if (pr) pr.onclick = () => printJobPnl(p);
+}
+
+/* ================================================================
    Screen — the director's overview
    Every job at once over a period: what the crews did, what went wrong,
    and what it was worth. Everything on it is added up from what the
    supervisors and the office entered on the jobs themselves — nothing
    here is typed twice.
    ================================================================ */
-const overview = { period: 'month', from: '', to: '', sort: 'value' };
-
-function overviewRange() {
-  if (overview.period === 'custom') return [overview.from, overview.to];
-  return periodRange(overview.period);
+/* The month you are in, every job in it. That is the question a director
+   opens the app with, so it is answered before a single choice is made.
+   Anything narrower sits behind one button. */
+function monthRange() {
+  const n = new Date(), y = n.getFullYear(), m = n.getMonth();
+  const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  return [iso(y, m, 1), iso(y, m, new Date(y, m + 1, 0).getDate())];
+}
+const pnlFilter = (() => {
+  const [from, to] = monthRange();
+  return { status: 'all', client: 'all', from, to, sort: 'value', open: false };
+})();
+function pnlIsDefault() {
+  const [from, to] = monthRange();
+  return pnlFilter.status === 'all' && pnlFilter.client === 'all'
+      && pnlFilter.from === from && pnlFilter.to === to;
+}
+function pnlReset() {
+  const [from, to] = monthRange();
+  Object.assign(pnlFilter, { status: 'all', client: 'all', from, to });
 }
 
-function renderOverview(view) {
+const PNL_STATUS = [
+  { key: 'all',       label: 'Every job' },
+  { key: 'planned',   label: 'Planned' },
+  { key: 'ongoing',   label: 'On site' },
+  { key: 'completed', label: 'Completed' }
+];
+
+function pnlJobs() {
+  return DB.projects.filter(p => {
+    // An archived job is one that never really ran. It should not be sitting
+    // in a month's margin any more than it should be on the board.
+    if (p.archived) return false;
+    if (pnlFilter.status !== 'all' && p.status !== pnlFilter.status) return false;
+    if (pnlFilter.client !== 'all' && (p.client || '').trim() !== pnlFilter.client) return false;
+    return jobInPeriod(p, pnlFilter.from, pnlFilter.to);
+  });
+}
+/** What the figures on screen are of, in one line. */
+function pnlLabel() {
+  const [mf, mt] = monthRange();
+  const n = new Date();
+  const when = (pnlFilter.from === mf && pnlFilter.to === mt)
+    ? `${MONTHS_LONG[n.getMonth()]} ${n.getFullYear()}`
+    : (pnlFilter.from || pnlFilter.to)
+      ? `${pnlFilter.from ? fmtDate(pnlFilter.from) : 'the beginning'} to ${pnlFilter.to ? fmtDate(pnlFilter.to) : 'today'}`
+      : 'All time';
+  const who = pnlFilter.client === 'all' ? '' : ` · ${pnlFilter.client}`;
+  const what = pnlFilter.status === 'all' ? '' : ` · ${PNL_STATUS.find(x => x.key === pnlFilter.status).label.toLowerCase()}`;
+  return when + who + what;
+}
+
+function renderPnl(view) {
   if (!isDirector()) {
     view.innerHTML = `
       <div class="card">
         <h2>Director only</h2>
-        <p class="muted small">The overview across every job — days on site, issues, value and
-        margin over a period — is for devices set to <strong>Director</strong>. Everything it adds
-        up is on the jobs themselves, which you can already see.</p>
-        <a class="btn wide mt" href="#/reports">Open reports</a>
+        <p class="muted small">The profit and loss across every job is for devices set to
+        <strong>Director</strong>. The jobs themselves, their paperwork and their diaries are
+        all open to you.</p>
+        <a class="btn wide mt" href="#/jobs">Open the jobs</a>
       </div>`;
     return;
   }
 
-  const [from, to] = overviewRange();
-  const list = DB.projects.filter(p => jobInPeriod(p, from, to));
+  const list = pnlJobs();
   const t = periodTotals(list);
+  const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim()).filter(Boolean))).sort();
 
+  const mg = p => { const m = costing(p); return m.acMargin != null ? m.acMargin : m.exMargin; };
   const sorters = {
     value:  (a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1),
-    margin: (a, b) => ((jobMargin(b) == null ? -Infinity : jobMargin(b)) - (jobMargin(a) == null ? -Infinity : jobMargin(a))),
-    days:   (a, b) => diaryDays(b.id).length - diaryDays(a.id).length,
-    issues: (a, b) => issueCount(b.id) - issueCount(a.id)
+    margin: (a, b) => ((mg(b) == null ? -Infinity : mg(b)) - (mg(a) == null ? -Infinity : mg(a))),
+    name:   (a, b) => String(a.name || '').localeCompare(String(b.name || '')),
+    date:   (a, b) => String(b.start_date || '').localeCompare(String(a.start_date || ''))
   };
-  const sorted = list.slice().sort(sorters[overview.sort] || sorters.value);
+  const sorted = list.slice().sort(sorters[pnlFilter.sort] || sorters.value);
 
   view.innerHTML = `
-    <div class="filters" id="periodChips">
-      ${PERIODS.map(x => `<button class="chip" data-period="${x.key}"
-        aria-pressed="${overview.period === x.key}">${esc(x.label)}</button>`).join('')}
-      <button class="chip" data-period="custom" aria-pressed="${overview.period === 'custom'}">Pick dates</button>
+    <div class="ledger">
+      <div class="lh">${esc(pnlLabel())}</div>
+      <div class="lrow"><span>Invoice</span><b>${esc(fmtMoney(t.value))}</b></div>
+      <div class="lrow"><span>Cost</span><b>${esc(fmtMoney(t.cost))}</b></div>
+      <div class="lrow tot"><span>Margin</span><b class="${
+        t.margin == null ? '' : t.margin < 0 ? 'neg' : 'pos'}">${
+        t.margin == null ? '—' : esc(fmtMoney(t.margin))}${
+        t.marginPct != null ? ` <em>${t.marginPct.toFixed(1)}%</em>` : ''}</b></div>
+      <div class="lf">${list.length} job${list.length === 1 ? '' : 's'} · ${t.valued} priced${
+        t.settled ? ` · ${t.settled} invoiced, ${esc(fmtMoney(t.acMargin))} actual` : ''}</div>
     </div>
 
-    ${overview.period === 'custom' ? `
-      <div class="card">
-        <div class="row">
-          <label class="field grow"><span>From</span><input type="date" id="from" value="${esc(overview.from)}"></label>
-          <label class="field grow"><span>To</span><input type="date" id="to" value="${esc(overview.to)}"></label>
-        </div>
-      </div>` : ''}
+    <button class="btn wide filterbtn${pnlIsDefault() ? '' : ' on'}" id="filterBtn">
+      ${icon('filter')}${pnlIsDefault() ? 'Filter' : 'Filtered · ' + esc(pnlLabel())}
+    </button>
 
-    <p class="muted small mb">${esc(periodLabel(overview.period, from, to))}</p>
-
-    <div class="card">
-      <div class="stat">
-        <div><span class="n">${t.jobs}</span><span class="l">Jobs</span></div>
-        <div><span class="n">${t.days}</span><span class="l">Days on site</span></div>
-        <div><span class="n">${t.entries}</span><span class="l">Diary entries</span></div>
-        <div><span class="n" style="color:${t.issues ? 'var(--red)' : 'inherit'}">${t.issues}</span><span class="l">Issues</span></div>
+    ${pnlFilter.open ? `
+    <div class="card filterpanel">
+      <label class="field"><span>Show</span>
+        <select id="fStatus">
+          ${PNL_STATUS.map(x => `<option value="${x.key}" ${pnlFilter.status === x.key ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>Client</span>
+        <select id="fClient">
+          <option value="all">Every client</option>
+          ${clients.map(c => `<option value="${esc(c)}" ${pnlFilter.client === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select></label>
+      <div class="row">
+        <label class="field grow"><span>From</span><input type="date" id="fFrom" value="${esc(pnlFilter.from)}"></label>
+        <label class="field grow"><span>To</span><input type="date" id="fTo" value="${esc(pnlFilter.to)}"></label>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>Value and margin</h2>
-      <div class="stat">
-        <div><span class="n" style="font-size:19px">${esc(fmtMoney(t.value))}</span><span class="l">Contract value</span></div>
-        <div><span class="n" style="font-size:19px">${esc(fmtMoney(t.cost))}</span><span class="l">Cost</span></div>
-        <div><span class="n" style="font-size:19px;color:${t.margin == null ? 'inherit' : t.margin < 0 ? 'var(--red)' : 'var(--green)'}">${
-          t.margin == null ? '—' : esc(fmtMoney(t.margin))}</span><span class="l">Margin${
-          t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</span></div>
+      <div class="btn-row">
+        <button class="btn sm" id="fAll">All time</button>
+        <button class="btn sm" id="fReset">This month</button>
+        <button class="btn sm primary" id="fClose">Done</button>
       </div>
-      ${t.valued < t.jobs || t.costed < t.jobs ? `<p class="muted tiny mt" style="margin-bottom:0">
-        Value is filled in on ${t.valued} of ${t.jobs} job(s), cost on ${t.costed}. The totals only
-        count the jobs that carry the number, so they are a floor, not the whole picture.</p>` : ''}
-    </div>
+    </div>` : ''}
 
     <div class="filters" id="sortChips">
-      ${[['value','By value'],['margin','By margin'],['days','By days on site'],['issues','By issues']]
-        .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${overview.sort === k}">${l}</button>`).join('')}
+      ${[['value','By value'],['margin','By margin'],['date','By date'],['name','By name']]
+        .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${pnlFilter.sort === k}">${l}</button>`).join('')}
     </div>
 
     ${sorted.length ? sorted.map((p, i) => {
-      const m = jobMargin(p), days = diaryDays(p.id).length, iss = issueCount(p.id);
-      const pct = marginPct(p.contract_value, m);
+      const c = costing(p);
+      const settled = c.acMargin != null;
+      const m = settled ? c.acMargin : c.exMargin;
+      const pct = settled ? c.acPct : c.exPct;
       return `
         <button class="job-row status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
           <div class="hdr">
             <span class="num">${jobNo(p)}</span>
             <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
-            ${p.archived ? '<span class="pill plain">Archived</span>' : ''}
+            <span class="pill plain">${settled ? 'Final' : c.lines.length ? 'Priced' : 'Not priced'}</span>
           </div>
           <div class="ttl">${esc(p.name)}</div>
           <div class="sub">
             ${p.client ? `<span>${esc(p.client)}</span>` : ''}
-            ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
-            <span>${days} day${days === 1 ? '' : 's'} on site</span>
-            ${iss ? `<span class="overdue">${iss} issue${iss > 1 ? 's' : ''}</span>` : ''}
+            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
+            ${p.start_date ? `<span>${esc(fmtShort(p.start_date))}</span>` : ''}
           </div>
           <div class="sub">
-            <span><strong>${esc(fmtMoney(p.contract_value))}</strong> value</span>
-            <span>${esc(fmtMoney(p.actual_cost))} cost</span>
-            ${m != null ? `<span style="color:${m < 0 ? 'var(--red)' : 'var(--green)'};font-weight:640">${
+            <span><strong>${esc(fmtMoney(settled ? c.acInv : c.exInv))}</strong> invoice</span>
+            <span>${esc(fmtMoney(settled ? c.acCost : c.exCost))} cost</span>
+            ${m != null ? `<span class="${m < 0 ? 'neg' : 'pos'}" style="font-weight:640">${
               esc(fmtMoney(m))}${pct != null ? ' · ' + pct.toFixed(1) + '%' : ''}</span>` : ''}
           </div>
         </button>`;
-    }).join('') : '<div class="empty"><b>No jobs in this period</b>Try a wider one.</div>'}
+    }).join('') : `<div class="empty"><b>No jobs here</b>Nothing matches this month.
+      Open the filter for a wider period.</div>`}
 
     <div class="card">
-      <button class="btn wide" id="print">${icon('printer')}Print the director's report</button>
-      <p class="muted tiny center mt" style="margin-bottom:0">Every job in the period, plus every issue
-      and delay the supervisors logged.</p>
+      <div class="btn-row">
+        <button class="btn" id="print">${icon('printer')}Print the report</button>
+        <button class="btn" id="csv">${icon('download')}Export to Excel</button>
+      </div>
+      <p class="muted tiny center mt" style="margin-bottom:0">Both cover exactly what is filtered above.</p>
     </div>`;
 
-  $$('#periodChips .chip', view).forEach(b => b.onclick = () => {
-    overview.period = b.dataset.period;
-    if (overview.period === 'custom' && !overview.from && !overview.to) {
-      const [f, t2] = periodRange('month');
-      overview.from = f; overview.to = t2;
-    }
-    render();
+  $('#filterBtn', view).onclick = () => { pnlFilter.open = !pnlFilter.open; render(); };
+  const on = (id, fn) => { const el = $('#' + id, view); if (el) el.onchange = fn; };
+  on('fStatus', e => { pnlFilter.status = e.target.value; render(); });
+  on('fClient', e => { pnlFilter.client = e.target.value; render(); });
+  on('fFrom',   e => { pnlFilter.from = e.target.value; render(); });
+  on('fTo',     e => { pnlFilter.to = e.target.value; render(); });
+  const click = (id, fn) => { const el = $('#' + id, view); if (el) el.onclick = fn; };
+  click('fReset', () => { pnlReset(); render(); });
+  click('fAll',   () => { pnlFilter.from = ''; pnlFilter.to = ''; render(); });
+  click('fClose', () => { pnlFilter.open = false; render(); });
+
+  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.sort = b.dataset.sort; render(); });
+  $$('.job-row', view).forEach(b => b.onclick = () => go('#/costs/' + b.dataset.id));
+  $('#print', view).onclick = () => printDirectorReport(sorted);
+  $('#csv', view).onclick = () => exportPnlCsv(sorted);
+}
+
+/** The filtered list as a spreadsheet — a client's month handed straight to
+    the accountant, with the same figures that are on the screen. */
+function exportPnlCsv(list) {
+  const r2 = v => v == null ? '' : Math.round(v * 100) / 100;
+  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Status', 'First day', 'Last day',
+    'Supervisor', 'Days on site', 'Issues',
+    'Expected invoice', 'Expected cost', 'Expected margin', 'Expected margin %',
+    'Final invoice', 'Actual cost', 'Actual margin', 'Actual margin %',
+    'Against the price', 'Note']];
+  list.forEach(p => {
+    const c = costing(p);
+    rows.push([
+      jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), statusLabel(p.status),
+      p.start_date || '', p.end_date || '', p.supervisor,
+      diaryDays(p.id).length, issueCount(p.id),
+      r2(c.exInv), r2(c.exCost), r2(c.exMargin), c.exPct == null ? '' : c.exPct.toFixed(1),
+      r2(c.acInv), r2(c.acCost), r2(c.acMargin), c.acPct == null ? '' : c.acPct.toFixed(1),
+      r2(c.swing), p.pnl_notes || ''
+    ]);
   });
-  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { overview.sort = b.dataset.sort; render(); });
-
-  const f = $('#from', view), t2 = $('#to', view);
-  if (f) f.onchange = () => { overview.from = f.value; render(); };
-  if (t2) t2.onchange = () => { overview.to = t2.value; render(); };
-
-  $$('.job-row', view).forEach(b => b.onclick = () => go('#/job/' + b.dataset.id));
-  $('#print', view).onclick = () => printDirectorReport(from, to);
+  const t = periodTotals(list);
+  rows.push([]);
+  rows.push(['TOTAL', pnlLabel(), '', '', '', '', '', '', '', t.days, t.issues,
+    r2(t.value), r2(t.cost), r2(t.margin), t.marginPct == null ? '' : t.marginPct.toFixed(1),
+    r2(t.acValue), r2(t.acCost), r2(t.acMargin), t.acMarginPct == null ? '' : t.acMarginPct.toFixed(1), '', '']);
+  const tag = (pnlFilter.client === 'all' ? 'all-clients' : pnlFilter.client)
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  downloadCsv(`rck-pnl-${tag}-${pnlFilter.from || 'start'}-to-${pnlFilter.to || today()}.csv`, rows);
 }
 
 /* ================================================================
@@ -2331,9 +2822,9 @@ function renderReports(view) {
     ${isDirector() ? `
     <div class="card">
       <h2>Across every job</h2>
-      <p class="muted small">The overview: days on site, issues, value and margin over a period,
-      added up from what the crews and the office entered on the jobs themselves.</p>
-      <a class="btn primary wide" href="#/overview">Open the director's overview</a>
+      <p class="muted small">Profit and loss over a period: what each job was priced at, what it
+      came to, and the margin — added up from the costings and the crews' own entries.</p>
+      <a class="btn primary wide" href="#/pnl">Open profit &amp; loss</a>
     </div>` : ''}
 
     <div class="card">
@@ -2375,12 +2866,12 @@ function downloadCsv(name, rows) {
 
 function exportJobsCsv() {
   const money = isOffice();     // a site phone exports a spreadsheet without the money in it
-  const rows = [['Job', 'Name', 'Client', 'Site', 'Type of work', 'Status', 'First day',
+  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Type of work', 'Status', 'First day',
     'Last day', 'Supervisor', 'Started', 'Completed', 'Days on site', 'Diary entries',
     'Issues', 'Documents', 'Closing note']
     .concat(money ? ['Contract value', 'Cost', 'Margin'] : [])];
   boardOrder(DB.projects.slice()).forEach(p => rows.push([
-    jobNo(p), p.name, p.client, p.site, typeLabel(typeOf(p)), statusLabel(p.status),
+    jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), typeLabel(typeOf(p)), statusLabel(p.status),
     p.start_date || '', p.end_date || '', p.supervisor,
     p.started_at ? fmtDate(p.started_at) : '', p.completed_at ? fmtDate(p.completed_at) : '',
     diaryDays(p.id).length, entriesFor(p.id).length, issueCount(p.id), allDocsFor(p.id).length,
@@ -2480,61 +2971,70 @@ async function printDoc(html, running) {
   setTimeout(() => window.print(), 80);
 }
 
+/** The job's facts, two to a line. A summary should sit across the page,
+    not run down it — half the height, and no harder to read. */
 function jobFacts(p) {
   const tone = p.status === 'ongoing' ? 'on' : p.status === 'completed' ? 'done' : '';
-  return `
-    <table class="kv">
-      <tr><td>Job number</td><td><strong>${jobNo(p)}</strong></td></tr>
-      <tr><td>Client</td><td>${esc(p.client || '—')}</td></tr>
-      <tr><td>Site</td><td>${esc(p.site || '—')}</td></tr>
-      <tr><td>Type of work</td><td>${esc(typeLabel(typeOf(p)))}</td></tr>
-      <tr><td>Status</td><td><span class="badge ${tone}">${esc(statusLabel(p.status))}</span></td></tr>
-      <tr><td>Planned dates</td><td>${p.start_date ? fmtDate(p.start_date) : 'not set'}${
-        p.end_date && p.end_date !== p.start_date ? ' to ' + fmtDate(p.end_date) : ''}</td></tr>
-      <tr><td>Supervisor</td><td>${esc(p.supervisor || '—')}</td></tr>
-      ${p.contact ? `<tr><td>Client contact</td><td>${esc(p.contact)}</td></tr>` : ''}
-      ${p.started_at ? `<tr><td>Started on site</td><td>${fmtDateTime(p.started_at)}${p.started_by ? ' · ' + esc(p.started_by) : ''}</td></tr>` : ''}
-      ${p.completed_at ? `<tr><td>Completed</td><td>${fmtDateTime(p.completed_at)}${p.completed_by ? ' · ' + esc(p.completed_by) : ''}</td></tr>` : ''}
-      <tr><td>Days on site</td><td>${diaryDays(p.id).length}</td></tr>
-    </table>
-    ${p.description ? `<p class="note">${esc(p.description)}</p>` : ''}`;
+  const facts = [
+    ['Job', `<strong>${jobNo(p)}</strong>`],
+    ['Status', `<span class="badge ${tone}">${esc(statusLabel(p.status))}</span>`],
+    ['Client', esc(p.client || '—')],
+    ['Crew', esc(crewLabel(crewOf(p)))],
+    ['Site', esc(p.site || '—')],
+    ['Work', esc(typeLabel(typeOf(p)))],
+    ['Supervisor', esc(p.supervisor || '—')],
+    ['Dates', p.start_date ? fmtDate(p.start_date) + (p.end_date && p.end_date !== p.start_date
+      ? ' – ' + fmtDate(p.end_date) : '') : 'not set'],
+    ['Days on site', String(diaryDays(p.id).length)]
+  ];
+  if (p.contact) facts.push(['Client contact', esc(p.contact)]);
+  if (p.started_at) facts.push(['Started', fmtDateTime(p.started_at)]);
+  if (p.completed_at) facts.push(['Completed', fmtDateTime(p.completed_at)]);
+
+  const rows = [];
+  for (let i = 0; i < facts.length; i += 2) {
+    const a = facts[i], b = facts[i + 1];
+    rows.push(`<tr><td class="lbl">${esc(a[0])}</td><td class="val">${a[1]}</td>` +
+      (b ? `<td class="lbl">${esc(b[0])}</td><td class="val">${b[1]}</td>` : '<td></td><td></td>') + '</tr>');
+  }
+  return `<table class="kv two">${rows.join('')}</table>` +
+    (p.description ? `<p class="note">${esc(p.description)}</p>` : '');
 }
 
-/** One shift, in the order it happened. Each entry is a block that cannot
-    be split across a page: a time with no comment under it, or a comment
-    orphaned from its time, is worse than a little white space. */
-function daySection(p, day, withPhotos) {
+/** One day, as a table. The heading lives in the thead, so a day that runs
+    on to the next page takes its heading with it — which is what stops the
+    orphaned headings and the half-empty pages that come of trying to keep a
+    whole day together. */
+function daySection(p, day, n, total) {
   const list = entriesFor(p.id, day);
   if (!list.length) return '';
   const first = list[0], last = list[list.length - 1];
-  const span = shiftSpan(list);
-  const photos = [];
-  list.forEach(e => (e.files || []).forEach(f => {
-    if (/^image\//.test(f.type || '')) photos.push({ f, e });
-  }));
+  const span = daySpan(list);
+  const shots = list.reduce((c, e) => c + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
 
   return `
-    <div class="day">
-      <div class="day-head">
-        <h3>${esc(fmtDayDate(day))}</h3>
-        ${span ? `<span class="span">${esc(fmtTime(first.at))} – ${esc(fmtTime(last.at))} · ${esc(span)} on site</span>` : ''}
-      </div>
-      ${list.map(e => {
-        const flag = e.kind === 'issue' || e.kind === 'delay';
-        const shots = (e.files || []).filter(f => /^image\//.test(f.type || '')).length;
-        return `
-          <div class="entry${flag ? ' flag' : ''}">
-            <div class="e-time">${esc(fmtTime(e.at))}</div>
-            <div class="e-body">
-              <div class="e-kind">${esc(entryLabel(e))}</div>
-              ${e.body ? `<div class="e-note">${esc(e.body)}</div>` : ''}
-              <div class="e-who">${esc(e.author || '')}${
-                shots ? ` · ${shots} photo${shots > 1 ? 's' : ''}` : ''}</div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>
-    ${withPhotos ? photoSheet(photos, fmtDayDate(day)) : ''}`;
+    <table class="dtable">
+      <thead>
+        <tr class="dayrow"><th colspan="4">
+          ${n ? `<span class="dn">Day ${n}${total ? '/' + total : ''}</span>` : ''}${esc(fmtDayDate(day))}
+          <span class="dmeta">${span ? `${esc(fmtTime(first.at))}–${esc(fmtTime(last.at))} · ${esc(span)} · ` : ''}${
+            list.length} entr${list.length > 1 ? 'ies' : 'y'}${shots ? ` · ${shots} photo${shots > 1 ? 's' : ''}` : ''}</span>
+        </th></tr>
+        <tr class="cols"><th>Time</th><th>Entry</th><th>Notes</th><th>By</th></tr>
+      </thead>
+      <tbody>
+        ${list.map(e => {
+          const flag = e.kind === 'issue' || e.kind === 'delay';
+          const n2 = (e.files || []).filter(f => /^image\//.test(f.type || '')).length;
+          return `<tr${flag ? ' class="flag"' : ''}>
+            <td class="dt">${esc(fmtTime(e.at))}</td>
+            <td class="dk">${esc(entryLabel(e))}</td>
+            <td class="dnote">${esc(e.body || '')}${n2 ? `<span class="ph"> · ${n2} photo${n2 > 1 ? 's' : ''}</span>` : ''}</td>
+            <td class="dby">${esc(e.author || '')}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
 }
 
 /** Cut a caption at a word, not mid-syllable. */
@@ -2546,20 +3046,33 @@ function clip(text, max) {
   return (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '') + '…';
 }
 
-/** Photos two across and two down, so a page carries four and a job with
-    thirty of them is still a document somebody will open. */
-function photoSheet(photos, heading) {
-  if (!photos.length) return '';
+/** Every photograph, gathered at the back. Laid out as a table rather than
+    a grid, because browsers fragment grids across pages badly — which is
+    what put photographs half on one page and half on the next. Two across,
+    three down: six to a page, every page the same. */
+function photoAppendix(p, days) {
+  const shots = [];
+  days.forEach((day, i) => entriesFor(p.id, day).forEach(e => (e.files || []).forEach(f => {
+    if (/^image\//.test(f.type || '')) shots.push({ f, e, day, n: i + 1 });
+  })));
+  if (!shots.length) return '';
+
+  const cell = ({ f, e, day, n }) => `
+    <td><figure class="photo">
+      <img src="${esc(f.url)}" alt="">
+      <div class="cap"><b>Day ${n} · ${esc(fmtShort(day))} · ${esc(fmtTime(e.at))}</b>
+        ${esc(entryLabel(e))}${e.body ? ' — ' + esc(clip(e.body, 74)) : ''}</div>
+    </figure></td>`;
+
+  const rows = [];
+  for (let i = 0; i < shots.length; i += 2) {
+    rows.push(`<tr>${cell(shots[i])}${shots[i + 1] ? cell(shots[i + 1]) : '<td></td>'}</tr>`);
+  }
+
   return `
-    <h2>Photos — ${esc(heading)}</h2>
-    <div class="photos">
-      ${photos.map(({ f, e }) => `
-        <div class="photo">
-          <img src="${esc(f.url)}" alt="">
-          <div class="cap"><b>${esc(fmtTime(e.at))} ${esc(entryLabel(e))}</b>${
-            e.body ? ' — ' + esc(clip(e.body, 105)) : ''}</div>
-        </div>`).join('')}
-    </div>`;
+    <div class="page-break"></div>
+    <h2>Photographs — ${shots.length} over ${days.length} day${days.length > 1 ? 's' : ''}</h2>
+    <table class="photos"><tbody>${rows.join('')}</tbody></table>`;
 }
 
 function docsTable(p, all) {
@@ -2615,8 +3128,10 @@ function printJobReport(p) {
 
     <h2>The job diary</h2>
     ${days.length
-      ? days.map(d => daySection(p, d, true)).join('')
+      ? days.map((d, i) => daySection(p, d, i + 1, days.length)).join('')
       : '<p>No diary entries were recorded.</p>'}
+
+    ${photoAppendix(p, days)}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
@@ -2633,7 +3148,7 @@ function printDayReport(p, day) {
     ${docHead('Daily job diary', p.name, `${jobNo(p)}${p.client ? ' · ' + p.client : ''} · ${fmtDayDate(day)}`)}
 
     <div class="figures">
-      <div><div class="n">${esc(shiftSpan(list) || '—')}</div><div class="l">On site</div></div>
+      <div><div class="n">${esc(daySpan(list) || '—')}</div><div class="l">On site</div></div>
       <div><div class="n">${list.length}</div><div class="l">Entries</div></div>
       <div><div class="n"${issues.length ? ' class="neg"' : ''}>${issues.length}</div><div class="l">Issues &amp; delays</div></div>
       <div><div class="n">${shots}</div><div class="l">Photos</div></div>
@@ -2642,7 +3157,9 @@ function printDayReport(p, day) {
     <h2>The job</h2>
     ${jobFacts(p)}
 
-    ${daySection(p, day, true) || '<p>No entries on this day.</p>'}
+    ${daySection(p, day) || '<p>No entries on this day.</p>'}
+
+    ${photoAppendix(p, [day])}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
@@ -2662,86 +3179,202 @@ function printDocRegister(p) {
 /** The director's report: the period's numbers, every job in it, and every
     issue and delay the crews logged — the supervisors' and the office's own
     entries added up, rather than a separate thing anyone has to write. */
-function printDirectorReport(from, to) {
-  const list = DB.projects.filter(p => jobInPeriod(p, from, to));
-  const t = periodTotals(list);
-  const sorted = list.slice().sort((a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1));
+/** The period, on paper. The numbers first, then how they split by client,
+    then a job at a time, then everything the crews flagged — so it reads
+    top-down from "how did we do" to "and why". */
+function printDirectorReport(list) {
+  const jobs = list || pnlJobs();
+  const t = periodTotals(jobs);
+  const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
+  const cls = v => v == null ? '' : v < 0 ? ' class="neg"' : ' class="pos"';
 
-  const inRange = d => !!d && (!from || d >= from) && (!to || d <= to);
+  // How the period splits by client — the cut a director asks for next.
+  const byClient = {};
+  jobs.forEach(p => {
+    const k = (p.client || '').trim() || 'No client named';
+    const c = costing(p);
+    const b = byClient[k] || (byClient[k] = { jobs: 0, inv: 0, cost: 0, priced: 0, days: 0, issues: 0 });
+    b.jobs++;
+    b.days += diaryDays(p.id).length;
+    b.issues += issueCount(p.id);
+    if (c.exInv != null)  { b.inv += c.exInv; b.priced++; }
+    if (c.exCost != null) { b.cost += c.exCost; }
+  });
+  const clients = Object.keys(byClient).sort((a, b) => byClient[b].inv - byClient[a].inv);
+
   const troubles = [];
-  list.forEach(p => entriesFor(p.id).forEach(e => {
-    if ((e.kind === 'issue' || e.kind === 'delay') && inRange(e.entry_date)) troubles.push({ p, e });
+  jobs.forEach(p => entriesFor(p.id).forEach(e => {
+    if ((e.kind === 'issue' || e.kind === 'delay') &&
+        (!pnlFilter.from || (e.entry_date || '') >= pnlFilter.from) &&
+        (!pnlFilter.to || (e.entry_date || '') <= pnlFilter.to)) troubles.push({ p, e });
   }));
   troubles.sort((a, b) => (a.e.entry_date || '').localeCompare(b.e.entry_date || ''));
 
   printDoc(`
-    ${docHead('Director\'s report', 'Jobs, days and margin', periodLabel(overview.period, from, to))}
+    ${docHead('Profit & loss', pnlLabel(), `${jobs.length} job${jobs.length === 1 ? '' : 's'}`)}
 
     <div class="figures">
-      <div><div class="n">${t.jobs}</div><div class="l">Jobs</div></div>
+      <div><div class="n">${money(t.value)}</div><div class="l">Invoice</div></div>
+      <div><div class="n">${money(t.cost)}</div><div class="l">Cost</div></div>
+      <div><div class="n"${cls(t.margin)}>${money(t.margin)}</div>
+        <div class="l">Margin${t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</div></div>
       <div><div class="n">${t.days}</div><div class="l">Days on site</div></div>
-      <div><div class="n"${t.issues ? ' class="neg"' : ''}>${t.issues}</div><div class="l">Issues</div></div>
-      <div><div class="n"${t.margin != null && t.margin < 0 ? ' class="neg"' : ' class="pos"'}>${
-        t.margin == null ? '—' : esc(fmtMoney(t.margin))}</div><div class="l">Margin</div></div>
     </div>
 
     <h2>The period</h2>
     <table class="kv">
-      <tr><td>Jobs</td><td><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
+      <tr><td class="lbl">Jobs</td><td class="val" colspan="3"><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
         ${t.planned || 0} planned, ${t.completed || 0} completed</td></tr>
-      <tr><td>Days on site</td><td>${t.days}</td></tr>
-      <tr><td>Diary entries</td><td>${t.entries}</td></tr>
-      <tr><td>Issues and delays</td><td>${t.issues}</td></tr>
-      <tr><td>Contract value</td><td><strong>${esc(fmtMoney(t.value))}</strong>${
-        t.valued < t.jobs ? ` <em>(on ${t.valued} of ${t.jobs} jobs)</em>` : ''}</td></tr>
-      <tr><td>Cost</td><td>${esc(fmtMoney(t.cost))}${
-        t.costed < t.jobs ? ` <em>(on ${t.costed} of ${t.jobs} jobs)</em>` : ''}</td></tr>
-      <tr><td>Margin</td><td><strong>${t.margin == null ? '—' : esc(fmtMoney(t.margin))}</strong>${
-        t.marginPct != null ? ` · ${t.marginPct.toFixed(1)}%` : ''}</td></tr>
+      <tr><td class="lbl">Priced</td><td class="val" colspan="3">${t.valued} of ${t.jobs}${
+        t.valued < t.jobs ? ' <em>— totals are a floor, not the whole picture</em>' : ''}</td></tr>
+      ${t.settled ? `<tr><td class="lbl">Finished and invoiced</td><td class="val" colspan="3">${t.settled} job(s) — invoiced
+        <strong>${money(t.acValue)}</strong> against <strong>${money(t.acCost)}</strong> of cost,
+        <strong${cls(t.acMargin)}>${money(t.acMargin)}</strong> actual margin${
+        t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}</td></tr>` : ''}
+      <tr><td class="lbl">Diary entries</td><td class="val" colspan="3">${t.entries}</td></tr>
+      <tr><td class="lbl">Issues and delays</td><td class="val" colspan="3">${t.issues}</td></tr>
     </table>
-    ${t.valued < t.jobs || t.costed < t.jobs
-      ? `<p style="font-size:10pt;color:#444">Totals count only the jobs carrying a figure, so they
-         are a floor rather than the whole picture.</p>` : ''}
 
-    <h2>Jobs</h2>
+    ${clients.length > 1 ? `
+    <h2>By client</h2>
+    <table>
+      <tr><th>Client</th><th style="width:14mm">Jobs</th><th style="width:14mm">Days</th>
+        <th style="width:26mm">Invoice</th><th style="width:26mm">Cost</th><th style="width:28mm">Margin</th></tr>
+      ${clients.map(k => {
+        const b = byClient[k];
+        const m = b.priced ? b.inv - b.cost : null;
+        const pct = marginPct(b.inv, m);
+        return `<tr class="avoid-break">
+          <td><strong>${esc(k)}</strong>${b.issues ? `<br><em>${b.issues} issue${b.issues > 1 ? 's' : ''}</em>` : ''}</td>
+          <td>${b.jobs}</td><td>${b.days}</td>
+          <td>${esc(fmtMoney(b.inv))}</td><td>${esc(fmtMoney(b.cost))}</td>
+          <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
+        </tr>`;
+      }).join('')}
+    </table>` : ''}
+
+    <h2>Job by job</h2>
     <table>
       <tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:22mm">Status</th>
-        <th style="width:13mm">Days</th><th style="width:13mm">Iss.</th>
-        <th style="width:24mm">Value</th><th style="width:24mm">Cost</th><th style="width:26mm">Margin</th></tr>
-      ${sorted.map(p => {
-        const m = jobMargin(p), pct = marginPct(p.contract_value, m);
+        <th style="width:12mm">Days</th><th style="width:24mm">Invoice</th>
+        <th style="width:24mm">Cost</th><th style="width:26mm">Margin</th></tr>
+      ${jobs.map(p => {
+        const c = costing(p);
+        const settled = c.acMargin != null;
+        const m = settled ? c.acMargin : c.exMargin;
+        const pct = settled ? c.acPct : c.exPct;
+        const iss = issueCount(p.id);
         return `<tr class="avoid-break">
-          <td><strong>${jobNo(p)}</strong></td>
+          <td><strong>${jobNo(p)}</strong>${settled ? '<br><em>final</em>' : ''}</td>
           <td>${esc(p.name)}${p.client ? `<br><em>${esc(p.client)}</em>` : ''}${
-            p.supervisor ? `<br>${esc(p.supervisor)}` : ''}</td>
-          <td>${esc(statusLabel(p.status))}${p.archived ? '<br><em>archived</em>' : ''}</td>
-          <td>${diaryDays(p.id).length}</td>
-          <td>${issueCount(p.id) || ''}</td>
-          <td>${esc(fmtMoney(p.contract_value))}</td>
-          <td>${esc(fmtMoney(p.actual_cost))}</td>
-          <td>${m == null ? '—' : esc(fmtMoney(m)) + (pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : '')}</td>
+            p.supervisor ? `<br>${esc(p.supervisor)} · ${esc(crewLabel(crewOf(p)))}` : ''}</td>
+          <td>${esc(statusLabel(p.status))}</td>
+          <td>${diaryDays(p.id).length}${iss ? `<br><em class="neg">${iss} iss.</em>` : ''}</td>
+          <td>${money(settled ? c.acInv : c.exInv)}</td>
+          <td>${money(settled ? c.acCost : c.exCost)}</td>
+          <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
         </tr>`;
-      }).join('') || '<tr><td colspan="8">No jobs in this period.</td></tr>'}
+      }).join('') || '<tr><td colspan="7">No jobs in this period.</td></tr>'}
     </table>
 
-    <h2>What went wrong on site</h2>
+    ${jobs.some(p => p.pnl_notes) ? `
+    <h2>Where the money went</h2>
+    ${jobs.filter(p => p.pnl_notes).map(p => `
+      <p class="note avoid-break"><strong>${jobNo(p)} ${esc(p.name)}</strong> — ${esc(p.pnl_notes)}</p>`).join('')}` : ''}
+
     ${troubles.length ? `
-      <table>
-        <tr><th style="width:24mm">Date</th><th style="width:22mm">Job</th>
-          <th>What happened</th><th style="width:26mm">Logged by</th></tr>
-        ${troubles.map(({ p, e }) => `<tr class="avoid-break">
-          <td>${esc(fmtShort(e.entry_date))} ${esc(fmtTime(e.at))}</td>
-          <td>${jobNo(p)}</td>
-          <td class="note"><strong>${esc(entryLabel(e))}</strong>${e.body ? ' — ' + esc(e.body) : ''}</td>
-          <td>${esc(e.author || '')}</td>
-        </tr>`).join('')}
-      </table>`
-      : '<p>Nothing was logged as an issue or a delay in this period.</p>'}
+    <h2>What the crews flagged</h2>
+    <table>
+      <tr><th style="width:26mm">Date</th><th style="width:22mm">Job</th>
+        <th>What happened</th><th style="width:26mm">Logged by</th></tr>
+      ${troubles.map(({ p, e }) => `<tr class="avoid-break">
+        <td>${esc(fmtShort(e.entry_date))} ${esc(fmtTime(e.at))}</td>
+        <td>${jobNo(p)}</td>
+        <td class="note"><strong>${esc(entryLabel(e))}</strong>${e.body ? ' — ' + esc(e.body) : ''}</td>
+        <td>${esc(e.author || '')}</td>
+      </tr>`).join('')}
+    </table>` : ''}
 
     <div class="sig">
       <div>Director &amp; date</div>
       <div>Reviewed &amp; date</div>
-    </div>`, `Director's report · ${periodLabel(overview.period, from, to)}`);
+    </div>`, `Profit & loss · ${pnlLabel()}`);
+}
+
+/** The job, end to end, in money: what it was priced at, what it came to,
+    where the difference went, and every word the supervisors wrote —
+    because the answer to "why did this one go over" is nearly always in
+    the diary rather than the spreadsheet. */
+function printJobPnl(p) {
+  const c = costing(p);
+  const days = diaryDays(p.id).slice().sort();
+  const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
+  const cls = v => v == null ? '' : v < 0 ? ' class="neg"' : ' class="pos"';
+
+  printDoc(`
+    ${docHead('Job profit & loss', p.name, jobNo(p) + (p.client ? ' · ' + p.client : ''))}
+
+    <div class="figures">
+      <div><div class="n">${money(c.acInv != null ? c.acInv : c.exInv)}</div>
+        <div class="l">${c.acInv != null ? 'Final invoice' : 'Expected invoice'}</div></div>
+      <div><div class="n">${money(c.acCost != null ? c.acCost : c.exCost)}</div>
+        <div class="l">${c.acCost != null ? 'Actual cost' : 'Expected cost'}</div></div>
+      <div><div class="n"${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
+        money(c.acMargin != null ? c.acMargin : c.exMargin)}</div>
+        <div class="l">Margin${(c.acPct != null || c.exPct != null)
+          ? ' · ' + (c.acPct != null ? c.acPct : c.exPct).toFixed(1) + '%' : ''}</div></div>
+      <div><div class="n"${cls(c.swing)}>${c.swing == null ? '—' : (c.swing > 0 ? '+' : '') + esc(fmtMoney(c.swing))}</div>
+        <div class="l">Against the price</div></div>
+    </div>
+
+    <h2>The job</h2>
+    ${jobFacts(p)}
+
+    <h2>What it was made of</h2>
+    <table>
+      <tr><th>Line</th><th style="width:26mm">Qty</th><th style="width:24mm">Rate</th>
+        <th style="width:26mm">Expected</th><th style="width:26mm">Actual</th><th style="width:24mm">Difference</th></tr>
+      ${c.lines.map(l => {
+        const ex = lineExpected(l), ac = lineActual(l);
+        const d = lineHasActual(l) ? ac - ex : null;
+        return `<tr class="avoid-break">
+          <td><strong>${esc(costLabel(l))}</strong></td>
+          <td>${l.qty == null ? '—' : esc(l.qty)}${l.unit ? ' ' + esc(l.unit) : ''}${
+            lineHasActual(l) && l.actual_qty != null ? `<br><em>${esc(l.actual_qty)} actual</em>` : ''}</td>
+          <td>${l.rate == null ? '—' : esc(fmtMoney(l.rate, true))}${
+            lineHasActual(l) && l.actual_rate != null ? `<br><em>${esc(fmtMoney(l.actual_rate, true))}</em>` : ''}</td>
+          <td>${esc(fmtMoney(ex, true))}</td>
+          <td>${lineHasActual(l) ? esc(fmtMoney(ac, true)) : '—'}</td>
+          <td${cls(d == null ? null : -d)}>${d == null ? '—' : (d > 0 ? '+' : '') + esc(fmtMoney(d, true))}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6">Nothing was priced on this job.</td></tr>'}
+      ${c.lines.length ? `<tr class="avoid-break">
+        <td><strong>Maintenance</strong> <em>(10% of the above)</em></td><td></td><td></td>
+        <td>${esc(fmtMoney(c.exMaint, true))}</td>
+        <td>${c.anyActual ? esc(fmtMoney(c.acMaint, true)) : '—'}</td><td></td></tr>` : ''}
+    </table>
+
+    <table class="kv">
+      <tr><td class="lbl">Invoice</td><td class="val" colspan="3">${money(c.exInv, true)} expected${
+        c.acInv != null ? ` · <strong>${esc(fmtMoney(c.acInv, true))} final</strong>` : ''}</td></tr>
+      <tr><td class="lbl">Total cost</td><td class="val" colspan="3">${money(c.exCost, true)} expected${
+        c.acCost != null ? ` · <strong>${esc(fmtMoney(c.acCost, true))} actual</strong>` : ''}</td></tr>
+      <tr><td class="lbl">Margin</td><td class="val" colspan="3"><strong${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
+        money(c.acMargin != null ? c.acMargin : c.exMargin, true)}</strong>${
+        c.acMargin != null && c.exMargin != null
+          ? ` — priced at ${esc(fmtMoney(c.exMargin, true))}` : ''}</td></tr>
+    </table>
+    ${p.pnl_notes ? `<h2>How it went</h2><p class="note">${esc(p.pnl_notes)}</p>` : ''}
+
+    <h2>What happened on site</h2>
+    ${days.length
+      ? days.map((d, i) => daySection(p, d, i + 1, days.length)).join('')
+      : '<p>No diary entries were recorded.</p>'}
+
+    <div class="sig">
+      <div>Director &amp; date</div>
+      <div>Reviewed &amp; date</div>
+    </div>`, `Job P&L · ${jobNo(p)}`);
 }
 
 function printJobsSummary(from, to) {
@@ -2806,38 +3439,38 @@ function renderKiosk(view) {
   const doneToday = jobs.filter(p => p.status === 'completed' && (p.completed_at || '').slice(0, 10) === day);
 
   // The last thing logged on any job today, newest first.
-  const feed = shiftFeed(day, 14);
+  const feed = dayFeed(day, 14);
 
   const clock = new Date();
   const time = `${String(clock.getHours()).padStart(2, '0')}:${String(clock.getMinutes()).padStart(2, '0')}`;
 
   view.innerHTML = `
-    <div class="k">
-      <div class="k-head">
+    <div class="kboard">
+      <div class="kb-head">
         <h1>RCK — today on site</h1>
         <div class="grow muted">${esc(fmtDayDate(day))}</div>
-        <div class="k-clock">${time}</div>
+        <div class="kb-clock">${time}</div>
       </div>
 
-      <div class="k-tally">
+      <div class="kb-tally">
         <div class="status-ongoing"><span class="n">${onSite.length}</span><span class="l">On site now</span></div>
         <div class="status-planned"><span class="n">${planned.length}${dueNow.length
           ? `<em>${dueNow.length} due</em>` : ''}</span><span class="l">Planned</span></div>
         <div class="status-completed"><span class="n">${doneToday.length}</span><span class="l">Finished today</span></div>
       </div>
 
-      <div class="k-body">
-        <div class="k-col">
+      <div class="kb-body">
+        <div class="kb-col">
           <h2>On site</h2>
-          <div class="k-scroll">
+          <div class="kb-scroll">
             ${onSite.length ? onSite.slice(0, 9).map((p, i) => {
               const e = entriesFor(p.id, day);
               const last = e.length ? e[e.length - 1] : null;
               return `
-                <div class="k-job status-ongoing" style="--i:${i}">
+                <div class="kb-job status-ongoing" style="--i:${i}">
                   <div>
                     <div class="kcode">${jobNo(p)}</div>
-                    <div class="kno">${esc(typeLabel(typeOf(p)).toUpperCase())}</div>
+                    <div class="kno">${esc(crewLabel(crewOf(p)).toUpperCase())}</div>
                   </div>
                   <div>
                     <div class="kttl">${esc(p.name)}</div>
@@ -2849,12 +3482,12 @@ function renderKiosk(view) {
                   </div>
                 </div>`;
             }).join('') : `
-              <div class="k-allclear status-completed">
+              <div class="kb-allclear status-completed">
                 <div class="big">No crews out</div>
                 Nothing is running right now.
               </div>`}
             ${dueNow.length ? dueNow.slice(0, 3).map((p, i) => `
-              <div class="k-job status-planned" style="--i:${onSite.length + i}">
+              <div class="kb-job status-planned" style="--i:${onSite.length + i}">
                 <div><div class="kcode">${jobNo(p)}</div><div class="kno">DUE TO START</div></div>
                 <div><div class="kttl">${esc(p.name)}</div>
                   <div class="kmeta">${esc(p.site || '—')}${p.supervisor ? ' · ' + esc(p.supervisor) : ''}</div></div>
@@ -2863,22 +3496,22 @@ function renderKiosk(view) {
           </div>
         </div>
 
-        <div class="k-col">
+        <div class="kb-col">
           <h2>Logged today</h2>
-          <div class="k-scroll k-grid" style="grid-template-columns:1fr">
+          <div class="kb-scroll kb-grid" style="grid-template-columns:1fr">
             ${feed.length ? feed.map((e, i) => {
               const p = jobById(e.project_id) || {};
               return `
-                <div class="k-chip status-${entryTone(e)}" style="--i:${i}">
+                <div class="kb-chip status-${entryTone(e)}" style="--i:${i}">
                   <div class="c">${esc(entryLabel(e))}<em>${esc(fmtTime(e.at))}</em></div>
                   <div class="s">${esc(jobNo(p))} ${esc(p.name || '')}${e.author ? ' · ' + esc(e.author) : ''}</div>
                 </div>`;
-            }).join('') : '<div class="k-chip status-completed"><div class="s">Nothing logged yet today.</div></div>'}
+            }).join('') : '<div class="kb-chip status-completed"><div class="s">Nothing logged yet today.</div></div>'}
           </div>
         </div>
       </div>
 
-      <div class="k-foot">
+      <div class="kb-foot">
         <span>${DB.projects.length} job(s) on file · refreshes every 20 seconds${
           connected() ? '' : ' · NOT CONNECTED'}</span>
         <span>
@@ -2989,6 +3622,7 @@ function renderSetup(view) {
         <tr><th>Jobs</th><td>${DB.projects.length}</td></tr>
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
+        <tr><th>Cost lines</th><td>${DB.job_costs.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
         <tr><th>Version</th><td>${VERSION}${updateReady ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
       </table>
@@ -3081,7 +3715,8 @@ function renderSetup(view) {
       device: { name: S.name, role: S.role, localMode: S.localMode },
       waitingToSend: Outbox.all(),
       problem: Outbox.problem(),
-      projects: DB.projects, project_docs: DB.project_docs, diary_entries: DB.diary_entries
+      projects: DB.projects, project_docs: DB.project_docs,
+      diary_entries: DB.diary_entries, job_costs: DB.job_costs
     };
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -3119,7 +3754,7 @@ function renderSetup(view) {
     localStorage.removeItem(cacheKey());
     localStorage.removeItem('rckd.outbox');
     localStorage.removeItem('rckd.outbox.problem');
-    DB.projects = []; DB.project_docs = []; DB.diary_entries = [];
+    DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = [];
     refresh().then(render);
   };
 }
@@ -3157,10 +3792,10 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     if (document.hidden || route.path === '/screen') return;
-    const before = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length]);
+    const before = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length, DB.job_costs.length]);
     await refresh();
-    const after = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length]);
-    if (before !== after && ['/', '/today'].includes(route.path)) render();
+    const after = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length, DB.job_costs.length]);
+    if (before !== after && ['/', '/jobs', '/today'].includes(route.path)) render();
   }, 20000);
 }
 

@@ -18,7 +18,7 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 ## What it does
 
 **For the office (and directors, who can do everything)**
-- Create a job: name, client, site, type of work, the dates, and who's running it.
+- Create a job: name, client, site, **which crew is on it**, the dates, and who's running it.
 - Load anything onto it — PMP, scope, job cards, TMP, drawings, permits, spreadsheets,
   photos. Several files at once is fine.
 - Decide who each document is for: **everyone**, **site crew**, or **office only**.
@@ -31,23 +31,39 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 
 **For the supervisor on site**
 - Open the job, read and **download** every document the office put there.
-- Keep the day's diary as it happens. Tap **On site**, **Prestart**, **Milling
-  started**, **Paving started**, **Issue** or **Off site** and it fills in the time;
-  add the comment and the photos.
-- Anything not on that list — *Traffic management set up*, *Delivery*, *Weather*,
-  *Visitor* — is in the full list, and you can name a new type of entry yourself. It
-  is a real type from that moment, on everyone's phone.
+- Keep the day's diary as it happens. **Log something** takes you to one list of everything
+  that can happen — on site, prestart, milling and paving start and stop, deliveries,
+  weather, visitors, issues, delays, off site — with the time already filled in. Name a new
+  type yourself and it is a real type from that moment, on everyone's phone.
+- **A day in the diary is the day on the calendar.** Today always has its own box, empty or
+  not, and an entry made at 01:30 goes under the date it was made on — a night job simply
+  reads as two days, which is how the crew talk about it and how the report sets it out. The
+  date is editable on every entry for the rare case that is wrong.
 - Every entry takes photos. They're shrunk on the phone so they go through on site.
 - When the job's finished: **Project completed**, with a closing note.
 
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
-- **⋮ → Director overview**: every job at once over a period — this month, last month, this
-  quarter, the financial year (1 April to 31 March), or dates you pick. Days on site, diary
-  entries, issues, contract value, cost and margin, sorted by whichever of those you care
-  about. Nothing on it is typed twice: it is added up from what the crews and the office
-  already entered on the jobs.
+- **The app opens on a landing page with two tools: Jobs, and Profit & loss.** Everyone gets
+  Jobs. P&L appears on Director devices only, and nothing hints at it otherwise.
+- **Costing a job**, on the job's own **Costing** screen: a line for each thing the job is
+  made of — asphalt, emulsion, concrete, materials, crew, trucking, plant and machinery,
+  transport, subcontractors, or anything you name yourself. Each line is a quantity, a unit
+  and a rate. **Maintenance is never typed in: it is always 10% of everything above it**, so
+  it moves when the lines move.
+- The office prices the job and enters the expected invoice. A **director** fills in the
+  actuals once it is done — quantity and rate again, line by line — plus the final invoice
+  and a note on why it landed where it did. The screen shows expected against actual, the
+  difference on every line, and how far ahead or behind the price the job came in.
+- **The job P&L prints** as one document: the money, every line with its variance, your note,
+  and every entry the supervisors wrote — because the reason a job went over is usually in
+  the diary rather than the spreadsheet.
+- **⋮ → Profit & loss** opens on the month you are in: invoice, cost and margin for every job
+  in it, before a single choice has been made. **Filter** narrows it — planned, on site or
+  completed, one client, any dates — and both the printed report and the **Excel export**
+  cover exactly what is filtered. Tapping a job goes straight to its costing: the overview, a
+  button through to the timeline, and the money — not the whole dispatch page.
 - **The director's report** prints that period — the totals, every job with its margin, and
   **every issue and delay the supervisors logged**, gathered across all the jobs into one table.
 - Value and cost live on the job itself, entered by the office or a director. They are never
@@ -55,11 +71,21 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   when both numbers are there — half the figures is worse than none.
 - Archiving a job is a director's call. Nothing in the app is ever deleted.
 
-**The report**
-The full job report is the whole record in one document: the job's details, a summary,
-every issue and delay, the documents on file, then each day of the diary in the order
-it happened with its photos underneath and a sign-off line at the end. It opens the
-phone's print dialog — choose *Save as PDF* to email it or file it.
+**The reports**
+The full job report is the whole record in one document: the job's facts set two to a line,
+every issue and delay, the documents on file, then the diary as **Day 1, Day 2, Day 3** —
+each day a table that carries its own heading if it runs on to the next page, so there are no
+orphaned headings and no half-empty pages. All the photographs sit together at the back, six
+to a page, each captioned with the day and entry it came from.
+
+Everything on the page is laid out to be read across as well as down. A three-night job with
+eighteen photographs prints as five pages rather than eight.
+
+The director's **Profit & loss** report is the period's figures, then how they split by
+client, then a job at a time, then the note on each finished job and everything the crews
+flagged — top down from *how did we do* to *and why*.
+
+All of them open the phone's print dialog — choose *Save as PDF* to email or file.
 
 **Night works**
 The app knows a shift isn't a calendar day. A crew that comes on at 19:45 and goes off
@@ -134,7 +160,9 @@ Android), then **Settings** → name, role, and the two values.
 | Create and edit jobs | | ✓ | ✓ |
 | Reopen a completed job | | ✓ | ✓ |
 | Enter a job's value and cost | | ✓ | ✓ |
-| **Overview across every job** | | | ✓ |
+| Price a job — cost lines and expected invoice | | ✓ | ✓ |
+| **See actuals, margin and the P&L** | | | ✓ |
+| **Enter the final invoice and actual costs** | | | ✓ |
 | **Archive a job** | | | ✓ |
 
 A diary entry written from a director's phone reads *· Director* in the record. Supervisors
@@ -168,12 +196,19 @@ Workshop in the same repository and GitHub Pages serves it from
   anything you'd mind an RCK phone seeing into the app, and don't publish the link.
 - **Practice mode** in Settings lets someone try the whole app without touching the
   shared data. Nothing entered in practice mode is visible to anyone else.
-- **Nothing is deleted by accident.** Archiving a job hides it from the board and keeps every
-  record, and only a director can do it; a completed job can be reopened by the office. There
-  is no permanent delete anywhere in the app, on purpose.
+- **Two ways to get rid of a job, and they are not the same.** **Archive** takes it off the
+  board and out of the profit and loss while keeping every record — that is the one for a job
+  that was cancelled, and it can be undone. **Delete** destroys the job with its diary, its
+  documents and its costing, for everyone, with no undo; it asks you to type the job number
+  first. Both are a director's call. A completed job can still be reopened by the office.
 - **The money is not a secret from the database.** Value and cost are hidden from site phones
   by the app, not by the database — same as the office-only documents. See the note on logins
   below before deciding what to put in those boxes.
+- **The board is filtered by crew.** Yellow, Subbie, Civil and Green, each with its own
+  colour so a chip is recognised before it is read, plus **Unassigned** whenever a job has
+  no crew on it yet. Type of work is still on every job, and in the reports and the
+  spreadsheet — it just isn't a filter, because nobody looks for a job that way. Adding a
+  fifth crew is one line in `CREWS` at the top of `app.js`.
 - **Types of work aren't a fixed list.** Pick **+ Add a new type…** when creating a job
   and name it — "Chip seal", say — and from then on it's a type like any other, with
   its own filter on the board. Naming one that already exists in a different spelling
@@ -190,3 +225,4 @@ Workshop in the same repository and GitHub Pages serves it from
 | `config.js` | Your Supabase URL and key |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
 | `sw.js` | Offline caching |
+| `check.mjs` | `node dispatch/check.mjs` — fails if any class the app writes has no rule in `app.css` |

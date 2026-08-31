@@ -38,6 +38,8 @@ create table if not exists projects (
   -- director, never shown on a site phone. Left null until somebody knows.
   contract_value numeric,
   actual_cost    numeric,
+  -- Which crew is on it. Blank until the office assigns one.
+  crew           text not null default '',
   updated_at     timestamptz not null default now()
 );
 
@@ -46,6 +48,11 @@ create table if not exists projects (
 -- which is what makes this file safe to re-run over a live database.
 alter table projects add column if not exists contract_value numeric;
 alter table projects add column if not exists actual_cost    numeric;
+alter table projects add column if not exists crew           text not null default '';
+alter table projects add column if not exists actual_invoice numeric;
+alter table projects add column if not exists pnl_notes      text not null default '';
+
+create index if not exists projects_crew_idx on projects (crew);
 
 create index if not exists projects_status_idx on projects (status);
 create index if not exists projects_dates_idx  on projects (start_date, end_date);
@@ -75,6 +82,28 @@ create table if not exists project_docs (
 );
 
 create index if not exists project_docs_project_idx on project_docs (project_id, uploaded_at);
+
+-- --------------------------------------------------------- job costing
+-- One line of what a job is expected to cost, and what it actually cost.
+-- Quantity times rate, both sides, so a job that went over says where.
+-- Maintenance is not stored: it is always 10% of everything else, worked
+-- out when it is shown, so it can never drift out of step with the lines.
+create table if not exists job_costs (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   uuid not null references projects(id) on delete cascade,
+  kind         text not null default 'other',   -- see COST_KINDS in app.js
+  label        text not null default '',        -- what it is, when kind is 'other'
+  unit         text not null default '',        -- tonnes, hours, loads …
+  qty          numeric,                         -- expected
+  rate         numeric,
+  actual_qty   numeric,                         -- filled in once the job is done
+  actual_rate  numeric,
+  sort         integer not null default 0,
+  created_at   timestamptz not null default now(),
+  created_by   text not null default ''
+);
+
+create index if not exists job_costs_project_idx on job_costs (project_id, sort);
 
 -- --------------------------------------------------------- job diary
 -- One row per thing that happened on site, in order: on site, prestart,
@@ -117,18 +146,27 @@ create trigger projects_touch before update on projects
 --  password to lose. The office/supervisor split is about keeping the app
 --  simple to use, not about secrecy: don't put anything you would mind an
 --  RCK phone seeing into the app, and don't publish the link outside RCK.
+--
+--  That now includes the costing. The app shows job_costs, margins and the
+--  P&L to a Director device only, but the database does not: anyone holding
+--  the anon key can read this table directly. If the margins must be secret
+--  from everyone but the directors, the app needs real accounts — see the
+--  RCK HR app, which is built that way.
 -- =====================================================================
 alter table projects      enable row level security;
 alter table project_docs  enable row level security;
 alter table diary_entries enable row level security;
+alter table job_costs     enable row level security;
 
 drop policy if exists projects_all      on projects;
 drop policy if exists project_docs_all  on project_docs;
 drop policy if exists diary_entries_all on diary_entries;
+drop policy if exists job_costs_all     on job_costs;
 
 create policy projects_all      on projects      for all to anon, authenticated using (true) with check (true);
 create policy project_docs_all  on project_docs  for all to anon, authenticated using (true) with check (true);
 create policy diary_entries_all on diary_entries for all to anon, authenticated using (true) with check (true);
+create policy job_costs_all     on job_costs     for all to anon, authenticated using (true) with check (true);
 
 -- =====================================================================
 --  File storage — job paperwork and site photos

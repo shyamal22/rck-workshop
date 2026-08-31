@@ -9,17 +9,19 @@
    ===================================================================== */
 
 :root {
-  /* surfaces */
-  --bg:        #f2f4f5;
-  --panel:     #ffffff;
-  --panel-2:   #f6f7f9;
+  /* Surfaces. Warm rather than blue-grey: paper and asphalt, not screen
+     default. The panel is very slightly off-white, which is what stops a
+     page of cards reading as a template somebody generated. */
+  --bg:        #f4f2ef;
+  --panel:     #fffefc;
+  --panel-2:   #f4f2ee;
 
-  /* ink */
-  --ink:       #0f1418;
-  --ink-2:     #59636f;
-  --ink-3:     #939ca6;
-  --line:      #e9ecef;
-  --line-2:    #d9dee3;
+  /* Ink, warmed the same way. */
+  --ink:       #17140f;
+  --ink-2:     #625b52;
+  --ink-3:     #9a9289;
+  --line:      #e8e3dc;
+  --line-2:    #d8d1c7;
 
   /* State. Each has a pastel fill for the whole card and a deep tone for
      text on top of it — every pairing clears 4.5:1, including yellow, which
@@ -27,27 +29,29 @@
 
      green  = on site now   ·  blue = planned, not started
      slate  = finished      ·  yellow/red = something needs attention */
-  --green:     #15703c;
-  --green-bg:  #e4f4ea;
+  --green:     #2c6b41;
+  --green-bg:  #e7f1e7;
   --yellow:    #7d5e00;
-  --yellow-bg: #fdf3cc;
-  --red:       #a81f1f;
-  --red-bg:    #fce9e9;
-  --blue:      #17558c;
-  --blue-bg:   #e6eff8;
-  --slate:     #4a545e;
-  --slate-bg:  #eceff2;
+  --yellow-bg: #fbf1cf;
+  --red:       #9e3226;
+  --red-bg:    #f8e9e5;
+  --blue:      #2a5578;
+  --blue-bg:   #e9eff4;
+  --slate:     #5a544c;
+  --slate-bg:  #efece7;
 
-  /* shape */
-  --r:      14px;
-  --r-sm:   10px;
+  /* Shape. Slightly softer and less uniform than a 14-everywhere grid —
+     the small radius is genuinely smaller, so surfaces differ by their
+     size rather than all being cut from the same template. */
+  --r:      13px;
+  --r-sm:   9px;
   --r-pill: 999px;
   --tap:    48px;
 
-  /* depth */
-  --sh-1: 0 1px 2px rgba(15, 20, 24, .05);
-  --sh-2: 0 2px 6px rgba(15, 20, 24, .06), 0 1px 2px rgba(15, 20, 24, .04);
-  --sh-3: 0 10px 34px rgba(15, 20, 24, .14), 0 2px 8px rgba(15, 20, 24, .08);
+  /* Depth, cast in the warm ink so a shadow never goes blue on paper. */
+  --sh-1: 0 1px 2px rgba(38, 30, 20, .05);
+  --sh-2: 0 1px 2px rgba(38, 30, 20, .05), 0 3px 10px rgba(38, 30, 20, .045);
+  --sh-3: 0 10px 34px rgba(38, 30, 20, .13), 0 2px 8px rgba(38, 30, 20, .07);
 
   /* motion */
   --t-fast: 130ms;
@@ -73,12 +77,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   padding-bottom: calc(74px + var(--safe-b));
   overscroll-behavior-y: none;
 }
 
-h1, h2, h3 { margin: 0; font-weight: 640; letter-spacing: -.014em; }
+h1, h2, h3 { margin: 0; font-weight: 660; letter-spacing: -.017em; }
 p { margin: 0 0 10px; }
 a { color: inherit; }
 
@@ -171,18 +175,23 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
   background: var(--panel);
   border-radius: var(--r);
   box-shadow: var(--sh-2);
-  padding: 16px;
+  padding: 17px 18px;
   margin-bottom: 12px;
 }
-.card > h2 { font-size: 15.5px; margin-bottom: 10px; }
+.card > h2 { font-size: 15.5px; margin-bottom: 10px; letter-spacing: -.015em; }
 
 /* A card that takes the status colour as its own surface. */
 .card.accent { background: var(--s-bg); }
 
 .section-title {
-  font-size: 11.5px; font-weight: 700; letter-spacing: .09em;
-  text-transform: uppercase; color: var(--ink-3);
-  margin: 22px 4px 9px;
+  font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  color: var(--ink-2);
+  margin: 24px 2px 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+/* A rule that runs out from the title, rather than a label floating alone. */
+.section-title::after {
+  content: ''; flex: 1; height: 1px; background: var(--line-2);
 }
 
 /* ------------------------------------------------------------ status */
@@ -209,6 +218,16 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .pill.plain { background: var(--panel-2); color: var(--ink-2); }
 .swatch { width: 7px; height: 7px; border-radius: 50%; background: var(--s, var(--ink-3)); flex: none; }
 
+/* A crew is recognised by its colour before its name is read — on a chip,
+   on a card, on the wall screen. The colour is the crew's, not a status,
+   so it is set inline rather than from the status variables. */
+.crew-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  display: inline-block; vertical-align: middle;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .55);
+}
+.chip[aria-pressed="true"] .crew-dot { box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .35); }
+
 /* A tinted pill would vanish into a tinted card. Translucent white keeps it
    legible and lets it pick up the warmth of whatever it is sitting on. */
 .job-card .pill, .job-row .pill, .card.accent .pill { background: rgba(255, 255, 255, .78); }
@@ -226,6 +245,7 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .filters::-webkit-scrollbar { display: none; }
 .chip {
   flex: none; scroll-snap-align: start;
+  display: inline-flex; align-items: center; gap: 7px;
   padding: 8px 14px; border-radius: var(--r-pill);
   border: 0; background: var(--panel); box-shadow: var(--sh-1);
   font: inherit; font-size: 13.5px; font-weight: 560; color: var(--ink-2);
@@ -395,57 +415,235 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .filerow .fa svg { width: 18px; height: 18px; }
 
 /* ------------------------------------------------------------ diary */
-/* A day on site, in the order it happened. The times sit in their own
-   column so the shape of the day is readable at a glance. */
+/* The day's own heading. A turned-over day has to be unmistakable, so it
+   gets a rule under it and today gets its name said out loud. */
 .dayhead {
   display: flex; align-items: baseline; gap: 10px;
-  margin: 22px 4px 9px;
+  margin: 22px 0 9px; padding: 0 4px 7px;
+  border-bottom: 2px solid var(--line-2);
 }
-.dayhead h3 { font-size: 15px; letter-spacing: -.015em; }
-.dayhead .sub { font-size: 12px; color: var(--ink-3); }
+.dayhead h3 { font-size: 15.5px; letter-spacing: -.015em; }
+.dayhead .sub { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+.dayhead.today { border-bottom-color: var(--ink); }
+.dayhead.today h3 em {
+  font-style: normal; margin-left: 8px; padding: 2px 8px;
+  border-radius: var(--r-pill); background: var(--ink); color: #fff;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  vertical-align: middle;
+}
 
-.diary { position: relative; }
-.d-item {
-  position: relative; display: grid; grid-template-columns: 54px 1fr; gap: 13px;
-  padding-bottom: 16px;
+/* ------------------------------------------------------------ timeline */
+/* A timeline, not a stack of boxes. The times keep their own column, the
+   rail runs unbroken behind the dots, and the quiet stretches between
+   entries are labelled — which is what lets you read the shape of a shift
+   rather than just its contents. */
+.tl { position: relative; }
+
+.tl-e {
+  position: relative; display: grid; grid-template-columns: 44px 18px 1fr;
+  align-items: start;
   animation: riseIn var(--t) var(--ease) both;
-  animation-delay: calc(var(--i, 0) * 20ms);
+  animation-delay: calc(var(--i, 0) * 18ms);
 }
-.d-item:last-child { padding-bottom: 0; }
-/* The rail runs between the dots, not past the last one. */
-.d-item:not(:last-child)::before {
-  content: ''; position: absolute; left: 58px; top: 16px; bottom: 0;
-  width: 2px; background: var(--line); border-radius: 2px;
-}
-.d-item .dt {
-  font-size: 13px; font-weight: 700; color: var(--ink-2);
+.tl-when {
+  font-size: 12.5px; font-weight: 700; color: var(--ink-2);
   font-variant-numeric: tabular-nums; text-align: right;
-  padding-top: 3px; letter-spacing: -.01em;
+  padding-top: 9px; letter-spacing: -.01em;
 }
-.d-item .db { position: relative; padding-left: 16px; min-width: 0; }
-.d-item .db::before {
-  content: ''; position: absolute; left: -5px; top: 7px;
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--line-2); box-shadow: 0 0 0 3px var(--panel);
+/* The rail is drawn by the column, so it never breaks between items. */
+.tl-rail { position: relative; align-self: stretch; }
+.tl-rail::before {
+  content: ''; position: absolute; left: 50%; top: 0; bottom: -1px;
+  width: 2px; margin-left: -1px; background: var(--line);
 }
-.d-item.mark .db::before { background: var(--s, var(--ink)); }
-.d-item .dk { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
-.d-item.mark .dk { color: var(--s, var(--ink)); }
-.d-item .dn { font-size: 13.5px; white-space: pre-wrap; margin-top: 3px; line-height: 1.45; color: var(--ink-2); }
-.d-item .dw { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
+.tl-e:first-child .tl-rail::before { top: 14px; }
+.tl-e:last-child .tl-rail::before { bottom: auto; height: 14px; }
+.tl-rail i {
+  position: absolute; left: 50%; top: 10px;
+  width: 9px; height: 9px; margin-left: -4.5px;
+  border-radius: 50%; background: var(--line-2);
+  box-shadow: 0 0 0 3px var(--panel);
+}
+.tl-e.mark .tl-rail i { background: var(--s, var(--ink)); }
+.tl-e.flag .tl-rail i { width: 11px; height: 11px; margin-left: -5.5px; top: 9px; }
 
-/* Quick-add buttons — the entries a supervisor makes twenty times a week. */
-.quick { display: flex; gap: 7px; flex-wrap: wrap; }
-.quick button {
-  flex: 1 1 calc(50% - 4px);
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 13px; border: 0; border-radius: var(--r-sm);
-  background: var(--panel-2); font: inherit; font-size: 13.5px; font-weight: 600;
-  color: var(--ink); cursor: pointer; text-align: left;
-  transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+.tl-card { padding: 6px 0 12px 4px; min-width: 0; }
+.tl-kind { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
+.tl-e.mark .tl-kind { color: var(--s, var(--ink)); }
+.tl-note { font-size: 13.5px; color: var(--ink-2); line-height: 1.45; margin-top: 2px; white-space: pre-wrap; }
+.tl-who { font-size: 11.5px; color: var(--ink-3); margin-top: 5px; }
+/* An issue is the one thing worth interrupting the rhythm for. */
+.tl-e.flag .tl-card {
+  background: var(--red-bg); border-radius: var(--r-sm);
+  padding: 9px 11px 11px; margin: 2px 0 10px;
 }
-.quick button:active { background: var(--line); transform: scale(.97); }
-.quick button .swatch { width: 8px; height: 8px; }
+
+/* The gap between two entries, sitting on the rail. */
+.tl-gap {
+  position: relative; display: grid; grid-template-columns: 44px 18px 1fr;
+  height: 26px; align-items: center;
+}
+.tl-gap::before {
+  content: ''; position: absolute; left: 44px; top: 0; bottom: 0;
+  width: 2px; margin-left: 8px; background: var(--line);
+}
+.tl-gap span {
+  grid-column: 3; justify-self: start; margin-left: 4px;
+  font-size: 10.5px; font-weight: 640; color: var(--ink-3);
+  letter-spacing: .04em; padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--panel-2);
+}
+
+/* The day on one line, before any of the words. */
+.tl-strip { margin: 2px 0 16px; }
+.tl-strip .bar {
+  position: relative; height: 6px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--line), var(--line-2));
+}
+.tl-strip .bar i {
+  position: absolute; top: -3px; width: 4px; height: 12px; margin-left: -2px;
+  border-radius: 2px; background: var(--s, var(--ink-3));
+  box-shadow: 0 0 0 1.5px var(--panel);
+}
+.tl-strip .ends {
+  display: flex; justify-content: space-between; margin-top: 6px;
+  font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- the ledger */
+/* The month's figures, set like a statement rather than a dashboard: a
+   ruled column of money you read down, not tiles you scan across. */
+.ledger {
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 16px 18px 14px; margin-bottom: 12px;
+  animation: riseIn var(--t) var(--ease) both;
+}
+.ledger .lh {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-3); padding-bottom: 10px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.ledger .lrow {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 7px 0; font-size: 14.5px; color: var(--ink-2);
+}
+.ledger .lrow b { font-size: 17px; font-weight: 640; color: var(--ink);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.ledger .lrow.tot { border-top: 1.5px solid var(--line-2); margin-top: 4px; padding-top: 11px; }
+.ledger .lrow.tot span { font-weight: 640; color: var(--ink); }
+.ledger .lrow.tot b { font-size: 23px; font-weight: 700; }
+.ledger .lrow.tot b em { font-style: normal; font-size: 13px; font-weight: 600; margin-left: 6px; opacity: .8; }
+.ledger .lf { font-size: 12px; color: var(--ink-3); padding-top: 11px; margin-top: 6px;
+  border-top: 1px solid var(--line); }
+
+.filterbtn { justify-content: flex-start; gap: 10px; margin-bottom: 12px; }
+.filterbtn.on { background: var(--ink); color: #fff; }
+.filterpanel { animation: riseIn var(--t-fast) var(--ease) both; }
+
+/* -------------------------------------------------------- the landing */
+/* Two tools behind one door. Big targets, because this is the first thing
+   a cold hand in a wet glove has to hit. */
+.tiles { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 4px; }
+.tile {
+  display: block; text-decoration: none; color: inherit;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 20px 20px 18px;
+  animation: riseIn var(--t) var(--ease) both;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
+}
+.tile:nth-child(2) { animation-delay: 60ms; }
+.tile:active { transform: scale(.985); box-shadow: var(--sh-1); }
+.tile .ti {
+  display: grid; place-items: center; width: 44px; height: 44px;
+  border-radius: 12px; background: var(--ink); color: #fff; margin-bottom: 13px;
+}
+.tile .ti svg { width: 23px; height: 23px; }
+.tile.money .ti { background: var(--green); }
+.tile b { display: block; font-size: 19px; letter-spacing: -.02em; }
+.tile .td { display: block; font-size: 13.5px; color: var(--ink-2); margin-top: 3px; }
+.tile .ts {
+  display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 11px;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+@media (min-width: 720px) {
+  .tiles { grid-template-columns: 1fr 1fr; }
+  .tile:hover { box-shadow: var(--sh-3); transform: translateY(-1px); }
+}
+
+/* ---------------------------------------------------------- costing */
+/* A line of what a job is made of. On a phone the quantity, unit and rate
+   sit in one row with the total on the end, so a whole costing is read
+   down a single column of money. */
+.costrow {
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 13px 14px 14px; margin-bottom: 10px;
+  animation: riseIn var(--t) var(--ease) both;
+}
+.costrow .ch { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.costrow .cname {
+  flex: 1; min-height: 38px; padding: 8px 10px; font-weight: 640; font-size: 14.5px;
+  background: transparent; border: 1.5px solid transparent; border-radius: var(--r-sm);
+}
+.costrow .cname:focus { background: var(--panel-2); border-color: var(--ink); }
+.costrow .cdel {
+  width: 36px; height: 36px; flex: none; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--panel-2); color: var(--ink-2); cursor: pointer;
+}
+.costrow .cdel:active { background: var(--line); transform: scale(.9); }
+.costrow .cdel svg { width: 16px; height: 16px; }
+
+.costrow .cg {
+  display: grid; grid-template-columns: 1fr .9fr 1fr auto; gap: 8px; align-items: end;
+}
+.costrow .cg label { display: block; min-width: 0; }
+.costrow .cg label > span {
+  display: block; font-size: 10.5px; font-weight: 640; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px;
+}
+.costrow .cg input { padding: 9px 10px; min-height: 40px; font-size: 14px; }
+.costrow .cu { display: block; font-size: 12.5px; color: var(--ink-3); padding: 11px 0; }
+.costrow .ctot { text-align: right; white-space: nowrap; padding-bottom: 2px; }
+.costrow .ctot span {
+  display: block; font-size: 10.5px; font-weight: 640; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px;
+}
+.costrow .ctot b { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.costrow .ctot em { display: block; font-style: normal; font-size: 11.5px; font-weight: 640; margin-top: 2px; }
+/* The actual row is the same shape, set back so the eye reads the price first. */
+.costrow .cg.actual {
+  margin-top: 11px; padding-top: 11px; border-top: 1px dashed var(--line-2);
+}
+
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+
+table.data.money td { text-align: right; font-variant-numeric: tabular-nums; }
+table.data.money th { width: auto; }
+table.data.money td.hd {
+  font-size: 10.5px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+table.data.money tr.tot th, table.data.money tr.tot td {
+  font-weight: 700; border-top: 1.5px solid var(--line-2);
+}
+
+/* One way in to the diary. The list of what happened lives in the entry
+   form, where it can be as long as it needs to be. */
+.logbtn { margin-bottom: 4px; }
+.logbtn svg { width: 20px; height: 20px; stroke-width: 2.2; }
+
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+
+table.data.money td { text-align: right; font-variant-numeric: tabular-nums; }
+table.data.money th { width: auto; }
+table.data.money td.hd {
+  font-size: 10.5px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+table.data.money tr.tot th, table.data.money tr.tot td {
+  font-weight: 700; border-top: 1.5px solid var(--line-2);
+}
 
 /* ------------------------------------------------------------- stats */
 .stat { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
@@ -590,39 +788,40 @@ body.kiosk {
 }
 body.kiosk #topbar, body.kiosk #tabbar, body.kiosk #menu { display: none; }
 body.kiosk #view { max-width: none; padding: 0; animation: none; }
+/* The wall screen wrapper. Named, not lettered — see the note in app.js. */
 
-.k { min-height: 100vh; display: flex; flex-direction: column; padding: 22px 24px 14px; gap: 16px; }
-.k-head { display: flex; align-items: center; gap: 18px; }
-.k-head h1 { font-size: 27px; letter-spacing: -.025em; }
-.k-head .muted { color: #7d8794; }
-.k-clock { font-size: 32px; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.kboard { min-height: 100vh; display: flex; flex-direction: column; padding: 22px 24px 14px; gap: 16px; }
+.kb-head { display: flex; align-items: center; gap: 18px; }
+.kb-head h1 { font-size: 27px; letter-spacing: -.025em; }
+.kb-head .muted { color: #7d8794; }
+.kb-clock { font-size: 32px; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 
-.k-tally { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.k-tally > div {
+.kb-tally { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.kb-tally > div {
   position: relative; overflow: hidden;
   display: flex; align-items: baseline; gap: 15px;
   background: var(--s-bg); border-radius: 14px; padding: 17px 22px;
   animation: riseIn var(--t-slow) var(--ease-soft) both;
 }
 
-.k-tally > div:nth-child(2) { animation-delay: 60ms; }
-.k-tally > div:nth-child(3) { animation-delay: 120ms; }
-.k-tally .n { font-size: 54px; font-weight: 700; line-height: 1; color: var(--s);
+.kb-tally > div:nth-child(2) { animation-delay: 60ms; }
+.kb-tally > div:nth-child(3) { animation-delay: 120ms; }
+.kb-tally .n { font-size: 54px; font-weight: 700; line-height: 1; color: var(--s);
   font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
-.k-tally .n em { font-style: normal; font-size: 20px; font-weight: 620;
+.kb-tally .n em { font-style: normal; font-size: 20px; font-weight: 620;
   margin-left: 8px; opacity: .7; letter-spacing: 0; }
-.k-tally .l { font-size: 16px; color: #a3adb9; }
+.kb-tally .l { font-size: 16px; color: #a3adb9; }
 
-.k-body { flex: 1; display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; min-height: 0; }
-.k-col {
+.kb-body { flex: 1; display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; min-height: 0; }
+.kb-col {
   display: flex; flex-direction: column; min-height: 0;
   background: #101317; border-radius: 14px; padding: 17px 19px;
   animation: riseIn var(--t-slow) var(--ease-soft) both; animation-delay: 100ms;
 }
-.k-col h2 { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #7d8794; margin-bottom: 13px; }
-.k-scroll { overflow: hidden; flex: 1; align-content: start; }
+.kb-col h2 { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #7d8794; margin-bottom: 13px; }
+.kb-scroll { overflow: hidden; flex: 1; align-content: start; }
 
-.k-job {
+.kb-job {
   display: grid; grid-template-columns: 118px 1fr auto; gap: 15px; align-items: center;
   position: relative; overflow: hidden;
   background: var(--s-bg); border-radius: 11px;
@@ -630,66 +829,66 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   animation: riseIn var(--t-slow) var(--ease-soft) both;
   animation-delay: calc(140ms + var(--i, 0) * 55ms);
 }
-.k-job .kcode { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
-.k-job .kno   { font-size: 11px; color: #98a2ae; letter-spacing: .04em; }
-.k-job .kttl  { font-size: 17px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.k-job .kmeta { font-size: 13px; color: #a3adb9; margin-top: 3px; }
-.k-job .keta  { text-align: right; font-size: 14px; color: #c3ccd6; white-space: nowrap; }
-.k-job .keta b { display: block; font-size: 17px; font-weight: 620; }
-.k-job .keta .late { color: #ff8078; }
+.kb-job .kcode { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.kb-job .kno   { font-size: 11px; color: #98a2ae; letter-spacing: .04em; }
+.kb-job .kttl  { font-size: 17px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-job .kmeta { font-size: 13px; color: #a3adb9; margin-top: 3px; }
+.kb-job .keta  { text-align: right; font-size: 14px; color: #c3ccd6; white-space: nowrap; }
+.kb-job .keta b { display: block; font-size: 17px; font-weight: 620; }
+.kb-job .keta .late { color: #ff8078; }
 
-.k-allclear {
+.kb-allclear {
   position: relative; overflow: hidden;
   background: var(--s-bg); border-radius: 11px;
   padding: 28px 26px; color: #96a0ac;
   animation: riseIn var(--t-slow) var(--ease-soft) both; animation-delay: 140ms;
 }
-.k-allclear .big { font-size: 31px; font-weight: 640; color: var(--s); margin-bottom: 5px; letter-spacing: -.02em; }
+.kb-allclear .big { font-size: 31px; font-weight: 640; color: var(--s); margin-bottom: 5px; letter-spacing: -.02em; }
 
-.k-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 9px; align-content: start; }
-.k-chip {
+.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 9px; align-content: start; }
+.kb-chip {
   position: relative; overflow: hidden;
   background: var(--s-bg); border-radius: 9px; padding: 10px 12px;
   animation: riseIn var(--t-slow) var(--ease-soft) both;
   animation-delay: calc(160ms + var(--i, 0) * 30ms);
 }
-.k-chip .c { font-size: 17px; font-weight: 700; letter-spacing: -.02em;
+.kb-chip .c { font-size: 17px; font-weight: 700; letter-spacing: -.02em;
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.k-chip .c em { font-style: normal; font-size: 13px; font-weight: 620; color: var(--s);
+.kb-chip .c em { font-style: normal; font-size: 13px; font-weight: 620; color: var(--s);
   font-variant-numeric: tabular-nums; }
-.k-chip .s { font-size: 11.5px; color: #a3adb9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-chip .s { font-size: 11.5px; color: #a3adb9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.k-foot { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: #5f6975; }
-.k-foot button {
+.kb-foot { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: #5f6975; }
+.kb-foot button {
   background: none; border: 1px solid #262c34; color: #8d97a3;
   border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 12px;
   cursor: pointer; margin-left: 6px;
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.k-foot button:hover { background: #171b21; color: #c3ccd6; }
+.kb-foot button:hover { background: #171b21; color: #c3ccd6; }
 
-@media (max-width: 900px) { .k-body { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .kb-body { grid-template-columns: 1fr; } }
 
 /* Read from across the office. */
 @media (min-width: 1400px) {
   .k { padding: 28px 32px 18px; }
-  .k-head h1 { font-size: 35px; }
-  .k-clock { font-size: 44px; }
-  .k-tally .n { font-size: 72px; }
-  .k-tally .n em { font-size: 26px; }
-  .k-tally .l { font-size: 20px; }
-  .k-col h2 { font-size: 14px; }
-  .k-job { grid-template-columns: 152px 1fr auto; padding: 18px 22px; }
-  .k-job .kcode { font-size: 29px; }
-  .k-job .kno  { font-size: 13px; }
-  .k-job .kttl { font-size: 22px; }
-  .k-job .kmeta { font-size: 16px; }
-  .k-job .keta { font-size: 16px; }
-  .k-job .keta b { font-size: 22px; }
-  .k-grid { grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); }
-  .k-chip .c { font-size: 21px; }
-  .k-chip .c em { font-size: 16px; }
-  .k-chip .s { font-size: 13px; }
+  .kb-head h1 { font-size: 35px; }
+  .kb-clock { font-size: 44px; }
+  .kb-tally .n { font-size: 72px; }
+  .kb-tally .n em { font-size: 26px; }
+  .kb-tally .l { font-size: 20px; }
+  .kb-col h2 { font-size: 14px; }
+  .kb-job { grid-template-columns: 152px 1fr auto; padding: 18px 22px; }
+  .kb-job .kcode { font-size: 29px; }
+  .kb-job .kno  { font-size: 13px; }
+  .kb-job .kttl { font-size: 22px; }
+  .kb-job .kmeta { font-size: 16px; }
+  .kb-job .keta { font-size: 16px; }
+  .kb-job .keta b { font-size: 22px; }
+  .kb-grid { grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); }
+  .kb-chip .c { font-size: 21px; }
+  .kb-chip .c em { font-size: 16px; }
+  .kb-chip .s { font-size: 13px; }
 }
 
 /* --------------------------------------------- laptops and tablets */
@@ -771,102 +970,106 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .doc .brandbar .right { margin-left: auto; text-transform: none; letter-spacing: .02em; }
 
 /* ------------------------------------------------------------ masthead */
-.doc .doc-head { margin-bottom: 7mm; }
-.doc .doc-head .top { display: flex; align-items: flex-start; gap: 4mm; }
-.doc .doc-head .mark { width: 13mm; height: 13mm; flex: none; }
-.doc .doc-head .org { font-size: 15pt; font-weight: 700; letter-spacing: .01em; line-height: 1.1; }
+/* Brand left, document right, on one line. A letterhead should cost the
+   page 30mm, not 60. */
+.doc .doc-head { margin-bottom: 5mm; }
+.doc .doc-head .top { display: flex; align-items: flex-start; gap: 3.5mm; }
+.doc .doc-head .mark { width: 11mm; height: 11mm; flex: none; }
+.doc .doc-head .org { font-size: 13pt; font-weight: 700; letter-spacing: .01em; line-height: 1.05; }
 .doc .doc-head .trade {
-  font-size: 8.5pt; color: var(--d-ink-2); letter-spacing: .13em;
-  text-transform: uppercase; margin-top: .8mm;
+  font-size: 7.5pt; color: var(--d-ink-2); letter-spacing: .12em;
+  text-transform: uppercase; margin-top: .6mm;
 }
-.doc .doc-head .contact { font-size: 8.5pt; color: var(--d-ink-3); margin-top: 1.4mm; }
+.doc .doc-head .contact { font-size: 7.5pt; color: var(--d-ink-3); margin-top: 1mm; }
 .doc .doc-head .meta { margin-left: auto; text-align: right; }
 .doc .doc-head .kind {
-  font-size: 8.5pt; letter-spacing: .16em; text-transform: uppercase;
+  font-size: 8pt; letter-spacing: .14em; text-transform: uppercase;
   color: var(--d-accent); font-weight: 700;
 }
-.doc h1 { font-size: 17pt; font-weight: 700; letter-spacing: -.01em; margin: 1mm 0 0; line-height: 1.15; }
-.doc .doc-head .sub { font-size: 10.5pt; color: var(--d-ink-2); margin-top: 1.2mm; }
-.doc .doc-head .when { font-size: 8.5pt; color: var(--d-ink-3); margin-top: .8mm; }
-/* The one piece of colour that carries the brand. */
-.doc .doc-head .rule { height: 1.6mm; background: var(--d-accent); margin-top: 4mm; border-radius: .8mm; }
+.doc .doc-head .when { font-size: 7.5pt; color: var(--d-ink-3); margin-top: .6mm; line-height: 1.3; }
+.doc h1 { font-size: 15pt; font-weight: 700; letter-spacing: -.015em; margin: 2.5mm 0 0; line-height: 1.12; }
+.doc .doc-head .sub { font-size: 9.5pt; color: var(--d-ink-2); margin-top: .8mm; }
+.doc .doc-head .rule { height: 1.2mm; background: var(--d-accent); margin-top: 2.6mm; border-radius: .6mm; }
 
 /* ------------------------------------------------------------ headings */
 .doc h2 {
-  font-size: 9pt; font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+  font-size: 8.5pt; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
   color: var(--d-ink-3);
-  margin: 7mm 0 2.5mm; padding-bottom: 1.4mm;
+  margin: 5.5mm 0 1.8mm; padding-bottom: 1mm;
   border-bottom: .7pt solid var(--d-line);
   break-after: avoid; page-break-after: avoid;
 }
 
 /* -------------------------------------------------------------- tables */
-.doc table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 3mm; }
+.doc table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 2mm; }
 .doc th, .doc td {
-  border: 0; border-bottom: .6pt solid var(--d-line);
-  padding: 2mm 2.6mm 2mm 0; text-align: left; vertical-align: top;
+  border: 0; border-bottom: .5pt solid var(--d-line);
+  padding: 1.5mm 2.2mm 1.5mm 0; text-align: left; vertical-align: top;
 }
 .doc th {
   background: none; color: var(--d-ink-3);
-  font-size: 7.5pt; text-transform: uppercase; letter-spacing: .09em; font-weight: 700;
-  border-bottom: .7pt solid var(--d-ink-3); padding-bottom: 1.4mm;
+  font-size: 7pt; text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
+  border-bottom: .7pt solid var(--d-ink-3); padding-bottom: 1mm;
 }
 .doc thead { display: table-header-group; }      /* repeat headings over a page break */
-/* Data rows stay whole — but never the sheet's own row, which wraps the
-   entire document. Telling the browser not to break inside something taller
-   than a page turns a two-page diary into twenty. */
 .doc table:not(.sheet) tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
+/* Facts two to a line rather than one, which halves the height of every
+   summary in the document. */
 .doc .kv { width: 100%; }
-.doc .kv td { border: 0; padding: 1.3mm 0; }
-.doc .kv td:first-child {
-  width: 44mm; color: var(--d-ink-3); font-size: 8.5pt;
-  text-transform: uppercase; letter-spacing: .06em;
+.doc .kv td { border: 0; padding: .9mm 0; }
+.doc .kv td.lbl {
+  width: 26mm; color: var(--d-ink-3); font-size: 7.5pt;
+  text-transform: uppercase; letter-spacing: .05em; padding-right: 2mm;
 }
+.doc .kv td.val { width: 65mm; padding-right: 6mm; }
+.doc .kv.two td.val:last-child { padding-right: 0; }
 
-/* -------------------------------------------------------- the day diary */
-/* One entry is one block that never splits: the time, what happened, and
-   whatever the supervisor wrote about it stay together or move together. */
-.doc .day { margin-bottom: 2mm; }
-.doc .day-head {
-  display: flex; align-items: baseline; gap: 3mm;
-  margin: 7mm 0 3mm; padding-bottom: 1.6mm;
-  border-bottom: .7pt solid var(--d-line);
-  break-after: avoid; page-break-after: avoid;
+/* ---------------------------------------------------------- the diary */
+/* A day is a table. Its heading lives in the thead, so a day that runs on
+   to the next page carries its own heading with it — which is what stops
+   the orphaned headings and the half-empty pages. */
+.doc .dtable { margin-bottom: 4mm; font-size: 8.5pt; }
+.doc .dtable .dayrow th {
+  border-bottom: 1.2pt solid var(--d-ink);
+  padding: 3mm 0 1.4mm; text-transform: none; letter-spacing: 0;
+  font-size: 11pt; color: var(--d-ink); font-weight: 700;
 }
-.doc .day-head h3 { font-size: 12pt; font-weight: 700; margin: 0; letter-spacing: -.01em; }
-.doc .day-head .span { font-size: 8.5pt; color: var(--d-ink-3); margin-left: auto; }
+.doc .dtable .dayrow .dn {
+  display: inline-block; margin-right: 2.5mm;
+  font-size: 7pt; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--d-accent); vertical-align: 1pt;
+}
+.doc .dtable .dayrow .dmeta {
+  float: right; font-size: 8pt; font-weight: 500; color: var(--d-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.doc .dtable .cols th { padding-top: 1.2mm; padding-bottom: .8mm; }
+.doc .dtable td { padding: 1.4mm 2.2mm 1.4mm 0; }
+.doc .dtable .dt { width: 13mm; font-weight: 700; font-variant-numeric: tabular-nums; }
+.doc .dtable .dk { width: 32mm; font-weight: 640; }
+.doc .dtable .dnote { white-space: pre-wrap; }
+.doc .dtable .dby { width: 22mm; color: var(--d-ink-3); font-size: 7.5pt; }
+.doc .dtable .ph { font-size: 7pt; color: var(--d-ink-3); font-style: italic; }
+.doc .dtable tr.flag .dt, .doc .dtable tr.flag .dk { color: var(--d-red); }
+.doc .dtable tr.flag td { background: #fdf6f4; }
 
-.doc .entry {
-  display: flex; gap: 4mm; align-items: flex-start;
-  padding: 2.2mm 0;
-  border-bottom: .5pt solid var(--d-line);
-  break-inside: avoid; page-break-inside: avoid;
+/* ------------------------------------------------------- photographs */
+/* A table, not a grid: browsers fragment grids across pages badly, which
+   is what put photographs half on one page and half on the next. Two
+   across, three down — six to a page, every page the same. */
+.doc .page-break { break-before: page; page-break-before: always; height: 0; }
+.doc table.photos { width: 100%; border-collapse: separate; border-spacing: 4mm 0; margin: 0 -4mm; }
+.doc table.photos tr { break-inside: avoid; page-break-inside: avoid; }
+.doc table.photos td {
+  width: 50%; border: 0; padding: 0 0 4mm; vertical-align: top;
 }
-.doc .entry:last-child { border-bottom: 0; }
-.doc .entry .e-time {
-  width: 15mm; flex: none; font-size: 10pt; font-weight: 700;
-  font-variant-numeric: tabular-nums; letter-spacing: -.01em; padding-top: .2mm;
-}
-.doc .entry .e-body { flex: 1; min-width: 0; }
-.doc .entry .e-kind { font-size: 10pt; font-weight: 650; }
-.doc .entry .e-note { font-size: 9.5pt; color: var(--d-ink-2); margin-top: .8mm; white-space: pre-wrap; }
-.doc .entry .e-who { font-size: 8pt; color: var(--d-ink-3); margin-top: 1mm; }
-/* Issues and delays are the lines a client reads first. */
-.doc .entry.flag { border-left: 1.2pt solid var(--d-red); padding-left: 3mm; }
-.doc .entry.flag .e-kind, .doc .entry.flag .e-time { color: var(--d-red); }
-
-/* --------------------------------------------------------- photo sheet */
-/* Two across, two down — four to a page. The cell height is what holds
-   that: a third row cannot fit, so a page never carries more than four. */
-.doc .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm 6mm; margin-bottom: 3mm; }
-.doc .photo { break-inside: avoid; page-break-inside: avoid; }
 .doc .photo img {
-  width: 100%; height: 88mm; object-fit: cover; display: block;
-  border: .6pt solid var(--d-line); border-radius: 1mm;
+  width: 100%; height: 55mm; object-fit: cover; display: block;
+  border: .5pt solid var(--d-line); border-radius: .8mm; background: var(--d-tint);
 }
-.doc .photo .cap { font-size: 8pt; color: var(--d-ink-2); margin-top: 1.4mm; line-height: 1.35; }
-.doc .photo .cap b { color: var(--d-ink); font-weight: 650; }
+.doc .photo .cap { font-size: 7pt; color: var(--d-ink-2); margin-top: 1mm; line-height: 1.28; }
+.doc .photo .cap b { color: var(--d-ink); font-weight: 700; }
 
 /* ----------------------------------------------------------- oddments */
 .doc .sig { margin-top: 12mm; display: flex; gap: 14mm; break-inside: avoid; }
