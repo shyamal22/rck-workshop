@@ -14,9 +14,8 @@ actually been filled in and uploaded, and from the dates on it.
 
 Three screens deep, and no deeper.
 
-**The landing page** — four options. *Staff information* and *Annual leave*
-are built; the last two are marked-out slots, left empty on purpose until you
-say what belongs in them.
+**The landing page** — four options: *Staff information*, *Annual leave*,
+*Company profiles* and *Disciplinaries & breaches*.
 
 **Staff information** — everyone as a tile, showing their head shot, name,
 role, crew and a ring with their compliance percentage. Filter by
@@ -67,6 +66,61 @@ would be worse than not showing it.
 Sick, unpaid, bereavement and parental leave can be recorded too, so a week off
 doesn't have to be filed as annual leave when it wasn't. Only annual leave
 counts towards the days-taken figure.
+
+---
+
+## Company profiles
+
+Everyone at RCK as a face, a name and a job, grouped by crew. No compliance,
+no dates, nothing to fill in — it builds itself from the staff already on file
+and exists to answer *who is that, and what do they do*. Search it, filter it
+by crew, tap anyone to open their full record.
+
+Head shots come from the **Head shot photo** tile on each person, so uploading
+one there fills this in too. Until then it shows their initials.
+
+---
+
+## Disciplinaries and breaches
+
+The register of anything that needs to be on record — a breach of the ten
+golden rules, no hard hat, a complaint from a customer.
+
+**Anyone with the app can raise one.** That is the point of handing supervisors
+the app: they are the ones on site who see it. It is the only thing a
+supervisor can put in — everything else stays read-only for them.
+
+**Raising one** asks who it is about, then:
+- the **date and time**, stamped as the form is filled in rather than chosen,
+  so the register says when something was actually reported;
+- **what happened** — a title, in their own words;
+- **describe it** — where, when, who was there;
+- **photos**, as many as they like, optional.
+
+**The office then works it.** A director or the HR manager opens the breach,
+adds comments as they go, and when they have decided what to do they press
+**Complete** and record what was done. It comes off the person's file and moves
+to the completed list. Nothing is ever deleted — these are employment records —
+and a completed breach can be reopened.
+
+### The shading
+
+An **open** breach shades that person wherever they appear:
+
+| Open breaches | Their profile |
+|---|---|
+| none | normal |
+| one | **yellow** |
+| two | **orange** |
+| three or more | **red** |
+
+Completing a breach takes the shading off. Complete the last one and they go
+back to normal.
+
+The shading is deliberately **separate from their compliance colour**. The ring
+still says how much of their paperwork is in; the wash says how their conduct
+stands. Running the two together would lose both — somebody can be 100%
+compliant on paper and still have been sent home twice.
 
 ---
 
@@ -329,6 +383,11 @@ It installs like a normal app.
 - **A new line has to be saved before a certificate can go on it** — there is
   nothing to attach it to until then. The tile says so.
 - **Reminders** are the colours and the counts; the app does not send email.
+- **A breach is never deleted**, only completed — and a completed one can be
+  reopened. Only remove one in the database, and only if it was entered against
+  the wrong person.
+- **Raising a breach is the one thing a supervisor can do.** Everything else in
+  the app is read-only for them.
 - **Nothing here is offline.** Unlike the workshop app there is no offline
   cache, which is the trade for not leaving staff files on a phone.
 - **The name on each phone** is what goes against every change, so it is worth

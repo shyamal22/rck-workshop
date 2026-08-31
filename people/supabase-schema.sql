@@ -17,6 +17,7 @@
 --   profile_sections  one row per compliance tile, per person or company
 --   profile_files     the documents behind those tiles
 --   staff_leave       approved annual leave, planned and taken
+--   staff_breaches    disciplinaries and breaches, open and completed
 --   staff_audit       who changed what, and when
 --   storage bucket    "staff-files", private, reachable only by signed link
 -- =====================================================================
@@ -168,6 +169,44 @@ create index if not exists staff_leave_staff_idx on staff_leave (staff_id, start
 create index if not exists staff_leave_when_idx  on staff_leave (starts_on, ends_on);
 
 -- ---------------------------------------------------------------------
+-- Disciplinaries and breaches
+--
+-- Raised by whoever saw it — a supervisor on site, or the office — and
+-- then worked by HR, who adds comments and records what was done before
+-- marking it complete.
+--
+-- An OPEN breach shades that person's tile: one is yellow, two orange,
+-- three or more red. Completing it takes the shading off and moves the
+-- record to the completed list. Nothing is ever deleted — these are
+-- employment records.
+--
+-- `raised_at` is stamped when the form is filled in, not chosen, so the
+-- register reflects when something was actually reported.
+--
+-- Photos attached to a breach live in profile_files with
+-- section_key = 'breach' and slot = this row's id, so they use the same
+-- private bucket and short-lived links as everything else.
+-- ---------------------------------------------------------------------
+create table if not exists staff_breaches (
+  id           uuid primary key default gen_random_uuid(),
+  staff_id     uuid not null references staff(id) on delete cascade,
+  title        text not null,
+  description  text default '',
+  raised_by    text default '',
+  raised_at    timestamptz not null default now(),
+  status       text not null default 'open',      -- open | complete
+  hr_comments  text default '',
+  outcome      text default '',
+  completed_by text default '',
+  completed_at timestamptz,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists staff_breaches_staff_idx  on staff_breaches (staff_id, raised_at desc);
+create index if not exists staff_breaches_status_idx on staff_breaches (status, raised_at desc);
+
+-- ---------------------------------------------------------------------
 -- The trail
 -- ---------------------------------------------------------------------
 create table if not exists staff_audit (
@@ -212,6 +251,10 @@ drop trigger if exists staff_leave_touch on staff_leave;
 create trigger staff_leave_touch before update on staff_leave
   for each row execute function touch_updated_at();
 
+drop trigger if exists staff_breaches_touch on staff_breaches;
+create trigger staff_breaches_touch before update on staff_breaches
+  for each row execute function touch_updated_at();
+
 -- =====================================================================
 --  Access
 --
@@ -252,13 +295,14 @@ alter table staff            enable row level security;
 alter table profile_sections enable row level security;
 alter table profile_files    enable row level security;
 alter table staff_leave      enable row level security;
+alter table staff_breaches   enable row level security;
 alter table staff_audit      enable row level security;
 
 do $$
 declare t text;
 begin
   foreach t in array array['companies', 'staff', 'profile_sections', 'profile_files',
-                       'staff_leave', 'staff_audit']
+                       'staff_leave', 'staff_breaches', 'staff_audit']
   loop
     -- every policy name this file has ever used, so a re-run lands clean
     execute format('drop policy if exists %I on %I', t || '_all',    t);

@@ -438,8 +438,19 @@ function daysFromToday(dateStr) {
   return Math.round((b - a) / 86400000);
 }
 const PLURALS = { person: 'people' };
+
+/**
+ * "1 breach" / "2 breaches", and "1 company" / "2 companies".
+ *
+ * Naive +s gets both of those wrong, and wrong English on a staff record
+ * reads as carelessness about the record itself.
+ */
 function plural(n, word) {
-  return n === 1 ? `${n} ${word}` : `${n} ${PLURALS[word] || word + 's'}`;
+  if (n === 1) return `${n} ${word}`;
+  if (PLURALS[word]) return `${n} ${PLURALS[word]}`;
+  if (/(ch|sh|ss|s|x|z)$/.test(word)) return `${n} ${word}es`;
+  if (/[^aeiou]y$/.test(word))        return `${n} ${word.slice(0, -1)}ies`;
+  return `${n} ${word}s`;
 }
 function fmtSize(bytes) {
   const n = Number(bytes);
@@ -521,6 +532,7 @@ const ICONS = {
   handshake: '<path d="M8.6 12.4l2.6-2.6a1.9 1.9 0 0 1 2.7 0l3.3 3.3"/><path d="M2.8 8.9l3.4-3.4 4 1.6 3.4-1.6 3.6 1.4 4 .6"/><path d="M2.8 8.9v5.2l4.5 4.5a1.7 1.7 0 0 0 2.4 0l.8-.8"/><path d="M10.5 17.8l1.6 1.6a1.7 1.7 0 0 0 2.4 0"/>',
   bank:      '<path d="M3.4 9.6L12 4.4l8.6 5.2"/><path d="M5.4 9.6v8M9.8 9.6v8M14.2 9.6v8M18.6 9.6v8"/><path d="M3 20.4h18"/>',
   building:  '<path d="M4.5 20.5V5.2A1.7 1.7 0 0 1 6.2 3.5h7.6a1.7 1.7 0 0 1 1.7 1.7v15.3"/><path d="M15.5 10.5h2.9a1.6 1.6 0 0 1 1.6 1.6v8.4"/><path d="M8 7.4h3.9M8 11h3.9M8 14.6h3.9"/><path d="M2.8 20.5h18.4"/>',
+  flag:      '<path d="M5.5 21V4.2"/><path d="M5.5 4.6h11.9l-2.2 4 2.2 4H5.5"/>',
   calendar:  '<rect x="3.4" y="5.4" width="17.2" height="15.2" rx="2.4"/><path d="M3.4 10.2h17.2"/><path d="M8.2 3.4v4M15.8 3.4v4"/><path d="M7.6 14h3M13.4 14h3"/>',
   print:     '<path d="M7 9V3.5h10V9"/><path d="M4 9h16v7h-3"/><path d="M7 16v4.5h10V16"/>',
   plus:      '<path d="M12 5.5v13M5.5 12h13"/>',
@@ -610,6 +622,17 @@ const myRole    = () => S.role;
 const isDirector = () => S.role === 'director';
 const canEdit   = () => isDirector();
 const canSeePay = () => isDirector();
+
+/**
+ * The one thing a supervisor can put into the app.
+ *
+ * Reporting a breach is the whole point of handing supervisors the app —
+ * they are the ones on site who see it. They can raise one and attach
+ * photos to it, and that is all: only the office adds comments to a
+ * breach or closes it out.
+ */
+const canRaiseBreach = () => true;
+const canWorkBreach  = () => isDirector();
 const ROLE_LABEL = { director: 'Director', supervisor: 'Supervisor' };
 const ROLES = [
   { key: 'supervisor', label: 'Supervisor', blurb: 'see everything except pay' },
@@ -639,7 +662,8 @@ function setupLink() {
 /* =====================================================================
    Data, held in memory only
    ===================================================================== */
-const DB = { staff: [], companies: [], sections: [], files: [], leave: [], audit: [] };
+const DB = { staff: [], companies: [], sections: [], files: [],
+             leave: [], breaches: [], audit: [] };
 let loaded = false;
 let locked = false;
 let lastError = '';
@@ -647,7 +671,7 @@ let lastError = '';
 /** Throw away every scrap of staff data held in memory. */
 function forgetData() {
   DB.staff = []; DB.companies = []; DB.sections = [];
-  DB.files = []; DB.leave = []; DB.audit = [];
+  DB.files = []; DB.leave = []; DB.breaches = []; DB.audit = [];
   Faces.forget();
   loaded = false;
 }
@@ -669,18 +693,20 @@ async function rest(path, opts) {
 
 const Store = {
   async pull() {
-    const [staff, companies, sections, files, leave] = await Promise.all([
+    const [staff, companies, sections, files, leave, breaches] = await Promise.all([
       rest('staff?select=*&order=last_name.asc,first_name.asc'),
       rest('companies?select=*&order=name.asc'),
       rest('profile_sections?select=*'),
       rest('profile_files?select=*&order=created_at.desc'),
-      rest('staff_leave?select=*&order=starts_on.asc')
+      rest('staff_leave?select=*&order=starts_on.asc'),
+      rest('staff_breaches?select=*&order=raised_at.desc')
     ]);
     DB.staff = staff || [];
     DB.companies = companies || [];
     DB.sections = sections || [];
     DB.files = files || [];
     DB.leave = leave || [];
+    DB.breaches = breaches || [];
     loaded = true;
   },
 
@@ -811,7 +837,8 @@ const encodePath = p => p.split('/').map(encodeURIComponent).join('/');
 
 function localName(table) {
   return { profile_sections: 'sections', profile_files: 'files',
-           staff_leave: 'leave', staff_audit: 'audit' }[table] || table;
+           staff_leave: 'leave', staff_breaches: 'breaches',
+           staff_audit: 'audit' }[table] || table;
 }
 const whoAmI = () => S.name || ROLE_LABEL[S.role] || 'Someone';
 
@@ -1186,6 +1213,72 @@ function daysTaken(staffId, year, kind) {
 }
 
 /* =====================================================================
+   Disciplinaries and breaches
+
+   Anyone with the app can raise one — the supervisor on site is usually
+   the one who saw it. From there it is the office's: they add comments,
+   record what was done, and mark it complete.
+
+   While a breach is OPEN it shades that person's tile. One is yellow,
+   two orange, three or more red. Completing it takes the shading off and
+   moves the record to the completed list; nothing is ever deleted,
+   because these are employment records.
+   ===================================================================== */
+
+/** Newest first. */
+const breachesFor = staffId => DB.breaches
+  .filter(x => x.staff_id === staffId)
+  .sort((a, b) => String(b.raised_at).localeCompare(String(a.raised_at)));
+
+const isOpenBreach = x => (x.status || 'open') !== 'complete';
+const openBreaches = () => DB.breaches.filter(isOpenBreach);
+const openBreachesFor = staffId => breachesFor(staffId).filter(isOpenBreach);
+
+/**
+ * How a person's tile is shaded: nothing, then yellow, orange, red as
+ * open breaches stack up. Deliberately separate from their compliance
+ * colour — one says "paperwork missing", the other says "conduct", and
+ * running them together would lose both.
+ */
+const BREACH_FLAGS = [
+  null,
+  { key: 'flag-1', tone: 'yellow', label: 'One open breach' },
+  { key: 'flag-2', tone: 'orange', label: 'Two open breaches' },
+  { key: 'flag-3', tone: 'red',    label: 'Three or more open breaches' }
+];
+
+function breachFlag(staffId) {
+  const n = openBreachesFor(staffId).length;
+  if (!n) return null;
+  return Object.assign({ count: n }, BREACH_FLAGS[Math.min(n, 3)]);
+}
+
+/** Photos attached to one breach. */
+const breachPhotos = breach =>
+  filesFor(staffOwner(breach.staff_id), 'breach', breach.id);
+
+/** Everyone carrying at least one open breach, worst first. */
+function flaggedPeople() {
+  const seen = new Map();
+  openBreaches().forEach(x => {
+    if (!seen.has(x.staff_id)) seen.set(x.staff_id, staffById(x.staff_id));
+  });
+  return Array.from(seen.values())
+    .filter(Boolean)
+    .map(p => ({ person: p, flag: breachFlag(p.id) }))
+    .sort((a, b) => b.flag.count - a.flag.count ||
+                    fullName(a.person).localeCompare(fullName(b.person)));
+}
+
+function breachWhen(x) {
+  const d = daysFromToday(String(x.raised_at).slice(0, 10));
+  if (d === null) return fmtDateTime(x.raised_at);
+  if (d === 0) return 'Today, ' + fmtDateTime(x.raised_at).split(', ')[1];
+  if (d === -1) return 'Yesterday';
+  return fmtDate(x.raised_at);
+}
+
+/* =====================================================================
    Routing
    ===================================================================== */
 function parseHash() {
@@ -1211,6 +1304,9 @@ const SCREENS = {
   'edit':      { title: 'Details',      render: renderPersonEdit, back: true },
   'tile':      { title: '',             render: renderStaffTile,  back: true },
   'leave':     { title: 'Annual leave', render: renderLeave, back: '#/' },
+  'team':      { title: 'Company profiles', render: renderTeam, back: '#/' },
+  'breaches':  { title: 'Disciplinaries & breaches', render: renderBreaches, back: '#/' },
+  'breach':    { title: 'Breach', render: renderBreach, back: '#/breaches' },
   'companies': { title: 'Labour hire & subcontractors', render: renderCompanies, back: '#/' },
   'company':   { title: 'Company',      render: renderCompany, back: '#/companies' },
   'ctile':     { title: '',             render: renderCompanyTile, back: true },
@@ -1638,11 +1734,6 @@ function showValue(f, value) {
    left as marked-out slots rather than invented, so what goes in them
    is still an open question rather than a wrong answer.
    ===================================================================== */
-const SLOTS = [
-  { n: 3, name: 'Slot three' },
-  { n: 4, name: 'Slot four' }
-];
-
 /** What the leave card says on the landing page. */
 function leaveHeadline() {
   const rows = leaveRows();
@@ -1653,6 +1744,15 @@ function leaveHeadline() {
   if (away) bits.push(`${plural(away, 'person')} away now`);
   if (soon) bits.push(`${soon} booked ahead`);
   return bits.length ? bits.join(' · ') : 'All booked leave has been taken.';
+}
+
+/** What the breaches card says on the landing page. */
+function breachHeadline() {
+  const open = openBreaches().length;
+  const flagged = flaggedPeople().length;
+  if (!DB.breaches.length) return 'Anything a supervisor needs on record. Nothing raised yet.';
+  if (!open) return 'All clear — everything raised has been closed out.';
+  return `${plural(open, 'breach')} open across ${plural(flagged, 'person')}.`;
 }
 
 function renderHome(view) {
@@ -1694,15 +1794,26 @@ function renderHome(view) {
         <span class="chev">${icon('chev')}</span>
       </button>
 
-      ${SLOTS.map(s => `
-      <button class="option empty-slot" data-slot="${s.n}">
-        <span class="mark">${icon('plus')}</span>
+      <button class="option" data-go="#/team">
+        <span class="mark">${icon('people')}</span>
         <span class="grow">
-          <span class="num">0${s.n}</span>
-          <b>${esc(s.name)}</b>
-          <span class="say">Not built yet.</span>
+          <span class="num">03</span>
+          <b>Company profiles</b>
+          <span class="say">${list.length ? `Everyone at RCK — ${plural(list.length, 'face')}, name and job.`
+            : 'Everyone at RCK, once there is somebody on the books.'}</span>
         </span>
-      </button>`).join('')}
+        <span class="chev">${icon('chev')}</span>
+      </button>
+
+      <button class="option${openBreaches().length ? ' status-red' : ''}" data-go="#/breaches">
+        <span class="mark"${openBreaches().length ? ' style="background:var(--s-bg);color:var(--s)"' : ''}>${icon('flag')}</span>
+        <span class="grow">
+          <span class="num">04</span>
+          <b>Disciplinaries &amp; breaches</b>
+          <span class="say">${breachHeadline()}</span>
+        </span>
+        <span class="chev">${icon('chev')}</span>
+      </button>
     </div>
 
     <div class="sec-head"><h2>Also here</h2></div>
@@ -1719,14 +1830,6 @@ function renderHome(view) {
   $$('[data-go]', view).forEach(b => { b.onclick = () => go(b.dataset.go); });
   $$('[data-level]', view).forEach(b => {
     b.onclick = () => { staffFilter.level = b.dataset.level; go('#/staff'); };
-  });
-  $$('[data-slot]', view).forEach(b => {
-    b.onclick = () => sheet(`<h2>Nothing here yet</h2>
-      <p class="sub">One of the four options on the landing page, left empty on purpose rather
-        than filled with a guess. Say what belongs here and it gets built next.</p>
-      <button class="btn wide" data-ok>Right you are</button>`, (el, close) => {
-      $('[data-ok]', el).onclick = close;
-    });
   });
 }
 
@@ -1763,11 +1866,14 @@ function personTile(p) {
              : c.level === 'orange' ? `${c.problems.length} expiring`
              : `${c.problems.filter(x => x.state.level === 'red').length} to do`;
 
-  return `<button class="ptile ${statusClass(c.level)}" data-person="${esc(p.id)}">
+  const flag = breachFlag(p.id);
+  return `<button class="ptile ${statusClass(c.level)}${flag ? ' ' + flag.key : ''}" data-person="${esc(p.id)}">
     <span class="top">
       ${faceHtml(p)}
       ${ringHtml(c.pct, c.level)}
     </span>
+    ${flag ? `<span class="flagline">${icon('flag')}${flag.count} open ${
+      flag.count === 1 ? 'breach' : 'breaches'}</span>` : ''}
     <span>
       <span class="who ellip">${esc(fullName(p))}</span>
       <span class="meta ellip">${esc(p.role || '—')}</span>
@@ -1887,6 +1993,10 @@ function renderPerson(view, args) {
         ${ringHtml(c.pct, c.level, true)}
       </div>
 
+      ${(() => { const f = breachFlag(p.id); return f ? `<div class="banner tone-${f.tone}"
+        style="margin:14px 0 0"><b>${f.count} open ${f.count === 1 ? 'breach' : 'breaches'}</b>
+        — on file until the office closes ${f.count === 1 ? 'it' : 'them'} out.</div>` : ''; })()}
+
       <div class="banner ${statusClass(c.level)}" style="margin:14px 0 15px">
         ${c.level === 'grey' ? 'No longer on the books.'
           : `${c.done} of ${c.total} complete${c.skipped ? ` · ${c.skipped} marked as not applying` : ''} — ${esc(c.text)}`}
@@ -1914,6 +2024,16 @@ function renderPerson(view, args) {
     <div class="sec-head"><h2>Compliance</h2><span class="sub">${c.done} of ${c.total}</span></div>
     <div class="stiles">${tiles.map(t => stileHtml(t, p)).join('')}</div>
 
+    <div class="sec-head"><h2>Disciplinaries &amp; breaches</h2>
+      ${canRaiseBreach() ? `<button class="act" id="addBreachHere">Raise one</button>` : ''}</div>
+    ${(() => {
+      const mine = breachesFor(p.id);
+      if (!mine.length) return `<div class="empty">Nothing on record.</div>`;
+      const open = mine.filter(isOpenBreach), done = mine.filter(x => !isOpenBreach(x));
+      return open.map(x => breachLine(x, { noFace: true, noName: true })).join('') +
+        (done.length ? `<div class="empty">${plural(done.length, 'completed breach')} on file.</div>` : '');
+    })()}
+
     <div class="sec-head"><h2>Annual leave</h2>
       ${canEdit() ? `<button class="act" id="addLeaveHere">Book leave</button>` : ''}</div>
     ${leavePersonCard(p)}
@@ -1939,6 +2059,9 @@ function renderPerson(view, args) {
   $('#histBtn').onclick = () => showHistory(p.id);
   const al = $('#addLeaveHere');
   if (al) al.onclick = () => editLeave(null, p.id);
+  const ab = $('#addBreachHere');
+  if (ab) ab.onclick = () => raiseBreach(p.id);
+  $$('[data-breach]', view).forEach(b => { b.onclick = () => go('#/breach/' + b.dataset.breach); });
   $$('[data-leave]', view).forEach(b => {
     b.onclick = () => {
       const row = DB.leave.find(l => l.id === b.dataset.leave);
@@ -2819,6 +2942,451 @@ function editLeave(row, presetStaffId) {
             toast('Removed.');
           } catch (e) { toast('Could not remove: ' + e.message); }
         });
+    };
+  });
+}
+
+/* =====================================================================
+   Screen — company profiles
+
+   Everyone in the company, as a face, a name and a job. No compliance,
+   no dates, nothing to fill in — it builds itself from the staff already
+   on file and exists purely to answer "who is that, and what do they
+   do".
+   ===================================================================== */
+const teamFilter = { crew: '', q: '' };
+
+function renderTeam(view) {
+  const all = onBooks();
+  const q = teamFilter.q.trim().toLowerCase();
+
+  const crewsUsed = (() => {
+    const used = new Set(all.map(p => p.crew).filter(Boolean));
+    const known = CREWS.filter(c => used.has(c.key));
+    const extra = Array.from(used).filter(k => !CREWS.some(c => c.key === k)).sort();
+    return known.concat(extra.map(k => ({ key: k, label: k })));
+  })();
+
+  const shown = all
+    .filter(p => !teamFilter.crew || (p.crew || '') === teamFilter.crew)
+    .filter(p => !q || [fullName(p), p.preferred_name, p.role, crewLabel(p.crew)]
+      .filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0);
+
+  /* Grouped by crew when everything is showing, because that is how the
+     yard actually thinks about who is who. */
+  const groups = teamFilter.crew || q
+    ? [{ label: '', people: shown }]
+    : crewsUsed.map(c => ({ label: c.label, people: shown.filter(p => (p.crew || '') === c.key) }))
+        .concat([{ label: 'No crew', people: shown.filter(p => !p.crew) }])
+        .filter(g => g.people.length);
+
+  view.innerHTML = `
+    <div class="toolbar">
+      <input type="search" id="tq" placeholder="Search name or job…" value="${esc(teamFilter.q)}"
+             autocapitalize="off" spellcheck="false">
+    </div>
+
+    ${crewsUsed.length > 1 ? `<div class="chips">
+      <button class="chip${!teamFilter.crew ? ' on' : ''}" data-tcrew="">Everyone<span class="c">${all.length}</span></button>
+      ${crewsUsed.map(c => `<button class="chip${teamFilter.crew === c.key ? ' on' : ''}" data-tcrew="${esc(c.key)}">${esc(c.label)}</button>`).join('')}
+    </div>` : ''}
+
+    ${shown.length ? groups.map(g => `
+      ${g.label ? `<div class="sec-head"><h2>${esc(g.label)}</h2><span class="sub">${g.people.length}</span></div>` : ''}
+      <div class="cards">${g.people.map(teamCard).join('')}</div>`).join('')
+      : `<div class="empty"><b>Nobody to show</b>${
+          all.length ? 'Nothing matches that.' : 'Add people under Staff information first.'}</div>`}`;
+
+  const tq = $('#tq');
+  let typing;
+  tq.oninput = () => {
+    clearTimeout(typing);
+    typing = setTimeout(() => {
+      teamFilter.q = tq.value;
+      const at = tq.selectionStart;
+      render();
+      const again = $('#tq');
+      if (again) { again.focus(); again.setSelectionRange(at, at); }
+    }, 180);
+  };
+  $$('[data-tcrew]', view).forEach(b => { b.onclick = () => { teamFilter.crew = b.dataset.tcrew; render(); }; });
+  $$('[data-person]', view).forEach(b => { b.onclick = () => go('#/person/' + b.dataset.person); });
+  wireFaces(view);
+}
+
+/** One person in the directory: face, name, job. Nothing else. */
+function teamCard(p) {
+  const flag = breachFlag(p.id);
+  return `<button class="pcard${flag ? ' ' + flag.key : ''}" data-person="${esc(p.id)}">
+    ${faceHtml(p, true)}
+    <span class="who">${esc(fullName(p))}</span>
+    <span class="job">${esc(p.role || '—')}</span>
+    ${p.preferred_name ? `<span class="job dim">Known as ${esc(p.preferred_name)}</span>` : ''}
+  </button>`;
+}
+
+/* =====================================================================
+   Screens — disciplinaries and breaches
+   ===================================================================== */
+const breachFilter = { showDone: false };
+
+function breachLine(x, opts) {
+  const o = opts || {};
+  const person = staffById(x.staff_id);
+  if (!person) return '';
+  const open = isOpenBreach(x);
+  const photos = breachPhotos(x).length;
+  return `<button class="option ${open ? 'status-red' : 'status-grey'}" data-breach="${esc(x.id)}">
+    ${o.noFace ? '' : faceHtml(person)}
+    <span class="grow">
+      <b>${esc(x.title)}</b>
+      <span class="say">${o.noName ? '' : esc(fullName(person)) + ' · '}${esc(breachWhen(x))}${
+        x.raised_by ? ' · by ' + esc(x.raised_by) : ''}</span>
+      ${photos ? `<span class="say dim">${plural(photos, 'photo')} attached</span>` : ''}
+    </span>
+    <span class="pill">${open ? 'Open' : 'Completed'}</span>
+  </button>`;
+}
+
+function renderBreaches(view) {
+  const open = openBreaches()
+    .sort((a, b) => String(b.raised_at).localeCompare(String(a.raised_at)));
+  const done = DB.breaches.filter(x => !isOpenBreach(x))
+    .sort((a, b) => String(b.completed_at || b.raised_at).localeCompare(String(a.completed_at || a.raised_at)));
+  const flagged = flaggedPeople();
+
+  view.innerHTML = `
+    <div class="toolbar">
+      <div class="grow"><p class="sub">Anything a supervisor or the office needs on record. Raising
+        one shades that person until the office has worked it and marked it complete.</p></div>
+      ${canRaiseBreach() ? `<button class="btn primary" id="addBreach" aria-label="Raise a breach">${icon('plus')}</button>` : ''}
+    </div>
+
+    <div class="tally">
+      <button class="status-red"    data-bjump="open"><span class="n">${open.length}</span><span class="l">Open</span></button>
+      <button class="status-orange" data-bjump="flagged"><span class="n">${flagged.length}</span><span class="l">People flagged</span></button>
+      <button class="status-grey"   data-bjump="done"><span class="n">${done.length}</span><span class="l">Completed</span></button>
+    </div>
+
+    <div class="sec-head" id="flagged"><h2>Flagged right now</h2></div>
+    ${flagged.length ? `<div class="cards">${flagged.map(f => `
+      <button class="pcard ${f.flag.key}" data-person="${esc(f.person.id)}">
+        ${faceHtml(f.person, true)}
+        <span class="who">${esc(fullName(f.person))}</span>
+        <span class="job">${esc(f.person.role || '—')}</span>
+        <span class="job"><b>${f.flag.count}</b> open</span>
+      </button>`).join('')}</div>`
+      : `<div class="empty">Nobody has an open breach.</div>`}
+
+    <div class="sec-head" id="open"><h2>Open</h2><span class="sub">${open.length}</span></div>
+    ${open.length ? open.map(x => breachLine(x)).join('')
+      : `<div class="empty">Nothing open.${canRaiseBreach() ? ' Raise one with the + button, top right.' : ''}</div>`}
+
+    <div class="sec-head" id="done"><h2>Completed</h2>
+      ${done.length ? `<button class="act" id="doneToggle">${breachFilter.showDone ? 'Hide' : 'Show'}</button>` : ''}</div>
+    ${!done.length ? `<div class="empty">Nothing completed yet.</div>`
+      : breachFilter.showDone ? done.map(x => breachLine(x)).join('')
+      : `<div class="empty">${plural(done.length, 'breach')} closed out.</div>`}`;
+
+  const add = $('#addBreach');
+  if (add) add.onclick = () => pickPersonForBreach();
+
+  $$('[data-breach]', view).forEach(b => { b.onclick = () => go('#/breach/' + b.dataset.breach); });
+  $$('[data-person]', view).forEach(b => { b.onclick = () => go('#/person/' + b.dataset.person); });
+  $$('[data-bjump]', view).forEach(b => {
+    b.onclick = () => {
+      const el = $('#' + b.dataset.bjump, view);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  });
+  const dt = $('#doneToggle');
+  if (dt) dt.onclick = () => { breachFilter.showDone = !breachFilter.showDone; render(); };
+
+  wireFaces(view);
+}
+
+/** Step one of raising a breach: whose is it. */
+function pickPersonForBreach() {
+  const people = onBooks();
+  if (!people.length) return toast('Add somebody to the staff list first.');
+
+  sheet(`
+    <h2>Who is this about?</h2>
+    <p class="sub">Pick the person, then describe what happened.</p>
+    <input type="search" id="bq" placeholder="Search name…" autocapitalize="off" spellcheck="false">
+    <div id="bList" style="margin-top:12px;max-height:46vh;overflow-y:auto"></div>
+    <div class="btn-row"><button class="btn ghost" data-no>Cancel</button></div>`, (el, close) => {
+
+    const paint = () => {
+      const q = $('#bq', el).value.trim().toLowerCase();
+      const list = people.filter(p => !q ||
+        [fullName(p), p.role, crewLabel(p.crew)].filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0);
+      $('#bList', el).innerHTML = list.length ? list.map(p => {
+        const flag = breachFlag(p.id);
+        return `<button class="slot" data-pick="${esc(p.id)}">
+          ${icon('people')}
+          <span class="grow">
+            <span>${esc(fullName(p))}</span>
+            <span class="sub">${esc([p.role, crewLabel(p.crew)].filter(Boolean).join(' · '))}</span>
+          </span>
+          ${flag ? `<span class="pill tone-${flag.tone}">${flag.count} open</span>` : ''}
+        </button>`;
+      }).join('') : `<div class="empty">Nobody matches that.</div>`;
+
+      $$('[data-pick]', el).forEach(b => {
+        b.onclick = () => { close(); raiseBreach(b.dataset.pick); };
+      });
+    };
+
+    $('#bq', el).oninput = paint;
+    $('[data-no]', el).onclick = close;
+    paint();
+  });
+}
+
+/**
+ * Raising one. The date and time are stamped as the form is filled in
+ * rather than chosen, so the register says when something was actually
+ * reported and not when somebody got round to it.
+ */
+function raiseBreach(staffId) {
+  const person = staffById(staffId);
+  if (!person) return;
+  const stamped = new Date();
+
+  sheet(`
+    <h2>Breach or disciplinary</h2>
+    <p class="sub">About <b>${esc(fullName(person))}</b>${
+      person.role ? ' · ' + esc(person.role) : ''}</p>
+
+    <div class="na-bar" style="margin-top:12px">
+      <div class="grow">
+        <b>${esc(fmtDateTime(stamped.toISOString()))}</b>
+        <span>Stamped now, and by ${esc(whoAmI() || 'you')}.</span>
+      </div>
+      ${icon('calendar')}
+    </div>
+
+    ${fieldHtml({ name: 'bTitle', label: 'What happened', want: true,
+                  placeholder: 'Breach of the 10 Golden Rules — no hard hat' }, '')}
+    ${fieldHtml({ name: 'bDesc', label: 'Describe it', type: 'textarea', want: true,
+                  placeholder: 'Where, when, who was there, what was said and done.' }, '')}
+
+    <div class="sec-head"><h2>Photos</h2><span class="sub">Optional, as many as you like</span></div>
+    <div id="bShots"></div>
+    <button class="slot" id="bAdd">${icon('camera')}<span class="grow">Add a photo</span></button>
+
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn ghost" data-no>Cancel</button>
+      <button class="btn primary" data-yes>Submit</button>
+    </div>`, (el, close) => {
+
+    /* Photos are held here until Submit, then uploaded against the saved
+       breach — there is nothing to attach them to before that. */
+    const pending = [];
+    const paintShots = () => {
+      $('#bShots', el).innerHTML = pending.map((f, i) => `
+        <div class="slot">
+          ${icon('file')}
+          <span class="grow"><span class="ellip">${esc(f.name)}</span>
+            <span class="sub">${esc(fmtSize(f.size))}</span></span>
+          <span class="icon-btn" data-drop="${i}" role="button" aria-label="Remove">${icon('trash')}</span>
+        </div>`).join('');
+      $$('[data-drop]', el).forEach(b => {
+        b.onclick = () => { pending.splice(Number(b.dataset.drop), 1); paintShots(); };
+      });
+    };
+
+    $('#bAdd', el).onclick = () => {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'image/*';
+      inp.multiple = true;
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.onchange = () => {
+        Array.from(inp.files || []).forEach(f => {
+          if (f.size > MAX_UPLOAD) return toast(f.name + ' is over 40 MB.');
+          pending.push(f);
+        });
+        inp.remove();
+        paintShots();
+      };
+      inp.click();
+    };
+
+    $('[data-no]', el).onclick = close;
+
+    $('[data-yes]', el).onclick = async () => {
+      const btn = $('[data-yes]', el);
+      const title = $('[data-f="bTitle"]', el).value.trim();
+      const desc  = $('[data-f="bDesc"]', el).value.trim();
+      if (!title) return toast('Say what happened.');
+      if (!desc)  return toast('Describe it, so the office has something to work with.');
+
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+      try {
+        const saved = await Store.insert('staff_breaches', {
+          staff_id: staffId, title, description: desc,
+          raised_by: whoAmI(), raised_at: stamped.toISOString(), status: 'open'
+        });
+
+        for (const f of pending) {
+          const path = await Store.upload(staffOwner(staffId), 'breach', f);
+          await Store.insert('profile_files', {
+            staff_id: staffId, company_id: null, section_key: 'breach', slot: saved.id,
+            path, file_name: f.name, file_size: f.size, mime: f.type || '', added_by: whoAmI()
+          });
+        }
+
+        note(staffOwner(staffId), 'breach', 'raised', 'Breach raised — ' + title);
+        close();
+        go('#/breach/' + saved.id);
+        toast('Submitted. The office will pick it up.');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Submit';
+        toast('Could not submit: ' + e.message);
+      }
+    };
+  });
+}
+
+/** One breach, in full. Where the office does its part. */
+function renderBreach(view, args) {
+  const x = DB.breaches.find(b => b.id === args[0]);
+  if (!x) return notFound(view, 'That breach is no longer on file.');
+  const person = staffById(x.staff_id);
+  if (!person) return notFound(view, 'That person is no longer on file.');
+
+  $('#title').textContent = 'Breach';
+  const open = isOpenBreach(x);
+  const photos = breachPhotos(x);
+
+  view.innerHTML = `
+    <div class="card">
+      <div class="row spread">
+        <div class="grow">
+          <h1 style="font-size:19px">${esc(x.title)}</h1>
+          <p class="sub" style="margin-top:3px">${esc(fullName(person))}${
+            person.role ? ' · ' + esc(person.role) : ''}${
+            person.crew ? ' · ' + esc(crewLabel(person.crew)) : ''}</p>
+        </div>
+        <span class="pill ${open ? 'status-red' : 'status-grey'}">${open ? 'Open' : 'Completed'}</span>
+      </div>
+      <div class="kv" style="margin-top:14px">
+        <div><div class="k">Raised</div><div class="v small">${esc(fmtDateTime(x.raised_at))}</div></div>
+        <div><div class="k">By</div><div class="v small">${esc(x.raised_by || '—')}</div></div>
+      </div>
+      <button class="btn sm ghost" style="margin-top:14px" id="toPerson">Open their file</button>
+    </div>
+
+    <div class="card">
+      <h2>What happened</h2>
+      <p style="white-space:pre-wrap;margin-top:8px">${esc(x.description || '—')}</p>
+    </div>
+
+    ${photos.length ? `<div class="sec-head"><h2>Photos</h2><span class="sub">${photos.length}</span></div>
+      <div class="card">${photos.map(f => fileLineHtml(f)).join('')}</div>` : ''}
+
+    <div class="sec-head"><h2>The office</h2></div>
+    <div class="card">
+      ${canWorkBreach() && open ? `
+        ${fieldHtml({ name: 'bComments', label: 'Comments', type: 'textarea',
+                      placeholder: 'What was discussed, who with, and when.' }, x.hr_comments)}
+        <button class="btn wide" id="saveComments">Save comments</button>
+        <button class="btn primary wide" id="completeBtn" style="margin-top:10px">
+          ${icon('check')} Complete this breach</button>
+      ` : `
+        <div class="kv">
+          <div><div class="k">Comments</div>
+               <div class="v small" style="white-space:pre-wrap">${esc(x.hr_comments || '—')}</div></div>
+        </div>
+        ${open ? `<p class="sub" style="margin-top:12px">Still open. The office adds their comments
+          and closes it out.</p>` : `
+        <div class="kv" style="margin-top:14px">
+          <div><div class="k">What was done</div>
+               <div class="v small" style="white-space:pre-wrap">${esc(x.outcome || '—')}</div></div>
+          <div><div class="k">Completed</div>
+               <div class="v small">${esc(fmtDateTime(x.completed_at))}${
+                 x.completed_by ? ' · ' + esc(x.completed_by) : ''}</div></div>
+        </div>`}
+      `}
+      ${!open && canWorkBreach() ? `<button class="btn sm ghost wide" id="reopenBtn"
+        style="margin-top:14px">Reopen it</button>` : ''}
+    </div>`;
+
+  $('#toPerson').onclick = () => go('#/person/' + person.id);
+  $$('[data-open]', view).forEach(b => { b.onclick = () => openFile(b.dataset.open); });
+  $$('[data-drop]', view).forEach(b => {
+    b.onclick = e => { e.stopPropagation(); if (canEdit()) removeFile(b.dataset.drop); };
+  });
+
+  const sc = $('#saveComments');
+  if (sc) sc.onclick = async () => {
+    sc.disabled = true;
+    try {
+      await Store.patch('staff_breaches', x.id,
+        { hr_comments: $('[data-f="bComments"]').value.trim() });
+      toast('Comments saved.');
+      render();
+    } catch (e) { sc.disabled = false; toast('Could not save: ' + e.message); }
+  };
+
+  const cb = $('#completeBtn');
+  if (cb) cb.onclick = () => completeBreach(x, ($('[data-f="bComments"]') || {}).value || '');
+
+  const rb = $('#reopenBtn');
+  if (rb) rb.onclick = () => confirmSheet('Reopen this breach?',
+    'It goes back on their file and shades their tile again.', 'Reopen', async () => {
+      try {
+        await Store.patch('staff_breaches', x.id,
+          { status: 'open', completed_at: null, completed_by: '' });
+        note(staffOwner(x.staff_id), 'breach', 'reopened', 'Breach reopened — ' + x.title);
+        render();
+        toast('Reopened.');
+      } catch (e) { toast('Could not reopen: ' + e.message); }
+    });
+}
+
+/** Closing one out: what was done, then it comes off their file. */
+function completeBreach(x, comments) {
+  const person = staffById(x.staff_id);
+  sheet(`
+    <h2>Complete this breach</h2>
+    <p class="sub">It comes off ${esc(person ? fullName(person) : 'their')} file and the shading
+      lifts. The record stays under Completed.</p>
+    ${fieldHtml({ name: 'bOutcome', label: 'What was done', type: 'textarea', want: true,
+                  placeholder: 'Verbal warning given and toolbox talk run with the crew.' }, x.outcome)}
+    <div class="btn-row">
+      <button class="btn ghost" data-no>Cancel</button>
+      <button class="btn primary" data-yes>Complete it</button>
+    </div>`, (el, close) => {
+    $('[data-no]', el).onclick = close;
+    $('[data-yes]', el).onclick = async () => {
+      const outcome = $('[data-f="bOutcome"]', el).value.trim();
+      if (!outcome) return toast('Say what was done, so the record stands on its own.');
+      const btn = $('[data-yes]', el);
+      btn.disabled = true;
+      btn.textContent = 'Completing…';
+      try {
+        await Store.patch('staff_breaches', x.id, {
+          status: 'complete',
+          hr_comments: (comments || x.hr_comments || '').trim(),
+          outcome,
+          completed_by: whoAmI(),
+          completed_at: new Date().toISOString()
+        });
+        note(staffOwner(x.staff_id), 'breach', 'completed', 'Breach completed — ' + x.title);
+        close();
+        render();
+        toast('Completed.');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Complete it';
+        toast('Could not complete: ' + e.message);
+      }
     };
   });
 }
