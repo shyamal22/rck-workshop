@@ -14,8 +14,9 @@ actually been filled in and uploaded, and from the dates on it.
 
 Three screens deep, and no deeper.
 
-**The landing page** — four options: *Staff information*, *Annual leave*,
-*Company profiles* and *Disciplinaries & breaches*.
+**The landing page** — four options. *Staff information*, *Annual leave* and
+*Disciplinaries & breaches* are built; the fourth is a marked-out slot, left
+empty on purpose until you say what belongs in it.
 
 **Staff information** — everyone as a tile, showing their head shot, name,
 role, crew and a ring with their compliance percentage. Filter by
@@ -69,18 +70,6 @@ counts towards the days-taken figure.
 
 ---
 
-## Company profiles
-
-Everyone at RCK as a face, a name and a job, grouped by crew. No compliance,
-no dates, nothing to fill in — it builds itself from the staff already on file
-and exists to answer *who is that, and what do they do*. Search it, filter it
-by crew, tap anyone to open their full record.
-
-Head shots come from the **Head shot photo** tile on each person, so uploading
-one there fills this in too. Until then it shows their initials.
-
----
-
 ## Disciplinaries and breaches
 
 The register of anything that needs to be on record — a breach of the ten
@@ -90,7 +79,10 @@ golden rules, no hard hat, a complaint from a customer.
 the app: they are the ones on site who see it. It is the only thing a
 supervisor can put in — everything else stays read-only for them.
 
-**Raising one** asks who it is about, then:
+**Raising one** opens a single form. The first field is a dropdown of everyone
+on the books, taken straight from Staff information — so a new starter can be
+picked the moment they are added, and there is no second list to keep in step.
+Then:
 - the **date and time**, stamped as the form is filled in rather than chosen,
   so the register says when something was actually reported;
 - **what happened** — a title, in their own words;

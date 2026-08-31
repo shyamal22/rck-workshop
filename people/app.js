@@ -1304,7 +1304,6 @@ const SCREENS = {
   'edit':      { title: 'Details',      render: renderPersonEdit, back: true },
   'tile':      { title: '',             render: renderStaffTile,  back: true },
   'leave':     { title: 'Annual leave', render: renderLeave, back: '#/' },
-  'team':      { title: 'Company profiles', render: renderTeam, back: '#/' },
   'breaches':  { title: 'Disciplinaries & breaches', render: renderBreaches, back: '#/' },
   'breach':    { title: 'Breach', render: renderBreach, back: '#/breaches' },
   'companies': { title: 'Labour hire & subcontractors', render: renderCompanies, back: '#/' },
@@ -1794,25 +1793,23 @@ function renderHome(view) {
         <span class="chev">${icon('chev')}</span>
       </button>
 
-      <button class="option" data-go="#/team">
-        <span class="mark">${icon('people')}</span>
-        <span class="grow">
-          <span class="num">03</span>
-          <b>Company profiles</b>
-          <span class="say">${list.length ? `Everyone at RCK — ${plural(list.length, 'face')}, name and job.`
-            : 'Everyone at RCK, once there is somebody on the books.'}</span>
-        </span>
-        <span class="chev">${icon('chev')}</span>
-      </button>
-
       <button class="option${openBreaches().length ? ' status-red' : ''}" data-go="#/breaches">
         <span class="mark"${openBreaches().length ? ' style="background:var(--s-bg);color:var(--s)"' : ''}>${icon('flag')}</span>
         <span class="grow">
-          <span class="num">04</span>
+          <span class="num">03</span>
           <b>Disciplinaries &amp; breaches</b>
           <span class="say">${breachHeadline()}</span>
         </span>
         <span class="chev">${icon('chev')}</span>
+      </button>
+
+      <button class="option empty-slot" data-slot="4">
+        <span class="mark">${icon('plus')}</span>
+        <span class="grow">
+          <span class="num">04</span>
+          <b>Slot four</b>
+          <span class="say">Not built yet.</span>
+        </span>
       </button>
     </div>
 
@@ -1830,6 +1827,14 @@ function renderHome(view) {
   $$('[data-go]', view).forEach(b => { b.onclick = () => go(b.dataset.go); });
   $$('[data-level]', view).forEach(b => {
     b.onclick = () => { staffFilter.level = b.dataset.level; go('#/staff'); };
+  });
+  $$('[data-slot]', view).forEach(b => {
+    b.onclick = () => sheet(`<h2>Nothing here yet</h2>
+      <p class="sub">The last of the four options, left empty on purpose rather than filled with a
+        guess. Say what belongs here and it gets built next.</p>
+      <button class="btn wide" data-ok>Right you are</button>`, (el, close) => {
+      $('[data-ok]', el).onclick = close;
+    });
   });
 }
 
@@ -2947,85 +2952,6 @@ function editLeave(row, presetStaffId) {
 }
 
 /* =====================================================================
-   Screen — company profiles
-
-   Everyone in the company, as a face, a name and a job. No compliance,
-   no dates, nothing to fill in — it builds itself from the staff already
-   on file and exists purely to answer "who is that, and what do they
-   do".
-   ===================================================================== */
-const teamFilter = { crew: '', q: '' };
-
-function renderTeam(view) {
-  const all = onBooks();
-  const q = teamFilter.q.trim().toLowerCase();
-
-  const crewsUsed = (() => {
-    const used = new Set(all.map(p => p.crew).filter(Boolean));
-    const known = CREWS.filter(c => used.has(c.key));
-    const extra = Array.from(used).filter(k => !CREWS.some(c => c.key === k)).sort();
-    return known.concat(extra.map(k => ({ key: k, label: k })));
-  })();
-
-  const shown = all
-    .filter(p => !teamFilter.crew || (p.crew || '') === teamFilter.crew)
-    .filter(p => !q || [fullName(p), p.preferred_name, p.role, crewLabel(p.crew)]
-      .filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0);
-
-  /* Grouped by crew when everything is showing, because that is how the
-     yard actually thinks about who is who. */
-  const groups = teamFilter.crew || q
-    ? [{ label: '', people: shown }]
-    : crewsUsed.map(c => ({ label: c.label, people: shown.filter(p => (p.crew || '') === c.key) }))
-        .concat([{ label: 'No crew', people: shown.filter(p => !p.crew) }])
-        .filter(g => g.people.length);
-
-  view.innerHTML = `
-    <div class="toolbar">
-      <input type="search" id="tq" placeholder="Search name or job…" value="${esc(teamFilter.q)}"
-             autocapitalize="off" spellcheck="false">
-    </div>
-
-    ${crewsUsed.length > 1 ? `<div class="chips">
-      <button class="chip${!teamFilter.crew ? ' on' : ''}" data-tcrew="">Everyone<span class="c">${all.length}</span></button>
-      ${crewsUsed.map(c => `<button class="chip${teamFilter.crew === c.key ? ' on' : ''}" data-tcrew="${esc(c.key)}">${esc(c.label)}</button>`).join('')}
-    </div>` : ''}
-
-    ${shown.length ? groups.map(g => `
-      ${g.label ? `<div class="sec-head"><h2>${esc(g.label)}</h2><span class="sub">${g.people.length}</span></div>` : ''}
-      <div class="cards">${g.people.map(teamCard).join('')}</div>`).join('')
-      : `<div class="empty"><b>Nobody to show</b>${
-          all.length ? 'Nothing matches that.' : 'Add people under Staff information first.'}</div>`}`;
-
-  const tq = $('#tq');
-  let typing;
-  tq.oninput = () => {
-    clearTimeout(typing);
-    typing = setTimeout(() => {
-      teamFilter.q = tq.value;
-      const at = tq.selectionStart;
-      render();
-      const again = $('#tq');
-      if (again) { again.focus(); again.setSelectionRange(at, at); }
-    }, 180);
-  };
-  $$('[data-tcrew]', view).forEach(b => { b.onclick = () => { teamFilter.crew = b.dataset.tcrew; render(); }; });
-  $$('[data-person]', view).forEach(b => { b.onclick = () => go('#/person/' + b.dataset.person); });
-  wireFaces(view);
-}
-
-/** One person in the directory: face, name, job. Nothing else. */
-function teamCard(p) {
-  const flag = breachFlag(p.id);
-  return `<button class="pcard${flag ? ' ' + flag.key : ''}" data-person="${esc(p.id)}">
-    ${faceHtml(p, true)}
-    <span class="who">${esc(fullName(p))}</span>
-    <span class="job">${esc(p.role || '—')}</span>
-    ${p.preferred_name ? `<span class="job dim">Known as ${esc(p.preferred_name)}</span>` : ''}
-  </button>`;
-}
-
-/* =====================================================================
    Screens — disciplinaries and breaches
    ===================================================================== */
 const breachFilter = { showDone: false };
@@ -3089,7 +3015,7 @@ function renderBreaches(view) {
       : `<div class="empty">${plural(done.length, 'breach')} closed out.</div>`}`;
 
   const add = $('#addBreach');
-  if (add) add.onclick = () => pickPersonForBreach();
+  if (add) add.onclick = () => raiseBreach();
 
   $$('[data-breach]', view).forEach(b => { b.onclick = () => go('#/breach/' + b.dataset.breach); });
   $$('[data-person]', view).forEach(b => { b.onclick = () => go('#/person/' + b.dataset.person); });
@@ -3105,59 +3031,29 @@ function renderBreaches(view) {
   wireFaces(view);
 }
 
-/** Step one of raising a breach: whose is it. */
-function pickPersonForBreach() {
-  const people = onBooks();
-  if (!people.length) return toast('Add somebody to the staff list first.');
-
-  sheet(`
-    <h2>Who is this about?</h2>
-    <p class="sub">Pick the person, then describe what happened.</p>
-    <input type="search" id="bq" placeholder="Search name…" autocapitalize="off" spellcheck="false">
-    <div id="bList" style="margin-top:12px;max-height:46vh;overflow-y:auto"></div>
-    <div class="btn-row"><button class="btn ghost" data-no>Cancel</button></div>`, (el, close) => {
-
-    const paint = () => {
-      const q = $('#bq', el).value.trim().toLowerCase();
-      const list = people.filter(p => !q ||
-        [fullName(p), p.role, crewLabel(p.crew)].filter(Boolean).join(' ').toLowerCase().indexOf(q) >= 0);
-      $('#bList', el).innerHTML = list.length ? list.map(p => {
-        const flag = breachFlag(p.id);
-        return `<button class="slot" data-pick="${esc(p.id)}">
-          ${icon('people')}
-          <span class="grow">
-            <span>${esc(fullName(p))}</span>
-            <span class="sub">${esc([p.role, crewLabel(p.crew)].filter(Boolean).join(' · '))}</span>
-          </span>
-          ${flag ? `<span class="pill tone-${flag.tone}">${flag.count} open</span>` : ''}
-        </button>`;
-      }).join('') : `<div class="empty">Nobody matches that.</div>`;
-
-      $$('[data-pick]', el).forEach(b => {
-        b.onclick = () => { close(); raiseBreach(b.dataset.pick); };
-      });
-    };
-
-    $('#bq', el).oninput = paint;
-    $('[data-no]', el).onclick = close;
-    paint();
-  });
-}
-
 /**
  * Raising one. The date and time are stamped as the form is filled in
  * rather than chosen, so the register says when something was actually
  * reported and not when somebody got round to it.
  */
-function raiseBreach(staffId) {
-  const person = staffById(staffId);
-  if (!person) return;
+function raiseBreach(preselectId) {
+  /* Everyone on the books, straight from Staff information — the list
+     builds itself, so a new starter can be picked the moment they are
+     added and there is no second list to keep in step. */
+  const people = onBooks();
+  if (!people.length) return toast('Add somebody under Staff information first.');
+
   const stamped = new Date();
+  const chosen = people.some(p => p.id === preselectId) ? preselectId : people[0].id;
 
   sheet(`
     <h2>Breach or disciplinary</h2>
-    <p class="sub">About <b>${esc(fullName(person))}</b>${
-      person.role ? ' · ' + esc(person.role) : ''}</p>
+
+    ${fieldHtml({ name: 'bStaff', label: 'Who is this about', type: 'select',
+                  noBlank: true, want: true,
+                  options: people.map(p => ({
+                    key: p.id,
+                    label: fullName(p) + (p.role ? ' — ' + p.role : '') })) }, chosen)}
 
     <div class="na-bar" style="margin-top:12px">
       <div class="grow">
@@ -3219,8 +3115,10 @@ function raiseBreach(staffId) {
 
     $('[data-yes]', el).onclick = async () => {
       const btn = $('[data-yes]', el);
+      const staffId = $('[data-f="bStaff"]', el).value;
       const title = $('[data-f="bTitle"]', el).value.trim();
       const desc  = $('[data-f="bDesc"]', el).value.trim();
+      if (!staffId) return toast('Pick who this is about.');
       if (!title) return toast('Say what happened.');
       if (!desc)  return toast('Describe it, so the office has something to work with.');
 
