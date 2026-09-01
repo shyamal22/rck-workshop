@@ -226,3 +226,16 @@ create policy crew_log_all on crew_log for all to anon, authenticated using (tru
 --  person, so their jobs and their diary are not split three ways.
 -- =====================================================================
 alter table crew add column if not exists aliases jsonb not null default '[]'::jsonb;
+
+-- =====================================================================
+--  A clean slate
+--
+--  Names pile up: seeded ones, device names, anyone who ever touched a
+--  job. hidden_at takes a name off the crew board until that person does
+--  something on or after that moment — so the board empties and then
+--  refills with whoever is actually working, on its own.
+--
+--  Nothing is deleted. The diary, the work orders and the history are
+--  untouched, and a hidden name is still there to assign a job to.
+-- =====================================================================
+alter table crew add column if not exists hidden_at timestamptz;

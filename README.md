@@ -97,6 +97,24 @@ real name (not the device name) to keep. Confirming a group:
 - leaves the folded names off the crew board, listed instead as *also …* under the
   person they belong to.
 
+### Starting fresh
+
+Names pile up: the six the app shipped with, every phone and laptop anyone has
+signed in on, everyone who has ever touched a job. Eventually the crew board is a
+list of history rather than a list of people.
+
+**⋮ → Start fresh** clears it. Pick a date — tomorrow by default, so today finishes
+as it is — and every name comes off the board. From that date, a name comes back
+the moment that person does something: raises a job, updates one, adds a photo,
+signs one off. The board refills itself with whoever is actually working, and stays
+that way.
+
+**Nothing is deleted.** Every work order, every photo and the whole diary are
+untouched — step the diary back to any past day and it reads exactly as it did.
+A cleared name is still there to assign a job to, under *Not on the board* in the
+picker. And anyone holding an open job stays on the board regardless, so clearing
+can never quietly orphan live work. **Put them all back** undoes the whole thing.
+
 Any name can be linked by hand, and **Separate** undoes it. Nothing is deleted or
 rewritten in the job history — the original name stays on every update; linking only
 says which names are the same person. So a mistake costs one tap to undo.

@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.8.0';
+const VERSION = '2.9.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -188,6 +188,7 @@ const ICONS = {
   chart:   '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   coin:    '<circle cx="12" cy="12" r="8.2"/><path d="M14.4 9.3a2.9 2.9 0 0 0-2.4-1.1c-1.5 0-2.5.8-2.5 1.9 0 2.6 5 1.3 5 3.9 0 1.1-1 1.9-2.5 1.9a2.9 2.9 0 0 1-2.5-1.2"/><path d="M12 6.6v10.8"/>',
   people:  '<circle cx="9" cy="8" r="3.4"/><path d="M3.2 20a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.3a3.4 3.4 0 0 1 0 5.5"/><path d="M17.6 14.6A5.8 5.8 0 0 1 21 20"/>',
+  broom:   '<path d="M13.5 4.5l6 6"/><path d="M11 12.5l-4.6 4.6a4 4 0 0 0-1.1 2.1L5 21l1.8-.3a4 4 0 0 0 2.1-1.1l4.6-4.6"/><path d="M9.4 10.9l3.7 3.7 4.2-4.2a2.6 2.6 0 0 0-3.7-3.7z"/>',
   spanner: '<path d="M15.5 8.5a3.8 3.8 0 0 0 4.6 4.6l-8 8a2.6 2.6 0 0 1-3.7-3.7l8-8a3.8 3.8 0 0 0-4.6-4.6l3 3-1.9 1.9-3-3a3.8 3.8 0 0 0 5.6 1.8z"/>'
 };
 function icon(name) {
@@ -563,6 +564,78 @@ function crewAndActive() {
     if (!seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
   });
   return out;
+}
+
+/* ------------------------------------------------------------------------
+   A clean slate.
+
+   Names pile up — the six the app shipped with, every device anyone has
+   ever used, everyone who has ever touched a job — until the board is a
+   list of history rather than a list of people. Hiding a name takes it off
+   the board until that person does something new, so the board empties and
+   then refills with whoever is actually working. Nothing is deleted: the
+   diary, the jobs and the history are exactly as they were, and a hidden
+   name can still be given a job.
+   ------------------------------------------------------------------------ */
+/** Whether the database has the column this needs. Rows come back from
+    PostgREST with every column on them, so one row carrying the key is
+    proof; none carrying it, on a real database, means the SQL hasn't run. */
+function canRestNames() {
+  if (!connected() || !DB.crew.length) return true;
+  return DB.crew.some(c => Object.prototype.hasOwnProperty.call(c, 'hidden_at'));
+}
+
+function hiddenSince(name) {
+  const c = DB.crew.find(x => String(x.name || '').toLowerCase() === String(name || '').toLowerCase());
+  return c && c.hidden_at ? c.hidden_at : null;
+}
+
+/** The moment the whole board was last cleared, if it was. */
+function freshStartAt() {
+  const stamps = DB.crew.map(c => c.hidden_at).filter(Boolean).sort();
+  return stamps.length ? stamps[stamps.length - 1] : null;
+}
+
+/** Has this person done anything since they were hidden? */
+function activeSince(name, iso) {
+  const n = personOf(name).toLowerCase();
+  return allEntries().some(e => entryPerson(e).toLowerCase() === n && String(e.at || '') >= iso);
+}
+
+/** Who belongs on the crew board: everyone not hidden, everyone who has
+    worked since they were hidden, and — always — anyone holding an open
+    job, so hiding a name can never lose the work it is carrying. */
+function boardNames() {
+  const holding = new Set(activeOrders().map(o => assignedTo(o).toLowerCase()).filter(Boolean));
+  return crewAndActive().filter(n => {
+    const since = hiddenSince(n);
+    return !since || holding.has(n.toLowerCase()) || activeSince(n, since);
+  });
+}
+
+/** Names kept off the board, for the pickers that still need to reach them. */
+function restingNames() {
+  const on = new Set(boardNames().map(n => n.toLowerCase()));
+  return crewAndActive().filter(n => !on.has(n.toLowerCase()));
+}
+
+/** Clear the board from a given moment. Every name known today is put to
+    rest; whoever works after that comes back by working. */
+async function startFresh(fromISO) {
+  const now = new Date().toISOString();
+  for (const name of crewAndActive()) {
+    const row = DB.crew.find(c => String(c.name || '').toLowerCase() === name.toLowerCase());
+    if (row) await Store.patch('crew', row.id, { hidden_at: fromISO });
+    else await Store.insert('crew', { id: uid(), name, active: true, aliases: [],
+                                      hidden_at: fromISO, created_at: now });
+  }
+}
+
+/** Put every name back, exactly as it was. */
+async function undoFresh() {
+  for (const row of DB.crew.filter(c => c.hidden_at)) {
+    await Store.patch('crew', row.id, { hidden_at: null });
+  }
 }
 
 /* ------------------------------------------------------------------------
@@ -1168,6 +1241,7 @@ const SCREENS = {
   '/crew-unassigned': { title: 'Unassigned jobs',  render: renderUnassigned, back: true },
   '/crew-today':      { title: 'Daily diary',      render: renderCrewDiary,  back: true },
   '/crew-merge':      { title: 'Same person?',     render: renderCrewMerge,  back: true },
+  '/crew-fresh':      { title: 'Start fresh',      render: renderCrewFresh,  back: true },
   '/crew-log':        { title: 'Diary entry',      render: renderCrewLogForm, back: true },
   '/costs':          { title: 'Costs',        render: renderCostsBoard },
   '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
@@ -1865,8 +1939,15 @@ function workshopPanel(o) {
       <label class="field"><span>Managed by</span>
         <select id="wAssign">
           <option value="">Nobody yet</option>
-          ${crewNames().map(n =>
-            `<option value="${esc(n)}" ${assignedTo(o).toLowerCase() === n.toLowerCase() ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+          ${(() => {
+            const pick = n => `<option value="${esc(n)}" ${
+              assignedTo(o).toLowerCase() === n.toLowerCase() ? 'selected' : ''}>${esc(n)}</option>`;
+            const on = boardNames();
+            const off = restingNames();
+            // a cleared name is still reachable — it just isn't in the way
+            return on.map(pick).join('')
+              + (off.length ? `<optgroup label="Not on the board">${off.map(pick).join('')}</optgroup>` : '');
+          })()}
           <option value="__new">+ Add someone…</option>
         </select>
       </label>
@@ -2801,7 +2882,10 @@ function looksSame(a, b) {
     Grouped transitively: "Milian" and "Mill Road" never match each other,
     but both match "Mil", so all three belong to the same person. */
 function suggestedGroups() {
-  const names = allDeviceNames().filter(n => personOf(n).toLowerCase() === n.toLowerCase());
+  // a name that has been put to rest is not worth nagging about
+  const resting = new Set(restingNames().map(n => n.toLowerCase()));
+  const names = allDeviceNames().filter(n =>
+    personOf(n).toLowerCase() === n.toLowerCase() && !resting.has(n.toLowerCase()));
   const parent = new Map(names.map(n => [n, n]));
   const find = a => { while (parent.get(a) !== a) a = parent.get(a); return a; };
 
@@ -2870,6 +2954,89 @@ async function linkNames(keeper, others) {
       await Store.patch('work_orders', o.id, { assigned_to: keep });
     }
   }
+}
+
+function renderCrewFresh(view) {
+  const started = freshStartAt();
+  const resting = restingNames();
+  const back = boardNames();
+  const holding = activeOrders().filter(o => assignedTo(o)).length;
+
+  // default to the start of tomorrow, so today finishes as it is
+  const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(0, 0, 0, 0);
+  const tomorrow = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+
+  $('#title').textContent = 'Start fresh';
+
+  const ready = canRestNames();
+
+  view.innerHTML = `
+    ${crewBanner()}
+    ${ready ? '' : `<div class="banner">This needs one line added to the database first.
+      Run <code>supabase-schema.sql</code> in Supabase again — it is safe to re-run —
+      then reopen the app. Everything else keeps working meanwhile.</div>`}
+    ${started ? `
+      <div class="card accent status-green">
+        <h2 style="font-size:17px">The board was cleared</h2>
+        <p class="small mt" style="margin-bottom:0">Counting from <strong>${esc(fmtDate(started))}</strong>.
+          ${resting.length} name${resting.length === 1 ? '' : 's'} put to rest,
+          ${back.length} back on the board.</p>
+      </div>` : ''}
+
+    <div class="card">
+      <h2>${started ? 'Clear it again' : 'Clear the crew board'}</h2>
+      <p class="small mt">Names pile up — the six the app came with, every phone and
+        laptop anyone has signed in on, everyone who has ever touched a job. This
+        takes them all off the board. From the date you pick, a name comes back the
+        moment that person does something: raises a job, updates one, adds a photo,
+        signs one off.</p>
+
+      <div class="banner info" style="margin-top:12px">
+        <strong>Nothing is deleted.</strong> Every work order, every photo and the
+        whole diary stay exactly as they are — step the diary back to any past day
+        and it reads the same as it does now. A cleared name can still be given a
+        job, under <em>Not on the board</em> in the picker.
+      </div>
+
+      ${holding ? `<p class="small mt">${holding} open job${holding === 1 ? ' has' : 's have'}
+        somebody on ${holding === 1 ? 'it' : 'them'} — ${holding === 1 ? 'that person stays' : 'those people stay'}
+        on the board either way, so no live work goes quiet.</p>` : ''}
+
+      <label class="field mt"><span>Start counting from</span>
+        <input type="date" id="fDate" value="${esc(tomorrow)}">
+      </label>
+      <button class="btn primary wide" id="fGo" ${ready ? '' : 'disabled'}>Clear the board</button>
+    </div>
+
+    ${resting.length ? `
+      <div class="section-title">Resting (${resting.length})</div>
+      <p class="muted small" style="margin:-4px 4px 9px">Off the board until they work again.</p>
+      <div class="card">
+        <div class="merge-names">${resting.map(n => `<span class="tagname">${esc(n)}</span>`).join('')}</div>
+      </div>
+      <button class="btn wide mt" id="fUndo">Put them all back</button>` : ''}`;
+
+  $('#fGo', view).onclick = async function () {
+    const d = $('#fDate', view).value;
+    if (!d) return toast('Pick a date first');
+    const iso = new Date(d + 'T00:00:00').toISOString();
+    const n = crewAndActive().length;
+    if (!confirm(`Take all ${n} names off the crew board and count again from ${fmtDate(d)}?\n\n`
+      + 'Nothing is deleted — people come back as they work.')) return;
+    this.disabled = true;
+    this.textContent = 'Clearing…';
+    await startFresh(iso);
+    toast('Board cleared — it fills up as people work');
+    go('#/crew');
+  };
+
+  const undo = $('#fUndo', view);
+  if (undo) undo.onclick = async function () {
+    this.disabled = true;
+    await undoFresh();
+    toast('Everyone is back');
+    render();
+  };
 }
 
 function renderCrewMerge(view) {
@@ -2966,7 +3133,7 @@ function renderCrewMerge(view) {
     people who need attention are the ones you read first. */
 function crewRows(date) {
   const onCrew = new Set(crewNames().map(n => n.toLowerCase()));
-  const order = crewAndActive();
+  const order = boardNames();
   return order.map(name => {
     const st = crewStats(name);
     const t = dayTally(name, date);
@@ -3080,6 +3247,7 @@ function renderCrewBoard(view) {
       <button class="btn" id="addCrew">${icon('plus')}Add someone</button>
       <a class="btn ${suggestedGroups().length ? 'primary' : ''}" href="#/crew-merge">${icon('people')}Link devices${
         suggestedGroups().length ? ` (${suggestedGroups().length})` : ''}</a>
+      <a class="btn" href="#/crew-fresh">${icon('broom')}Start fresh</a>
     </div>`;
 
   const loose_ = $('#looseTile', view);
