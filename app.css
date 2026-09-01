@@ -502,6 +502,43 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 /* the read-only counters on a person's page */
 .tally button[disabled] { opacity: 1; pointer-events: none; }
 
+/* ------------------------------------------------------- crew diary */
+/* Diary entries carry no status colour — colour still only means status. */
+.diary-tile { display: block; text-decoration: none; background: var(--panel-2); }
+.diary-tile::before { display: none; }
+.diary-tile .ttl { font-size: 15px; }
+
+.log-card { padding: 4px 14px; }
+
+.log-item {
+  display: grid; grid-template-columns: 46px 1fr; gap: 12px;
+  padding: 13px 0; cursor: pointer;
+  border-top: 1px solid var(--line);
+}
+.log-card .log-item:first-child { border-top: 0; }
+.log-item:active { opacity: .6; }
+.log-time {
+  font-size: 13px; font-weight: 700; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; padding-top: 1px;
+}
+.log-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
+.log-kind { font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; }
+.log-who {
+  font-size: 11.5px; font-weight: 620; color: var(--ink-2);
+  background: var(--panel-2); padding: 2px 8px; border-radius: var(--r-pill);
+}
+.log-amt { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: auto; }
+.log-job { font-size: 12px; color: var(--ink-2); margin-top: 3px; font-weight: 550; }
+.log-note { font-size: 14px; line-height: 1.45; margin-top: 4px; white-space: pre-wrap; }
+.log-by { font-size: 11.5px; color: var(--ink-3); margin-top: 5px; }
+.log-item .thumbs img { width: 66px; height: 66px; }
+
+.log-day { margin-bottom: 14px; }
+.log-date {
+  font-size: 12.5px; font-weight: 700; color: var(--ink-2);
+  margin: 14px 4px 7px; letter-spacing: -.005em;
+}
+
 /* =====================================================================
    The landing page, and the costs portal
    ===================================================================== */

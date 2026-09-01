@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -198,6 +198,72 @@ function icon(name) {
     rather than looking empty and broken. */
 let costsTableMissing = false;
 let crewTableMissing = false;
+let logTableMissing = false;
+
+/* What a workshop day is actually made of. Anyone can add a type; it is kept
+   on the entry itself so a phone that has never seen it still reads right. */
+const CREW_LOG_TYPES = [
+  { key: 'on_tools',       label: 'On the tools' },
+  { key: 'inspection',     label: 'Inspection / service' },
+  { key: 'quote_request',  label: 'Quote requested' },
+  { key: 'quote_received', label: 'Quote received', money: true },
+  { key: 'parts_ordered',  label: 'Parts ordered',  money: true },
+  { key: 'parts_arrived',  label: 'Parts arrived' },
+  { key: 'dropped_off',    label: 'Dropped at repairer' },
+  { key: 'picked_up',      label: 'Picked up from repairer' },
+  { key: 'admin',          label: 'Admin / paperwork' },
+  { key: 'note',           label: 'Note' }
+];
+
+const builtinLogType = k => CREW_LOG_TYPES.find(t => t.key === k);
+
+function logLabel(e) {
+  if (e && e.label) return e.label;
+  const b = builtinLogType(e && e.kind);
+  return b ? b.label : (e && e.kind ? e.kind : 'Note');
+}
+const logTakesMoney = k => !!(builtinLogType(k) || {}).money;
+
+/** Built-in types plus any anyone has added. */
+function allLogTypes() {
+  const out = CREW_LOG_TYPES.slice();
+  const seen = new Set(out.map(t => t.key));
+  DB.crew_log.forEach(e => {
+    if (e.kind && !seen.has(e.kind)) { seen.add(e.kind); out.push({ key: e.kind, label: logLabel(e) }); }
+  });
+  return out;
+}
+
+/** A diary day is the day on the calendar, so a late entry stays on its day. */
+const logDay = e => (e.entry_date || (e.at || '').slice(0, 10) || '');
+
+function logFor(name, date) {
+  const n = String(name || '').toLowerCase();
+  return DB.crew_log
+    .filter(e => String(e.crew_name || '').toLowerCase() === n && (!date || logDay(e) === date))
+    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+}
+
+const logOnDay = date => DB.crew_log
+  .filter(e => logDay(e) === date)
+  .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+
+/** The days one person has written anything on, newest first. */
+function logDays(name) {
+  const seen = new Set();
+  logFor(name).forEach(e => { const d = logDay(e); if (d) seen.add(d); });
+  return Array.from(seen).sort().reverse();
+}
+
+const logById = id => DB.crew_log.find(e => e.id === id);
+
+/** 24-hour, because that is how a diary is written. */
+function fmtTime(v) {
+  const d = new Date(v);
+  if (isNaN(d)) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 
 /** The crew RCK started with. Anyone can be added later. */
 const CREW_SEED = ['Milian', 'Clint', 'Ryder', 'Sebastion', 'Lyndon', 'Barry'];
@@ -309,7 +375,7 @@ const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 /* ================================================================
    Local cache — the app opens instantly and stays readable offline
    ================================================================ */
-const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], crew: [], localSeq: 0 };
+const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], crew: [], crew_log: [], localSeq: 0 };
 
 function cacheKey() { return 'rckw.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -322,6 +388,7 @@ function loadCache() {
       DB.wo_updates = raw.wo_updates || [];
       DB.costs = raw.costs || [];
       DB.crew = raw.crew || [];
+      DB.crew_log = raw.crew_log || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -370,14 +437,15 @@ async function rest(path, opts) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [gear, orders, updates, costs, crew] = await Promise.all([
+    const [gear, orders, updates, costs, crew, log] = await Promise.all([
       rest('gear?select=*&order=code.asc', { headers: restHeaders() }),
       rest('work_orders?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }),
       // The cost table may not exist yet on an older database; the rest of
       // the app must keep working if it doesn't.
       rest('costs?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }).catch(() => null),
-      rest('crew?select=*&order=created_at.asc', { headers: restHeaders() }).catch(() => null)
+      rest('crew?select=*&order=created_at.asc', { headers: restHeaders() }).catch(() => null),
+      rest('crew_log?select=*&order=at.desc&limit=8000', { headers: restHeaders() }).catch(() => null)
     ]);
     DB.gear = gear || [];
     DB.work_orders = orders || [];
@@ -386,6 +454,8 @@ const Store = {
     else costsTableMissing = true;
     if (crew) { DB.crew = crew; crewTableMissing = false; }
     else crewTableMissing = true;
+    if (log) { DB.crew_log = log; logTableMissing = false; }
+    else logTableMissing = true;
     saveCache();
   },
 
@@ -734,6 +804,8 @@ const SCREENS = {
   '/gear':      { title: 'Gear',          render: renderBoard },
   '/crew':           { title: 'Maintenance crew', render: renderCrewBoard },
   '/crew-unassigned': { title: 'Unassigned jobs',  render: renderUnassigned, back: true },
+  '/crew-today':      { title: 'Daily diary',      render: renderCrewDiary,  back: true },
+  '/crew-log':        { title: 'Diary entry',      render: renderCrewLogForm, back: true },
   '/costs':          { title: 'Costs',        render: renderCostsBoard },
   '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
   '/costs/summary':  { title: 'Cost tracker', render: renderCostSummary },
@@ -767,7 +839,8 @@ function render() {
   let back = false;
   if (screen) { /* an exact route always wins over the patterns below */ }
 
-  if (!screen && route.path.startsWith('/crew/')) { screen = { title: 'Crew', render: renderCrewPerson }; back = true; }
+  if (!screen && route.path.startsWith('/crew-log/edit/')) { screen = { title: 'Edit entry', render: renderCrewLogForm }; back = true; }
+  else if (!screen && route.path.startsWith('/crew/')) { screen = { title: 'Crew', render: renderCrewPerson }; back = true; }
   else if (!screen && route.path.startsWith('/costs/edit/')) { screen = { title: 'Edit cost', render: renderCostForm }; back = true; }
   else if (!screen && route.path.startsWith('/costs/')) { screen = { title: 'Costs', render: renderCostsAsset }; back = true; }
   else if (!screen && route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
@@ -2218,6 +2291,7 @@ function crewBanner() {
 function renderCrewBoard(view) {
   const names = crewNames();
   const loose = unassignedOrders();
+  const todayCount = logOnDay(today()).length;
 
   view.innerHTML = `
     ${crewBanner()}
@@ -2227,6 +2301,12 @@ function renderCrewBoard(view) {
         <div class="sub"><span>Nobody is accountable for these yet — tap to assign them</span></div>
       </button>` : `
       <div class="card muted small">Every open job has someone managing it.</div>`}
+
+    <a class="wo diary-tile" href="#/crew-today">
+      <div class="hdr"><span class="num">DAILY DIARY</span></div>
+      <div class="ttl">${todayCount ? `${todayCount} entr${todayCount === 1 ? 'y' : 'ies'} logged today` : 'Nothing logged today yet'}</div>
+      <div class="sub"><span>What everyone has been doing — quotes, parts, time on the tools</span></div>
+    </a>
 
     <div class="section-title">Crew (${names.length})</div>
     <div class="crew-grid">
@@ -2238,7 +2318,8 @@ function renderCrewBoard(view) {
             <span class="avatar">${esc(initials(n))}</span>
             <span class="who">${esc(n)}</span>
             <span class="load">${st.open === 0 ? 'No open jobs'
-              : `${st.open} open job${st.open === 1 ? '' : 's'}`}</span>
+              : `${st.open} open job${st.open === 1 ? '' : 's'}`}${
+              logFor(n, today()).length ? ` · ${logFor(n, today()).length} logged today` : ''}</span>
             ${st.overdue ? `<span class="flag">${st.overdue} overdue</span>`
               : st.red ? `<span class="flag amber">${st.red} out of action</span>` : ''}
           </button>`;
@@ -2291,6 +2372,7 @@ function renderCrewPerson(view) {
   });
   const done = mine.filter(o => !isOpen(o))
     .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
+  const days = logDays(name);
 
   $('#title').textContent = name;
 
@@ -2299,7 +2381,8 @@ function renderCrewPerson(view) {
       <span class="avatar big">${esc(initials(name))}</span>
       <div class="grow">
         <h2 style="font-size:20px">${esc(name)}</h2>
-        <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}</div>
+        <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}${
+          logFor(name, today()).length ? ` · ${logFor(name, today()).length} logged today` : ''}</div>
       </div>
     </div>
 
@@ -2316,12 +2399,307 @@ function renderCrewPerson(view) {
     ${open.length ? open.map(woCard).join('')
       : `<div class="card muted small">Nothing outstanding.</div>`}
 
+    <div class="section-title">Diary</div>
+    <a class="btn primary wide" href="#/crew-log?who=${encodeURIComponent(name)}">${icon('plus')}Log what you're doing</a>
+    ${days.length ? days.slice(0, 5).map(d => `
+      <div class="log-day">
+        <div class="log-date">${fmtDate(d)}${d === today() ? ' · today' : ''}</div>
+        <div class="card log-card">${logFor(name, d).map(e => logRow(e)).join('')}</div>
+      </div>`).join('')
+      : `<div class="card muted small mt">Nothing logged yet.</div>`}
+    ${days.length > 5 ? `<p class="muted small center">Showing the last 5 days.
+      <a href="#/crew-today">Open the daily diary</a> for any other day.</p>` : ''}
+
     <div class="section-title">Completed (${done.length})</div>
     ${done.length ? done.slice(0, 10).map(woCard).join('')
       : `<div class="card muted small">Nothing completed yet.</div>`}
     ${done.length > 10 ? `<p class="muted small center">Showing the 10 most recent.</p>` : ''}`;
 
   wireWoCards(view);
+  $$('[data-log]', view).forEach(b => b.onclick = () => go('#/crew-log/edit/' + b.dataset.log));
+}
+
+/* ================================================================
+   Crew diary — what each person did today
+   ================================================================ */
+function logBanner() {
+  return logTableMissing
+    ? `<div class="banner">The diary table isn't in the database yet. Run the
+       <strong>Crew diary</strong> section at the end of <code>supabase-schema.sql</code>
+       in Supabase, then reopen the app. Entries won't save until then.</div>`
+    : '';
+}
+
+/** One line of the diary. */
+function logRow(e, opts) {
+  const o = opts || {};
+  const wo = e.work_order_id ? orderById(e.work_order_id) : null;
+  const g = wo ? gearById(wo.gear_id) : null;
+  const files = Array.isArray(e.files) ? e.files : [];
+  return `
+    <div class="log-item" data-log="${e.id}">
+      <div class="log-time">${fmtTime(e.at)}</div>
+      <div class="log-body">
+        <div class="log-head">
+          <span class="log-kind">${esc(logLabel(e))}</span>
+          ${o.showWho && e.crew_name ? `<span class="log-who">${esc(e.crew_name)}</span>` : ''}
+          ${e.amount != null && e.amount !== '' ? `<span class="log-amt">${money(e.amount)}</span>` : ''}
+        </div>
+        ${wo ? `<div class="log-job">${esc(g ? g.code : '')} · ${woNo(wo)} — ${esc(wo.title)}</div>` : ''}
+        ${e.body ? `<div class="log-note">${esc(e.body)}</div>` : ''}
+        ${files.length ? `<div class="thumbs">${files.map(f => /^image\//.test(f.type || '')
+          ? `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`
+          : `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>`
+        ).join('')}</div>` : ''}
+        <div class="log-by">${esc(e.author || '')}</div>
+      </div>
+    </div>`;
+}
+
+/* ------------------------------------------- the whole day, everyone */
+const diaryState = { date: '' };
+
+function renderCrewDiary(view) {
+  if (!diaryState.date) diaryState.date = today();
+  const day = diaryState.date;
+  const entries = logOnDay(day);
+
+  // group by person, keeping the order the crew board uses
+  const order = crewNames();
+  const groups = {};
+  entries.forEach(e => {
+    const who = String(e.crew_name || '').trim() || 'Unattributed';
+    (groups[who] = groups[who] || []).push(e);
+  });
+  const people = Object.keys(groups).sort((a, b) => {
+    const ia = order.findIndex(n => n.toLowerCase() === a.toLowerCase());
+    const ib = order.findIndex(n => n.toLowerCase() === b.toLowerCase());
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+  });
+
+  $('#title').textContent = 'Daily diary';
+
+  view.innerHTML = `
+    ${logBanner()}
+    <div class="row" style="gap:10px">
+      <button class="btn sm" id="dPrev">&#8592;</button>
+      <label class="field grow" style="margin:0"><input type="date" id="dDate" value="${esc(day)}"></label>
+      <button class="btn sm" id="dNext">&#8594;</button>
+    </div>
+    <p class="muted small center mt">${fmtDate(day)}${day === today() ? ' · today' : ''} ·
+      ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} from ${people.length} ${people.length === 1 ? 'person' : 'people'}</p>
+
+    ${people.length ? people.map(who => `
+      <div class="section-title">${esc(who)} <span class="muted">· ${groups[who].length}</span></div>
+      <div class="card log-card">${groups[who].map(e => logRow(e)).join('')}</div>
+    `).join('') : `<div class="empty"><b>Nothing logged</b>No one has written anything for this day yet.</div>`}
+
+    <div class="btn-row mt">
+      <a class="btn primary" href="#/crew-log?date=${day}">${icon('plus')}Add an entry</a>
+      <button class="btn" id="dPrint">${icon('printer')}Print the day</button>
+    </div>`;
+
+  const step = n => {
+    const d = new Date(day + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    diaryState.date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    renderCrewDiary(view);
+  };
+  $('#dPrev', view).onclick = () => step(-1);
+  $('#dNext', view).onclick = () => step(1);
+  $('#dDate', view).onchange = e => { diaryState.date = e.target.value || today(); renderCrewDiary(view); };
+  $('#dPrint', view).onclick = () => printDiaryDay(day, people, groups);
+  $$('[data-log]', view).forEach(b => b.onclick = () => go('#/crew-log/edit/' + b.dataset.log));
+}
+
+function printDiaryDay(day, people, groups) {
+  printDoc(`
+    ${docHead('Workshop diary', fmtDate(day))}
+    ${people.length ? people.map(who => `
+      <h2>${esc(who)}</h2>
+      <table>
+        <tr><th style="width:16mm">Time</th><th style="width:34mm">Entry</th>
+            <th style="width:38mm">Job</th><th>Detail</th><th style="width:24mm">Amount</th></tr>
+        ${groups[who].map(e => {
+          const wo = e.work_order_id ? orderById(e.work_order_id) : null;
+          const g = wo ? gearById(wo.gear_id) : null;
+          return `<tr class="avoid-break">
+            <td>${fmtTime(e.at)}</td>
+            <td>${esc(logLabel(e))}</td>
+            <td>${wo ? `<strong>${esc(g ? g.code : '')}</strong> ${woNo(wo)}` : '—'}</td>
+            <td class="note">${esc(e.body || '')}</td>
+            <td>${e.amount != null && e.amount !== '' ? money(e.amount) : ''}</td>
+          </tr>`;
+        }).join('')}
+      </table>`).join('') : '<p>Nothing logged for this day.</p>'}
+    <div class="sig"><div>Workshop manager &amp; date</div></div>`);
+}
+
+/* ------------------------------------------------- add / edit an entry */
+function renderCrewLogForm(view) {
+  const editing = route.path.startsWith('/crew-log/edit/');
+  const existing = editing ? logById(route.path.split('/')[3]) : null;
+  if (editing && !existing) { view.innerHTML = `<div class="empty"><b>Entry not found</b></div>`; return; }
+
+  const names = crewNames();
+  const draft = {
+    kind: existing ? existing.kind : 'on_tools',
+    files: existing && Array.isArray(existing.files) ? existing.files.slice() : [],
+    newFiles: []
+  };
+  const who = existing ? existing.crew_name : (route.query.who || (matchCrew(S.name) || ''));
+  const day = existing ? logDay(existing) : (route.query.date || today());
+  const at = existing ? new Date(existing.at) : new Date();
+  const timeVal = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+
+  // jobs worth offering: whoever's, open first, then everything else
+  const jobs = DB.work_orders.slice().sort((a, b) => {
+    const ao = isOpen(a) ? 0 : 1, bo = isOpen(b) ? 0 : 1;
+    if (ao !== bo) return ao - bo;
+    return (b.number || 0) - (a.number || 0);
+  });
+
+  $('#title').textContent = editing ? 'Edit entry' : 'Diary entry';
+
+  view.innerHTML = `
+    ${logBanner()}
+    <div class="card">
+      <label class="field"><span>Who</span>
+        <select id="lWho">
+          ${names.map(n => `<option value="${esc(n)}" ${n.toLowerCase() === String(who).toLowerCase() ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+        </select></label>
+      <div class="row" style="gap:10px">
+        <label class="field grow"><span>Day</span><input type="date" id="lDate" value="${esc(day)}"></label>
+        <label class="field grow"><span>Time</span><input type="time" id="lTime" value="${esc(timeVal)}"></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="field"><span>What happened</span>
+        <select id="lKind">
+          ${allLogTypes().map(t => `<option value="${esc(t.key)}" ${t.key === draft.kind ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+          <option value="__new">+ Add a type…</option>
+        </select></label>
+
+      <label class="field" id="lAmtBox" ${logTakesMoney(draft.kind) ? '' : 'hidden'}>
+        <span>Amount (NZD)</span>
+        <input type="number" id="lAmt" step="0.01" inputmode="decimal" placeholder="0.00"
+               value="${existing && existing.amount != null ? esc(existing.amount) : ''}"></label>
+
+      <label class="field"><span>Notes</span>
+        <textarea id="lBody" placeholder="What you did, what you found, who you spoke to.">${esc(existing ? existing.body : '')}</textarea></label>
+
+      <label class="field"><span>Against a job (optional)</span>
+        <select id="lWo">
+          <option value="">Not about one job</option>
+          ${jobs.map(o => {
+            const g = gearById(o.gear_id) || {};
+            return `<option value="${o.id}" ${existing && existing.work_order_id === o.id ? 'selected' : ''}>${
+              esc(g.code || '')} · ${woNo(o)} — ${esc(o.title)}${isOpen(o) ? '' : ' (closed)'}</option>`;
+          }).join('')}
+        </select></label>
+    </div>
+
+    <div class="card">
+      <h2>Photos or paperwork</h2>
+      <input type="file" id="lFile" hidden multiple>
+      <button class="btn wide" id="lAddFile" type="button">${icon('camera')}Attach</button>
+      <div id="lFiles" class="mt"></div>
+    </div>
+
+    <button class="btn primary wide" id="lSave">${editing ? 'Save changes' : 'Add to the diary'}</button>
+    ${editing ? `<button class="btn wide mt" id="lDelete">Delete this entry</button>` : ''}`;
+
+  const kindSel = $('#lKind', view);
+  let previousKind = kindSel.value;
+  kindSel.onchange = () => {
+    if (kindSel.value === '__new') {
+      const typed = (prompt('Name the kind of entry, e.g. "Warranty claim":') || '').trim();
+      if (!typed) { kindSel.value = previousKind; }
+      else {
+        const existingType = allLogTypes().find(t => t.label.toLowerCase() === typed.toLowerCase());
+        const key = existingType ? existingType.key : typed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        if (!existingType) {
+          const opt = document.createElement('option');
+          opt.value = key; opt.textContent = typed;
+          kindSel.insertBefore(opt, kindSel.querySelector('option[value="__new"]'));
+        }
+        kindSel.value = key;
+      }
+    }
+    previousKind = kindSel.value;
+    draft.kind = kindSel.value;
+    $('#lAmtBox', view).hidden = !logTakesMoney(draft.kind);
+  };
+
+  const fileInput = $('#lFile', view);
+  $('#lAddFile', view).onclick = () => fileInput.click();
+  fileInput.onchange = async () => {
+    for (const f of Array.from(fileInput.files || [])) draft.newFiles.push(await compressImage(f));
+    fileInput.value = '';
+    paintFiles();
+  };
+  paintFiles();
+
+  function paintFiles() {
+    const box = $('#lFiles', view);
+    const saved = draft.files.map((f, i) =>
+      `<div class="filerow"><a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>
+       <button class="btn sm" data-drop="${i}">Remove</button></div>`).join('');
+    const pending = draft.newFiles.map((f, i) =>
+      `<div class="filerow"><span class="attach">${icon('file')}${esc(f.name || 'file')}</span>
+       <button class="btn sm" data-dropnew="${i}">Remove</button></div>`).join('');
+    box.innerHTML = (saved + pending) || '<p class="muted small" style="margin:0">Nothing attached.</p>';
+    $$('[data-drop]', box).forEach(b => b.onclick = () => { draft.files.splice(+b.dataset.drop, 1); paintFiles(); });
+    $$('[data-dropnew]', box).forEach(b => b.onclick = () => { draft.newFiles.splice(+b.dataset.dropnew, 1); paintFiles(); });
+  }
+
+  $('#lSave', view).onclick = async function () {
+    const crew_name = $('#lWho', view).value;
+    const entry_date = $('#lDate', view).value || today();
+    const kind = kindSel.value;
+    if (kind === '__new') return toast('Name the type first');
+    if (!crew_name) return toast('Pick who this is for');
+
+    const [hh, mm] = ($('#lTime', view).value || '00:00').split(':');
+    const stamp = new Date(entry_date + 'T00:00:00');
+    stamp.setHours(Number(hh) || 0, Number(mm) || 0, 0, 0);
+
+    this.disabled = true;
+    this.textContent = 'Saving…';
+    const files = draft.files.slice();
+    for (const f of draft.newFiles) files.push(await Store.upload(f));
+
+    const amtRaw = $('#lAmt', view).value.trim();
+    const row = {
+      crew_name,
+      entry_date,
+      at: stamp.toISOString(),
+      kind,
+      label: kindSel.selectedOptions[0] ? kindSel.selectedOptions[0].textContent : '',
+      body: $('#lBody', view).value.trim(),
+      work_order_id: $('#lWo', view).value || null,
+      amount: logTakesMoney(kind) && amtRaw ? Number(amtRaw) : null,
+      files
+    };
+
+    if (editing) await Store.patch('crew_log', existing.id, row);
+    else await Store.insert('crew_log', Object.assign(
+      { id: uid(), author: whoami(), role: S.role, created_at: new Date().toISOString() }, row));
+
+    diaryState.date = entry_date;
+    toast(editing ? 'Saved' : 'Added to the diary');
+    go('#/crew/' + encodeURIComponent(crew_name));
+  };
+
+  const del = $('#lDelete', view);
+  if (del) del.onclick = async () => {
+    if (!confirm('Delete this diary entry?')) return;
+    const back = existing.crew_name;
+    await Store.remove('crew_log', existing.id);
+    toast('Deleted');
+    go('#/crew/' + encodeURIComponent(back));
+  };
 }
 
 /* ================================================================

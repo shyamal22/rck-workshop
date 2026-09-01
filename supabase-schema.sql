@@ -180,3 +180,36 @@ insert into crew (name, created_at) values
   ('Lyndon',    now() + interval '4 seconds'),
   ('Barry',     now() + interval '5 seconds')
 on conflict (name) do nothing;
+
+-- =====================================================================
+--  Crew diary — what each person did today
+--
+--  Same idea as the job diary in Dispatch, but for the workshop: quotes,
+--  parts, time on the tools, trips to a repairer. An entry can point at a
+--  work order but doesn't have to — plenty of a day isn't one job.
+--
+--  Amounts here are a note of what a quote or an order came to. They are
+--  NOT the cost ledger and never reach the cost tracker.
+-- =====================================================================
+create table if not exists crew_log (
+  id            uuid primary key default gen_random_uuid(),
+  crew_name     text not null default '',
+  entry_date    date not null default current_date,
+  at            timestamptz not null default now(),   -- when it happened
+  kind          text not null default 'note',         -- see CREW_LOG_TYPES in app.js
+  label         text not null default '',             -- shown name, so added types survive
+  body          text not null default '',
+  work_order_id uuid references work_orders(id) on delete set null,
+  amount        numeric,
+  files         jsonb not null default '[]'::jsonb,
+  author        text not null default '',
+  role          text not null default '',
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists crew_log_day_idx on crew_log (entry_date, at);
+create index if not exists crew_log_who_idx on crew_log (crew_name, entry_date);
+
+alter table crew_log enable row level security;
+drop policy if exists crew_log_all on crew_log;
+create policy crew_log_all on crew_log for all to anon, authenticated using (true) with check (true);

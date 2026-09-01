@@ -40,6 +40,23 @@ someone here chasing it.
 - Assigning changes nothing operationally — it doesn't touch gear colour or status.
   It only answers who is on what.
 
+### The daily diary
+
+Same idea as the job diary in Dispatch, but for the workshop. Each person logs
+what they did as the day goes: **on the tools, inspection, quote requested,
+quote received, parts ordered, parts arrived, dropped at a repairer, picked up,
+admin** — and anyone can add a type of their own.
+
+- An entry carries a time (24-hour, the way a diary is written), a note, and
+  photos or paperwork. It can point at a work order but doesn't have to — plenty
+  of a day isn't one job.
+- Quote and order entries take an **amount**, so what a repair was quoted at sits
+  in the record next to the day it was chased. These are a note of what was
+  quoted, **not** the cost ledger — nothing here reaches the cost tracker.
+- The **Daily diary** shows a whole day across everyone, grouped by person and in
+  time order, with a date stepper and a printable day sheet for the manager.
+- Each person's page carries their own last five days.
+
 ## What it does
 
 **For the crew**
