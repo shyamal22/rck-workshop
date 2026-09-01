@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.3.0';
+const VERSION = '2.4.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -222,7 +222,6 @@ const builtinLogType = k => CREW_LOG_TYPES.find(t => t.key === k);
    A kind missing from here is not captured — file uploads are summarised
    by their caller as one line rather than one per photo. */
 const AUTO_LOG_LABELS = {
-  created:  'Damage reported',
   comment:  'Note added to a job',
   status:   'Job updated',
   external: 'Repairer arranged',
@@ -270,6 +269,36 @@ function logDays(name) {
 }
 
 const logById = id => DB.crew_log.find(e => e.id === id);
+
+/** A day's work for one person, counted from their diary. */
+function dayTally(name, date) {
+  const t = { entries: 0, reported: 0, updates: 0, photos: 0, docs: 0, closed: 0, notes: 0 };
+  logFor(name, date).forEach(e => {
+    t.entries++;
+    (Array.isArray(e.files) ? e.files : []).forEach(f => {
+      if (/^image\//.test(f.type || '')) t.photos++; else t.docs++;
+    });
+    if (!e.auto) { t.notes++; return; }
+    const k = String(e.kind || '').replace(/^auto_/, '');
+    if (k === 'complete') t.closed++;
+    else if (k === 'created') t.reported++;
+    else if (k !== 'file') t.updates++;
+  });
+  return t;
+}
+
+/** "3 updates · 2 photos · 1 closed" — zeros left out. */
+function tallyLine(t) {
+  const bits = [];
+  const add = (n, one, many) => { if (n) bits.push(`${n} ${n === 1 ? one : (many || one + 's')}`); };
+  add(t.reported, 'reported');
+  add(t.updates, 'update');
+  add(t.photos, 'photo');
+  add(t.docs, 'document');
+  add(t.closed, 'closed', 'closed');
+  add(t.notes, 'note');
+  return bits.join(' · ');
+}
 
 /** 24-hour, because that is how a diary is written. */
 function fmtTime(v) {
@@ -691,7 +720,8 @@ function whoami() { return S.name || 'Unnamed user'; }
 
 /** Puts what someone just did on a job into their own diary for today. */
 async function autoDiary(workOrderId, kind, body, opts) {
-  const label = (opts && opts.label) || AUTO_LOG_LABELS[kind];
+  const o = opts || {};
+  const label = o.label || AUTO_LOG_LABELS[kind];
   if (!label) return;
   const who = matchCrew(whoami()) || whoami();
   if (!who) return;
@@ -707,7 +737,7 @@ async function autoDiary(workOrderId, kind, body, opts) {
     body: String(body || '').split('\n').slice(0, 3).join('\n').slice(0, 400),
     work_order_id: workOrderId || null,
     amount: null,
-    files: [],
+    files: o.files || [],
     auto: true,
     author: whoami(),
     role: S.role,
@@ -750,11 +780,18 @@ async function createWorkOrder(data, files) {
       ? ' — gear taken out of operation.'
       : ' — gear is damaged but still usable.'));
 
+  const shots = [];
   for (const f of files || []) {
     const up = await Store.upload(f);
-    // no diary line per photo — the report itself is already one entry
+    shots.push(up);
     await logUpdate(saved.id, 'file', 'Photo of the damage', up);
   }
+
+  // One diary line for the whole report, carrying the photos, rather than
+  // one per photo.
+  await autoDiary(saved.id, 'created',
+    `${data.title}${shots.length ? ` — ${shots.length} photo${shots.length === 1 ? '' : 's'}` : ''}`,
+    { label: 'Damage reported', files: shots });
 
   if (data.location) {
     await Store.patch('gear', data.gear_id, {
@@ -1653,15 +1690,21 @@ function wireWorkshopPanel(view, o) {
       const note = ($('#wFileNote', view).value || '').trim();
       upBtn.disabled = true;
       upBtn.textContent = 'Uploading…';
-      let n = 0;
+      const added = [];
       for (const raw of files) {
         const f = await compressImage(raw);
         const up = await Store.upload(f);
         await logUpdate(o.id, 'file', note || (o.repairer === 'external' ? 'Paperwork from external repairer' : 'Attachment'), up);
-        n++;
+        added.push(up);
       }
-      if (n) await autoDiary(o.id, 'file',
-        note || `${n} file${n === 1 ? '' : 's'} added`, { label: 'Paperwork added' });
+      const n = added.length;
+      if (n) {
+        const pics = added.filter(f => /^image\//.test(f.type || '')).length;
+        const label = pics === n ? `Photo${n === 1 ? '' : 's'} added`
+                    : pics ? 'Photos and paperwork added' : 'Paperwork added';
+        await autoDiary(o.id, 'file', note || `${n} file${n === 1 ? '' : 's'} added`,
+          { label, files: added });
+      }
       toast(`${n} file${n === 1 ? '' : 's'} added`);
       render();
     };
@@ -2366,8 +2409,9 @@ function renderCrewBoard(view) {
             <span class="avatar">${esc(initials(n))}</span>
             <span class="who">${esc(n)}</span>
             <span class="load">${st.open === 0 ? 'No open jobs'
-              : `${st.open} open job${st.open === 1 ? '' : 's'}`}${
-              logFor(n, today()).length ? ` · ${logFor(n, today()).length} logged today` : ''}</span>
+              : `${st.open} open job${st.open === 1 ? '' : 's'}`}</span>
+            ${(() => { const line = tallyLine(dayTally(n, today()));
+              return line ? `<span class="today">Today: ${esc(line)}</span>` : ''; })()}
             ${st.overdue ? `<span class="flag">${st.overdue} overdue</span>`
               : st.red ? `<span class="flag amber">${st.red} out of action</span>` : ''}
           </button>`;
@@ -2429,8 +2473,9 @@ function renderCrewPerson(view) {
       <span class="avatar big">${esc(initials(name))}</span>
       <div class="grow">
         <h2 style="font-size:20px">${esc(name)}</h2>
-        <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}${
-          logFor(name, today()).length ? ` · ${logFor(name, today()).length} logged today` : ''}</div>
+        <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}</div>
+        ${(() => { const line = tallyLine(dayTally(name, today()));
+          return line ? `<div class="small" style="margin-top:2px"><strong>Today:</strong> ${esc(line)}</div>` : ''; })()}
       </div>
     </div>
 
@@ -2452,6 +2497,7 @@ function renderCrewPerson(view) {
     ${days.length ? days.slice(0, 5).map(d => `
       <div class="log-day">
         <div class="log-date">${fmtDate(d)}${d === today() ? ' · today' : ''}</div>
+        <div class="tally-line">${esc(tallyLine(dayTally(name, d)) || 'nothing counted')}</div>
         <div class="card log-card">${logFor(name, d).map(e => logRow(e)).join('')}</div>
       </div>`).join('')
       : `<div class="card muted small mt">Nothing logged yet.</div>`}
@@ -2464,7 +2510,7 @@ function renderCrewPerson(view) {
     ${done.length > 10 ? `<p class="muted small center">Showing the 10 most recent.</p>` : ''}`;
 
   wireWoCards(view);
-  $$('[data-log]', view).forEach(b => b.onclick = () => go('#/crew-log/edit/' + b.dataset.log));
+  wireLogRows(view);
 }
 
 /* ================================================================
@@ -2485,7 +2531,8 @@ function logRow(e, opts) {
   const g = wo ? gearById(wo.gear_id) : null;
   const files = Array.isArray(e.files) ? e.files : [];
   return `
-    <div class="log-item" data-log="${e.id}">
+    <div class="log-item${e.auto ? ' to-job' : ''}"
+         ${e.auto && e.work_order_id ? `data-wo="${e.work_order_id}"` : `data-log="${e.id}"`}>
       <div class="log-time">${fmtTime(e.at)}</div>
       <div class="log-body">
         <div class="log-head">
@@ -2507,6 +2554,12 @@ function logRow(e, opts) {
 
 /* ------------------------------------------- the whole day, everyone */
 const diaryState = { date: '' };
+
+/** Captured lines open the job they came from; hand-written ones open to edit. */
+function wireLogRows(root) {
+  $$('[data-log]', root).forEach(b => b.onclick = () => go('#/crew-log/edit/' + b.dataset.log));
+  $$('.log-item[data-wo]', root).forEach(b => b.onclick = () => go('#/wo/' + b.dataset.wo));
+}
 
 function renderCrewDiary(view) {
   if (!diaryState.date) diaryState.date = today();
@@ -2538,10 +2591,13 @@ function renderCrewDiary(view) {
     <p class="muted small center mt">${fmtDate(day)}${day === today() ? ' · today' : ''} ·
       ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} from ${people.length} ${people.length === 1 ? 'person' : 'people'}</p>
 
-    ${people.length ? people.map(who => `
-      <div class="section-title">${esc(who)} <span class="muted">· ${groups[who].length}</span></div>
-      <div class="card log-card">${groups[who].map(e => logRow(e)).join('')}</div>
-    `).join('') : `<div class="empty"><b>Nothing logged</b>No one has written anything for this day yet.</div>`}
+    ${people.length ? people.map(who => {
+      const t = dayTally(who, day);
+      return `
+      <div class="section-title">${esc(who)}</div>
+      <div class="tally-line">${esc(tallyLine(t) || `${t.entries} entries`)}</div>
+      <div class="card log-card">${groups[who].map(e => logRow(e)).join('')}</div>`;
+    }).join('') : `<div class="empty"><b>Nothing logged</b>No one has written anything for this day yet.</div>`}
 
     <div class="btn-row mt">
       <a class="btn primary" href="#/crew-log?date=${day}">${icon('plus')}Add an entry</a>
@@ -2558,7 +2614,7 @@ function renderCrewDiary(view) {
   $('#dNext', view).onclick = () => step(1);
   $('#dDate', view).onchange = e => { diaryState.date = e.target.value || today(); renderCrewDiary(view); };
   $('#dPrint', view).onclick = () => printDiaryDay(day, people, groups);
-  $$('[data-log]', view).forEach(b => b.onclick = () => go('#/crew-log/edit/' + b.dataset.log));
+  wireLogRows(view);
 }
 
 function printDiaryDay(day, people, groups) {
@@ -2566,6 +2622,7 @@ function printDiaryDay(day, people, groups) {
     ${docHead('Workshop diary', fmtDate(day))}
     ${people.length ? people.map(who => `
       <h2>${esc(who)}</h2>
+      <p><strong>${esc(tallyLine(dayTally(who, day)) || 'no activity counted')}</strong></p>
       <table>
         <tr><th style="width:16mm">Time</th><th style="width:34mm">Entry</th>
             <th style="width:38mm">Job</th><th>Detail</th><th style="width:24mm">Amount</th></tr>

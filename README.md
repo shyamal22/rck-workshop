@@ -68,6 +68,20 @@ match the crew name for the entries to land in the right diary. Settings says
 which it is. Someone not on the maintenance crew still gets their own line — the
 work is never filed under somebody else.
 
+Photos and paperwork ride along on the line that captured them, so a photo added
+to a job shows as a photo in the diary rather than a mention of one.
+
+**The day is tallied.** Each person's day is counted from their diary — reported,
+updates, photos, documents, closed — and shown on their crew tile, at the top of
+their page, against each day, and on the printed day sheet. That is the
+"who got what done today" figure.
+
+Everything points at everything else: a captured diary line opens the job it came
+from, a work order names who is managing it and links to their page, and their
+page lists their jobs. Updating a job from the crew side and from the maintenance
+side are the same act on the same record — there is one work order, seen from
+two directions.
+
 ## What it does
 
 **For the crew**
