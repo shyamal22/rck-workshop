@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.7.0';
+const VERSION = '2.8.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -229,6 +229,70 @@ const AUTO_LOG_LABELS = {
   reopen:   'Job reopened'
 };
 
+/* A comment on its own never said whether someone was fixing the job or just
+   talking about it, so a board full of notes told you nothing. Posting one now
+   means saying which it is — and that answer becomes the job's live line,
+   readable from the card without opening anything.
+
+   Tone borrows the status vocabulary rather than inventing colours: red is bad
+   news, yellow is held up, dark is happening now, grey is only words. */
+const NOTE_KINDS = [
+  { key: 'working', label: 'Working on it', diary: 'Working on a job',
+    tone: 'live',  hint: 'Spanners on it now' },
+  { key: 'waiting', label: 'Waiting on',    diary: 'Waiting on something',
+    tone: 'hold',  hint: 'Parts, a quote, the repairer' },
+  { key: 'problem', label: 'Hit a problem', diary: 'Problem on a job',
+    tone: 'stop',  hint: 'Needs a decision' },
+  { key: 'looked',  label: 'Had a look',    diary: 'Looked at a job',
+    tone: 'plain', hint: 'Checked it over, nothing done yet' },
+  { key: 'info',    label: 'Just info',     diary: 'Note added to a job',
+    tone: 'plain', hint: 'Nothing for anyone to do' }
+];
+const noteKind = k => NOTE_KINDS.find(n => n.key === k) || null;
+const noteOf = u => noteKind(u && u.meta && u.meta.note);
+
+/** What is actually happening on a job right now, read back off its own
+    history — so every card can say it without anyone writing a status. */
+function jobPulse(o) {
+  const ups = updatesFor(o.id);
+  if (!isOpen(o)) {
+    const done = ups.filter(u => u.kind === 'complete').pop();
+    return { label: 'Fixed', tone: 'done', at: o.completed_at || (done && done.created_at),
+             who: o.completed_by || (done && done.author) || '' };
+  }
+  for (let i = ups.length - 1; i >= 0; i--) {
+    const u = ups[i];
+    const n = noteOf(u);
+    if (n) return { label: n.key === 'waiting' && u.body
+                      ? 'Waiting on ' + firstLine(u.body).replace(/^waiting on\s*/i, '')
+                      : n.label,
+                    tone: n.tone, at: u.created_at, who: personOf(u.author) };
+    if (u.kind === 'complete' || u.kind === 'reopen') break;
+  }
+  if (o.repairer === 'external') {
+    return { label: 'With ' + (o.external_company || 'an external repairer'),
+             tone: 'plain', at: o.updated_at, who: assignedTo(o) };
+  }
+  const last = ups[ups.length - 1];
+  return { label: 'No word yet', tone: 'quiet',
+           at: last ? last.created_at : o.reported_at, who: '' };
+}
+
+/** "3 days ago", short enough to sit on a card. */
+function ago(v) {
+  const t = new Date(v).getTime();
+  if (isNaN(t)) return '';
+  const mins = Math.round((Date.now() - t) / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.round(hrs / 24);
+  return days === 1 ? 'yesterday' : days + 'd ago';
+}
+
+const firstLine = t => String(t || '').split('\n')[0].trim();
+
 function logLabel(e) {
   if (e && e.label) return e.label;
   const b = builtinLogType(e && e.kind);
@@ -302,6 +366,10 @@ const logById = id => DB.crew_log.find(e => e.id === id);
    the diary shows everyone, reaches back to before the diary existed, and
    can never drift out of step with the jobs it describes.
    ------------------------------------------------------------------------ */
+const DERIVED_TONES = {
+  created: 'stop', complete: 'done', reopen: 'stop', external: 'plain', status: 'plain'
+};
+
 const DERIVED_LABELS = {
   created:  'Damage reported',
   comment:  'Note added to a job',
@@ -361,7 +429,8 @@ function derivedEntries() {
 
   rows.forEach(u => {
     if (u.kind === 'file') return;
-    const label = DERIVED_LABELS[u.kind];
+    const n = noteOf(u);
+    const label = n ? n.diary : DERIVED_LABELS[u.kind];
     const author = String(u.author || '').trim();
     if (!label || !author || !u.created_at) return;
 
@@ -383,6 +452,7 @@ function derivedEntries() {
       at: u.created_at,
       kind: 'auto_' + u.kind,
       label,
+      tone: n ? n.tone : DERIVED_TONES[u.kind] || 'plain',
       body: u.body || '',
       work_order_id: u.work_order_id,
       amount: null,
@@ -402,6 +472,7 @@ function derivedEntries() {
       entry_date: b.at.slice(0, 10),
       at: b.at,
       kind: 'auto_file',
+      tone: 'plain',
       label: pics === b.files.length ? `Photo${b.files.length === 1 ? '' : 's'} added`
            : pics ? 'Photos and paperwork added' : 'Paperwork added',
       body: b.body || '',
@@ -1431,6 +1502,22 @@ async function setLocation(g, text) {
   toast('Location updated');
 }
 
+/** The one line that says whether a job is moving. */
+function pulseLine(o, size) {
+  const p = jobPulse(o);
+  if (!p) return '';
+  const when = p.at ? ago(p.at) : '';
+  // the card already names whoever is managing the job; saying it twice is
+  // noise, so the speaker is named only when it is somebody else
+  const who = p.who && p.who !== assignedTo(o) ? p.who : '';
+  const meta = [who, when].filter(Boolean).join(' \u00b7 ');
+  return `<div class="pulse tone-${p.tone}${size === 'big' ? ' big' : ''}">
+    <span class="pdot"></span>
+    <span class="pl">${esc(p.label)}</span>
+    ${meta ? `<span class="pm">${esc(meta)}</span>` : ''}
+  </div>`;
+}
+
 function woCard(o, i) {
   const g = gearById(o.gear_id) || {};
   const due = dueText(o.target_date);
@@ -1442,6 +1529,7 @@ function woCard(o, i) {
         <span class="num">${esc(g.code || '')}</span>
       </div>
       <div class="ttl">${esc(o.title)}</div>
+      ${pulseLine(o)}
       <div class="sub">
         <span class="pill"><span class="swatch"></span>${closed ? statusLabel(o.status) : STATUS_TEXT[o.severity]}</span>
         ${closed ? '' : `<span class="pill plain">${statusLabel(o.status)}</span>`}
@@ -1668,6 +1756,7 @@ function renderWorkOrder(view) {
       <div style="margin-top:11px">
         <span class="pill"><span class="swatch"></span>${closed ? 'Fixed' : STATUS_TEXT[o.severity]}</span>
       </div>
+      ${pulseLine(o, 'big')}
       ${o.description ? `<p class="small mt" style="white-space:pre-wrap;margin-bottom:0">${esc(o.description)}</p>` : ''}
     </div>
 
@@ -1703,22 +1792,31 @@ function renderWorkOrder(view) {
     </div>
 
     <div class="card">
-      <label class="field"><span>Add a comment</span>
-        <textarea id="cmt" placeholder="Notes on the fault, parts ordered, what you found…"></textarea>
+      <label class="field"><span>Say what's happening</span>
+        <textarea id="cmt" placeholder="What you found, what you're doing, what you're waiting on…"></textarea>
       </label>
-      <button class="btn wide" id="postCmt">Post comment</button>
+      <p class="tiny muted" style="margin:-2px 2px 8px">Pick the one that fits — it becomes this job's live line, so
+        everyone can see whether it's moving without opening it.</p>
+      <div class="note-kinds">
+        ${NOTE_KINDS.map(n => `
+          <button class="note-chip tone-${n.tone}" data-note="${n.key}">
+            <span class="nk">${esc(n.label)}</span>
+            <span class="nh">${esc(n.hint)}</span>
+          </button>`).join('')}
+      </div>
     </div>`;
 
   $('#printWo', view).onclick = () => printWorkOrder(o);
 
-  $('#postCmt', view).onclick = async function () {
+  $$('[data-note]', view).forEach(b => b.onclick = async function () {
     const body = $('#cmt', view).value.trim();
-    if (!body) return toast('Write something first');
-    this.disabled = true;
-    await logUpdate(o.id, 'comment', body);
-    toast('Comment added');
+    const n = noteKind(this.dataset.note);
+    if (!body && n.key !== 'working') return toast('Write a line first');
+    $$('[data-note]', view).forEach(x => x.disabled = true);
+    await logUpdate(o.id, 'comment', body || 'On it now.', { note: n.key });
+    toast(n.label + ' — posted');
     render();
-  };
+  });
 
   if (isWorkshop()) wireWorkshopPanel(view, o);
 }
@@ -1728,9 +1826,11 @@ function tlItem(u) {
   const isFile = u.kind === 'file' && m.url;
   const isImage = isFile && /^image\//.test(m.type || '');
   const strong = ['created', 'status', 'complete', 'external', 'reopen'].includes(u.kind);
+  const n = noteOf(u);
   return `
     <div class="tl-item ${strong ? 'mark' : ''}">
       <div class="tl-when">${fmtDateTime(u.created_at)}</div>
+      ${n ? `<span class="note-tag tone-${n.tone}">${esc(n.label)}</span>` : ''}
       <div class="tl-who">${esc(u.author || 'Unknown')}${u.role === 'workshop' ? ' · Workshop' : ''}</div>
       ${u.body ? `<div class="tl-body">${esc(u.body)}</div>` : ''}
       ${isImage
@@ -2335,6 +2435,9 @@ function printWorkOrder(o) {
     <div class="callout">
       <div class="state"><span class="${state.cls}">${esc(state.word)}</span></div>
       <div class="sub">${esc(state.line)}</div>
+      ${(() => { const p = jobPulse(o);
+        return closed || !p ? '' : `<div class="sub"><strong>Last word:</strong> ${esc(p.label)}${
+          p.who ? ' — ' + esc(p.who) : ''}${p.at ? ' (' + esc(ago(p.at)) + ')' : ''}</div>`; })()}
     </div>
 
     <h2>What is wrong</h2>
@@ -2367,12 +2470,14 @@ function printWorkOrder(o) {
 
     <h2>Comments &amp; history</h2>
     <table>
-      <tr><th style="width:34mm">When</th><th style="width:32mm">Who</th><th>Entry</th></tr>
-      ${comments.map(u => `<tr class="avoid-break">
+      <tr><th style="width:30mm">When</th><th style="width:28mm">Who</th>
+          <th style="width:26mm">What</th><th>Entry</th></tr>
+      ${comments.map(u => { const n = noteOf(u); return `<tr class="avoid-break">
         <td>${fmtDateTime(u.created_at)}</td>
         <td>${esc(u.author || '—')}${u.role === 'workshop' ? '<br><span class="quiet">Workshop</span>' : ''}</td>
+        <td>${n ? `<strong>${esc(n.label)}</strong>` : esc(DERIVED_LABELS[u.kind] || 'Note')}</td>
         <td class="note">${esc(u.body || '')}</td>
-      </tr>`).join('') || '<tr><td colspan="3" class="quiet">Nothing recorded.</td></tr>'}
+      </tr>`; }).join('') || '<tr><td colspan="4" class="quiet">Nothing recorded.</td></tr>'}
     </table>
 
     ${photoSheet(ups)}
@@ -2572,9 +2677,10 @@ function renderKiosk(view) {
                     </div>
                     <div style="min-width:0">
                       <div class="kttl">${esc(o.title)}</div>
-                      <div class="kmeta">${statusLabel(o.status)}${o.repairer === 'external'
-                        ? ' · ' + esc(o.external_company || 'external') : o.repairer === 'internal' ? ' · in-house' : ''}${
-                        assignedTo(o) ? ' · ' + esc(assignedTo(o)) : ''}</div>
+                      <div class="kmeta">${(() => { const p = jobPulse(o);
+                        return `<b class="kpulse tone-${p.tone}">${esc(p.label)}</b>${p.at ? ' ' + esc(ago(p.at)) : ''}`; })()}${
+                        assignedTo(o) ? ' · ' + esc(assignedTo(o)) : ''}${o.repairer === 'external'
+                        ? ' · ' + esc(o.external_company || 'external') : ''}</div>
                     </div>
                     <div class="keta">
                       ${o.target_date
@@ -2856,62 +2962,119 @@ function renderCrewMerge(view) {
   });
 }
 
+/** Everyone worth a row, with the numbers each row needs, ordered so the
+    people who need attention are the ones you read first. */
+function crewRows(date) {
+  const onCrew = new Set(crewNames().map(n => n.toLowerCase()));
+  const order = crewAndActive();
+  return order.map(name => {
+    const st = crewStats(name);
+    const t = dayTally(name, date);
+    return { name, st, t, guest: !onCrew.has(name.toLowerCase()) };
+  }).sort((a, b) =>
+       (b.st.overdue - a.st.overdue)
+    || (b.st.open - a.st.open)
+    || (b.t.entries - a.t.entries)
+    // nothing to separate them: leave the list in the order it was set up,
+    // so a quiet morning shows the crew the way they are used to reading it
+    || (order.indexOf(a.name) - order.indexOf(b.name)));
+}
+
+/** A whole day for the whole workshop, counted the same way one person is. */
+function dayTotals(date) {
+  const t = { entries: 0, reported: 0, updates: 0, photos: 0, docs: 0, closed: 0, notes: 0, people: 0 };
+  const seen = new Set();
+  logOnDay(date).forEach(e => {
+    t.entries++;
+    const who = entryPerson(e); if (who) seen.add(who.toLowerCase());
+    (Array.isArray(e.files) ? e.files : []).forEach(f => {
+      if (/^image\//.test(f.type || '')) t.photos++; else t.docs++;
+    });
+    if (!e.auto) { t.notes++; return; }
+    const k = String(e.kind || '').replace(/^auto_/, '');
+    if (k === 'complete') t.closed++;
+    else if (k === 'created') t.reported++;
+    else if (k !== 'file') t.updates++;
+  });
+  t.people = seen.size;
+  return t;
+}
+
+/** The day at a glance — four numbers instead of a paragraph to scroll. */
+function glance(t) {
+  const cells = [
+    [t.reported, 'reported'],
+    [t.updates,  'updates'],
+    [t.photos + t.docs, 'files'],
+    [t.closed,   'closed']
+  ];
+  return `<div class="glance">${cells.map(([n, l]) =>
+    `<div class="${n ? '' : 'zero'}"><span class="n">${n}</span><span class="l">${l}</span></div>`).join('')}</div>`;
+}
+
+/** The little counted strip on a person's row. */
+function miniTally(t) {
+  if (!t.entries) return '<span class="mt-quiet">nothing yet today</span>';
+  const bits = [];
+  const add = (n, l) => { if (n) bits.push(`<b>${n}</b> ${l}`); };
+  add(t.reported, 'raised');
+  add(t.updates, 'updates');
+  add(t.photos + t.docs, 'files');
+  add(t.closed, 'closed');
+  add(t.notes, 'notes');
+  return bits.slice(0, 3).join('<i>\u00b7</i>');
+}
+
 function renderCrewBoard(view) {
-  const names = crewNames();
-  const others = crewAndActive().filter(n => !names.some(c => c.toLowerCase() === n.toLowerCase()));
+  const rows = crewRows(today());
   const loose = unassignedOrders();
-  const todayCount = logOnDay(today()).length;
+  const tot = dayTotals(today());
+  const busy = rows.filter(r => r.t.entries).slice(0, 8);
 
   view.innerHTML = `
     ${crewBanner()}
-    ${loose.length ? `
-      <button class="wo status-red unassigned-tile" id="looseTile">
-        <div class="ttl">${loose.length} job${loose.length === 1 ? '' : 's'} not assigned to anyone</div>
-        <div class="sub"><span>Nobody is accountable for these yet — tap to assign them</span></div>
-      </button>` : `
-      <div class="card muted small">Every open job has someone managing it.</div>`}
 
-    <a class="wo diary-tile" href="#/crew-today">
-      <div class="hdr"><span class="num">DAILY DIARY</span></div>
-      <div class="ttl">${todayCount ? `${todayCount} entr${todayCount === 1 ? 'y' : 'ies'} logged today` : 'Nothing logged today yet'}</div>
-      <div class="sub"><span>What everyone has been doing — quotes, parts, time on the tools</span></div>
+    <a class="card today-card" href="#/crew-today">
+      <div class="tc-head">
+        <span>Today</span>
+        <span class="tc-date">${esc(fmtDate(today()))}</span>
+      </div>
+      ${glance(tot)}
+      ${busy.length ? `<div class="facepile">${busy.map(r =>
+          `<span class="avatar sm" title="${esc(r.name)}">${esc(initials(r.name))}</span>`).join('')}
+        <span class="fp-note">${tot.people} ${tot.people === 1 ? 'person' : 'people'} on the tools</span></div>`
+        : '<div class="fp-note only">Nothing logged yet today</div>'}
+      <span class="tc-go">Open the diary \u2192</span>
     </a>
 
-    <div class="section-title">Crew (${names.length})</div>
-    <div class="crew-grid">
-      ${names.map((n, i) => {
-        const st = crewStats(n);
-        const tone = st.overdue ? 'status-red' : st.open ? 'status-orange' : 'status-green';
-        return `
-          <button class="crew-tile ${tone}" data-name="${esc(n)}" style="--i:${Math.min(i, 14)}">
-            <span class="avatar">${esc(initials(n))}</span>
-            <span class="who">${esc(n)}</span>
-            ${aliasesOf(n).length ? `<span class="alsonames">also ${esc(aliasesOf(n).join(', '))}</span>` : ''}
-            <span class="load">${st.open === 0 ? 'No open jobs'
-              : `${st.open} open job${st.open === 1 ? '' : 's'}`}</span>
-            ${(() => { const line = tallyLine(dayTally(n, today()));
-              return line ? `<span class="today">Today: ${esc(line)}</span>` : ''; })()}
-            ${st.overdue ? `<span class="flag">${st.overdue} overdue</span>`
-              : st.red ? `<span class="flag amber">${st.red} out of action</span>` : ''}
-          </button>`;
-      }).join('')}
-    </div>
+    ${loose.length ? `
+      <button class="wo status-red unassigned-tile" id="looseTile">
+        <div class="ttl">${loose.length} job${loose.length === 1 ? '' : 's'} with nobody on ${loose.length === 1 ? 'it' : 'them'}</div>
+        <div class="sub"><span>Tap to assign</span></div>
+      </button>` : ''}
 
-    ${others.length ? `
-      <div class="section-title">Also active</div>
-      <p class="muted small" style="margin:-4px 4px 9px">Not on the maintenance crew, but has worked on jobs.</p>
-      <div class="crew-grid">
-        ${others.map((n, i) => {
-          const line = tallyLine(dayTally(n, today()));
-          return `
-            <button class="crew-tile status-green" data-name="${esc(n)}" style="--i:${Math.min(i, 14)}">
-              <span class="avatar">${esc(initials(n))}</span>
-              <span class="who">${esc(n)}</span>
-              <span class="load">${logDays(n).length} day${logDays(n).length === 1 ? '' : 's'} logged</span>
-              ${line ? `<span class="today">Today: ${esc(line)}</span>` : ''}
-            </button>`;
-        }).join('')}
-      </div>` : ''}
+    <div class="section-title">Crew</div>
+    <div class="crew-list">
+      ${rows.map((r, i) => {
+        const tone = r.st.overdue ? 'status-red' : r.st.open ? 'status-orange' : 'status-green';
+        return `
+          <button class="crew-row ${tone}" data-name="${esc(r.name)}" style="--i:${Math.min(i, 14)}">
+            <span class="avatar">${esc(initials(r.name))}</span>
+            <span class="cr-mid">
+              <span class="who">${esc(r.name)}</span>${
+                r.guest ? '<span class="guest">not on the crew list</span>' : ''}
+              <span class="cr-load">
+                <span class="load">${r.st.open
+                  ? `${r.st.open} open job${r.st.open === 1 ? '' : 's'}` : 'No open jobs'}</span>
+                ${r.st.overdue ? `<span class="flag">${r.st.overdue} overdue</span>`
+                  : r.st.red ? `<span class="flag amber">${r.st.red} out of action</span>` : ''}
+              </span>
+              <span class="mini">${miniTally(r.t)}</span>
+            </span>
+            <span class="cr-num${r.t.entries ? '' : ' zero'}">${r.t.entries}<i>today</i></span>
+          </button>`;
+      }).join('') || '<div class="card muted small">Nobody on the crew yet.</div>'}
+    </div>
 
     <div class="btn-row mt">
       <button class="btn" id="addCrew">${icon('plus')}Add someone</button>
@@ -2964,6 +3127,9 @@ function renderCrewPerson(view) {
   const done = mine.filter(o => !isOpen(o))
     .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
   const days = logDays(name);
+  const also = aliasesOf(name);
+  const todayRows = logFor(name, today());
+  const earlier = days.filter(d => d !== today()).slice(0, 4);
 
   $('#title').textContent = name;
 
@@ -2973,12 +3139,18 @@ function renderCrewPerson(view) {
       <div class="grow">
         <h2 style="font-size:20px">${esc(name)}</h2>
         <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}</div>
-        ${(() => { const line = tallyLine(dayTally(name, today()));
-          return line ? `<div class="small" style="margin-top:2px"><strong>Today:</strong> ${esc(line)}</div>` : ''; })()}
+        ${also.length ? `<div class="tiny" style="color:var(--ink-3);margin-top:3px">also ${esc(also.join(', '))}</div>` : ''}
       </div>
     </div>
 
-    <div class="tally">
+    <div class="section-title">Today</div>
+    ${glance(dayTally(name, today()))}
+    ${todayRows.length
+      ? `<div class="card log-card stream">${todayRows.slice().reverse().map(e => logRow(e)).join('')}</div>`
+      : `<div class="card muted small">Nothing logged today.</div>`}
+    <a class="btn wide mt" href="#/crew-log?who=${encodeURIComponent(name)}">${icon('plus')}Log something by hand</a>
+
+    <div class="tally mt">
       <button class="status-orange" disabled><span class="n">${st.open}</span><span class="l">Open</span></button>
       <button class="status-red" disabled><span class="n">${st.overdue}</span><span class="l">Overdue</span></button>
       <button class="status-green" disabled><span class="n">${st.done}</span><span class="l">Fixed</span></button>
@@ -2991,17 +3163,14 @@ function renderCrewPerson(view) {
     ${open.length ? open.map(woCard).join('')
       : `<div class="card muted small">Nothing outstanding.</div>`}
 
-    <div class="section-title">Diary</div>
-    <a class="btn primary wide" href="#/crew-log?who=${encodeURIComponent(name)}">${icon('plus')}Log what you're doing</a>
-    ${days.length ? days.slice(0, 5).map(d => `
-      <div class="log-day">
-        <div class="log-date">${fmtDate(d)}${d === today() ? ' · today' : ''}</div>
-        <div class="tally-line">${esc(tallyLine(dayTally(name, d)) || 'nothing counted')}</div>
-        <div class="card log-card">${logFor(name, d).map(e => logRow(e)).join('')}</div>
-      </div>`).join('')
-      : `<div class="card muted small mt">Nothing logged yet.</div>`}
-    ${days.length > 5 ? `<p class="muted small center">Showing the last 5 days.
-      <a href="#/crew-today">Open the daily diary</a> for any other day.</p>` : ''}
+    ${earlier.length ? `<div class="section-title">Earlier days</div>
+      ${earlier.map(d => `
+        <div class="log-day">
+          <div class="log-date">${fmtDate(d)} <span class="tally-inline">${esc(tallyLine(dayTally(name, d)) || '')}</span></div>
+          <div class="card log-card">${logFor(name, d).slice().reverse().map(e => logRow(e)).join('')}</div>
+        </div>`).join('')}
+      ${days.length > 5 ? `<p class="muted small center">Showing the last few days.
+        <a href="#/crew-today">Open the daily diary</a> for any other day.</p>` : ''}` : ''}
 
     <div class="section-title">Completed (${done.length})</div>
     ${done.length ? done.slice(0, 10).map(woCard).join('')
@@ -3030,30 +3199,49 @@ function logRow(e, opts) {
   const wo = e.work_order_id ? orderById(e.work_order_id) : null;
   const g = wo ? gearById(wo.gear_id) : null;
   const files = Array.isArray(e.files) ? e.files : [];
+  const tone = e.tone || (e.auto ? 'plain' : 'written');
   return `
-    <div class="log-item${e.auto ? ' to-job' : ''}"
+    <div class="log-item tone-${tone}${e.auto ? ' to-job' : ''}"
          ${e.auto && e.work_order_id ? `data-wo="${e.work_order_id}"` : `data-log="${e.id}"`}>
-      <div class="log-time">${fmtTime(e.at)}</div>
+      <div class="log-time">${fmtTime(e.at)}<span class="log-dot"></span></div>
       <div class="log-body">
         <div class="log-head">
+          ${o.showWho && entryPerson(e)
+            ? `<span class="log-who"><span class="avatar sm">${esc(initials(entryPerson(e)))}</span>${
+                esc(entryPerson(e))}</span>` : ''}
           <span class="log-kind">${esc(logLabel(e))}</span>
-          ${e.auto ? '<span class="log-auto">captured</span>' : ''}
-          ${o.showWho && e.crew_name ? `<span class="log-who">${esc(e.crew_name)}</span>` : ''}
+          ${!e.auto ? '<span class="log-hand">written by hand</span>' : ''}
           ${e.amount != null && e.amount !== '' ? `<span class="log-amt">${money(e.amount)}</span>` : ''}
         </div>
         ${wo ? `<div class="log-job">${esc(g ? g.code : '')} · ${woNo(wo)} — ${esc(wo.title)}</div>` : ''}
-        ${e.body ? `<div class="log-note">${esc(e.body)}</div>` : ''}
+        ${(() => { const t = trimNote(e, wo);
+          return t ? `<div class="log-note">${esc(t)}</div>` : ''; })()}
         ${files.length ? `<div class="thumbs">${files.map(f => /^image\//.test(f.type || '')
           ? `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`
           : `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>`
         ).join('')}</div>` : ''}
-        <div class="log-by">${esc(e.author || '')}</div>
+        ${e.author && e.author !== entryPerson(e)
+          ? `<div class="log-by">from ${esc(e.author)}</div>` : ''}
       </div>
     </div>`;
 }
 
+/** The line above already names the job, so a note that only repeats its
+    title is noise. Keep whatever the note adds and drop the echo. */
+function trimNote(e, wo) {
+  let t = String(e.body || '').trim();
+  if (!t || !wo) return t;
+  const title = String(wo.title || '').trim();
+  if (title) {
+    const i = t.toLowerCase().indexOf(title.toLowerCase());
+    if (i >= 0) t = (t.slice(0, i) + t.slice(i + title.length)).trim();
+  }
+  t = t.replace(/^damage reported:?\s*/i, '').replace(/^[\u2014\-:,\s]+/, '').trim();
+  return t ? t[0].toUpperCase() + t.slice(1) : '';
+}
+
 /* ------------------------------------------- the whole day, everyone */
-const diaryState = { date: '' };
+const diaryState = { date: '', who: '', oldest: false };
 
 /** Captured lines open the job they came from; hand-written ones open to edit. */
 function wireLogRows(root) {
@@ -3064,12 +3252,12 @@ function wireLogRows(root) {
 function renderCrewDiary(view) {
   if (!diaryState.date) diaryState.date = today();
   const day = diaryState.date;
-  const entries = logOnDay(day);
+  const all = logOnDay(day);
 
   // group by person, keeping the order the crew board uses
   const order = crewAndActive();
   const groups = {};
-  entries.forEach(e => {
+  all.forEach(e => {
     const who = entryPerson(e) || 'Unattributed';
     (groups[who] = groups[who] || []).push(e);
   });
@@ -3079,25 +3267,52 @@ function renderCrewDiary(view) {
     return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
   });
 
+  // the filter only narrows what is shown; the day's totals stay the day's
+  if (diaryState.who && !people.some(n => n === diaryState.who)) diaryState.who = '';
+  const shown = diaryState.who ? groups[diaryState.who] : all;
+  const tot = dayTotals(day);
+
   $('#title').textContent = 'Daily diary';
 
   view.innerHTML = `
     ${logBanner()}
-    <div class="row" style="gap:10px">
-      <button class="btn sm" id="dPrev">&#8592;</button>
-      <label class="field grow" style="margin:0"><input type="date" id="dDate" value="${esc(day)}"></label>
-      <button class="btn sm" id="dNext">&#8594;</button>
+    <div class="daynav">
+      <button class="icon-btn" id="dPrev" aria-label="Previous day">
+        <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg></button>
+      <label class="dn-date">
+        <b>${esc(fmtDate(day))}</b>
+        <span>${day === today() ? 'today' : `${tot.entries} entr${tot.entries === 1 ? 'y' : 'ies'}`}</span>
+        <input type="date" id="dDate" value="${esc(day)}">
+      </label>
+      <button class="icon-btn" id="dNext" aria-label="Next day" ${day >= today() ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
     </div>
-    <p class="muted small center mt">${fmtDate(day)}${day === today() ? ' · today' : ''} ·
-      ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} from ${people.length} ${people.length === 1 ? 'person' : 'people'}</p>
 
-    ${people.length ? people.map(who => {
-      const t = dayTally(who, day);
-      return `
-      <a class="section-title day-who" href="#/crew/${encodeURIComponent(who)}">${esc(who)}</a>
-      <div class="tally-line">${esc(tallyLine(t) || `${t.entries} entries`)}</div>
-      <div class="card log-card">${groups[who].map(e => logRow(e)).join('')}</div>`;
-    }).join('') : `<div class="empty"><b>Nothing logged</b>No one has written anything for this day yet.</div>`}
+    ${glance(tot)}
+
+    ${people.length ? `
+      <div class="who-strip">
+        <button class="who-chip all ${diaryState.who ? '' : 'on'}" data-who="">Everyone
+          <i>${tot.entries}</i></button>
+        ${people.map(n => `
+          <button class="who-chip ${diaryState.who === n ? 'on' : ''}" data-who="${esc(n)}">
+            <span class="avatar sm">${esc(initials(n))}</span>${esc(shortName(n))}
+            <i>${groups[n].length}</i></button>`).join('')}
+      </div>` : ''}
+
+    ${shown.length ? `
+      <div class="stream-head">
+        <span>${diaryState.who ? esc(diaryState.who) : 'Everyone'} \u00b7 ${shown.length}
+          entr${shown.length === 1 ? 'y' : 'ies'}</span>
+        <button class="linky" id="dFlip">${diaryState.oldest ? 'Oldest first' : 'Latest first'}</button>
+      </div>
+      <div class="card log-card stream">
+        ${(diaryState.oldest ? shown : shown.slice().reverse())
+          .map(e => logRow(e, { showWho: !diaryState.who, face: true })).join('')}
+      </div>`
+      : `<div class="empty"><b>Nothing logged</b>${day === today()
+          ? 'Nothing has happened on a job yet today.'
+          : 'No one worked on a job this day.'}</div>`}
 
     <div class="btn-row mt">
       <a class="btn primary" href="#/crew-log?date=${day}">${icon('plus')}Add an entry</a>
@@ -3113,8 +3328,18 @@ function renderCrewDiary(view) {
   $('#dPrev', view).onclick = () => step(-1);
   $('#dNext', view).onclick = () => step(1);
   $('#dDate', view).onchange = e => { diaryState.date = e.target.value || today(); renderCrewDiary(view); };
+  const flip = $('#dFlip', view);
+  if (flip) flip.onclick = () => { diaryState.oldest = !diaryState.oldest; renderCrewDiary(view); };
+  $$('[data-who]', view).forEach(b => b.onclick = () => {
+    diaryState.who = b.dataset.who; renderCrewDiary(view);
+  });
   $('#dPrint', view).onclick = () => printDiaryDay(day, people, groups);
   wireLogRows(view);
+}
+
+/** "Clint Cunningham" \u2192 "Clint" — chips have no room for a surname. */
+function shortName(n) {
+  return String(n || '').trim().split(/\s+/)[0] || n;
 }
 
 function printDiaryDay(day, people, groups) {

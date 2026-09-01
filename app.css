@@ -453,51 +453,129 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 }
 
 /* =====================================================================
+   What is happening on a job
+
+   A note used to be a note — you could not tell someone fixing the thing
+   from someone talking about it. Notes now carry a meaning, and the newest
+   one becomes the job's live line. Tone reuses the status vocabulary rather
+   than inventing colours: red is bad news, yellow is held up, dark is
+   happening now, grey is only words.
+   ===================================================================== */
+.tone-live  { --tn: var(--ink);     --tn-bg: rgba(15, 20, 24, .08); }
+.tone-hold  { --tn: var(--yellow);  --tn-bg: var(--yellow-bg); }
+.tone-stop  { --tn: var(--red);     --tn-bg: var(--red-bg); }
+.tone-done  { --tn: var(--green);   --tn-bg: var(--green-bg); }
+.tone-plain { --tn: var(--ink-2);   --tn-bg: var(--panel-2); }
+.tone-quiet { --tn: var(--ink-3);   --tn-bg: var(--panel-2); }
+.tone-written { --tn: var(--ink-2); --tn-bg: var(--panel-2); }
+
+.pulse {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  margin: 7px 0 2px; font-size: 12.5px; font-weight: 620; color: var(--tn);
+}
+.pulse .pdot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--tn); flex: none;
+}
+.tone-quiet .pdot { background: none; box-shadow: inset 0 0 0 1.5px var(--tn); }
+.tone-live .pdot { animation: beat 2s var(--ease-soft) infinite; }
+@keyframes beat {
+  0%, 70%, 100% { transform: scale(1); opacity: 1; }
+  35% { transform: scale(1.5); opacity: .55; }
+}
+.pulse .pm { font-weight: 550; color: var(--ink-3); white-space: nowrap; }
+.pulse.big {
+  margin-top: 10px; font-size: 13.5px;
+  background: var(--tn-bg); border-radius: var(--r-pill);
+  padding: 7px 13px; align-self: flex-start; width: fit-content;
+}
+
+/* posting a note: the chip you tap is the meaning */
+.note-kinds { display: grid; gap: 8px; }
+.note-chip {
+  display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+  border: 0; border-radius: var(--r-sm); padding: 11px 14px;
+  background: var(--tn-bg); color: var(--tn);
+  transition: transform var(--t-fast) var(--ease), opacity var(--t) var(--ease);
+}
+.tone-plain.note-chip { box-shadow: inset 0 0 0 1px var(--line-2); }
+.note-chip:active { transform: scale(.985); }
+.note-chip[disabled] { opacity: .45; }
+.note-chip .nk { display: block; font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
+.note-chip .nh { display: block; font-size: 12px; font-weight: 500; opacity: .78; margin-top: 1px; }
+
+.note-tag {
+  display: inline-block; margin-bottom: 4px;
+  background: var(--tn-bg); color: var(--tn);
+  font-size: 11.5px; font-weight: 700; letter-spacing: -.005em;
+  padding: 2px 9px; border-radius: var(--r-pill);
+}
+
+/* =====================================================================
    Maintenance crew
    ===================================================================== */
-.crew-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.avatar {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none;
+  border-radius: 50%; background: var(--s-bg, var(--panel-2)); color: var(--s, var(--ink-2));
+  font-size: 13px; font-weight: 700; letter-spacing: -.02em;
+}
+.avatar.big { width: 48px; height: 48px; font-size: 18px; margin: 0 14px 0 0;
+  background: var(--panel-2); color: var(--ink); }
+.avatar.sm { width: 24px; height: 24px; font-size: 10px; }
 
-.crew-tile {
-  position: relative; overflow: hidden; text-align: left; width: 100%;
-  cursor: pointer; font: inherit; color: inherit; border: 0;
+/* one row per person: name, load, what they have done today */
+.crew-list { display: grid; gap: 8px; }
+.crew-row {
+  position: relative; overflow: hidden; width: 100%; cursor: pointer;
+  font: inherit; color: inherit; border: 0; text-align: left;
+  display: flex; align-items: center; gap: 12px;
   background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
-  padding: 14px 15px 15px;
+  padding: 12px 14px 12px 16px;
   animation: riseIn var(--t) var(--ease) both;
-  animation-delay: calc(var(--i, 0) * 16ms);
+  animation-delay: calc(var(--i, 0) * 14ms);
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
 }
-.crew-tile::before {
+.crew-row::before {
   content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--s);
 }
-.crew-tile:active { transform: scale(.975); box-shadow: var(--sh-1); }
-
-.avatar {
-  display: grid; place-items: center; width: 36px; height: 36px;
-  border-radius: 50%; background: var(--s-bg); color: var(--s);
-  font-size: 14px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 10px;
-}
-.avatar.big { width: 48px; height: 48px; font-size: 18px; margin: 0 14px 0 0; flex: none;
-  background: var(--panel-2); color: var(--ink); }
-
-.crew-tile .who  { display: block; font-size: 15.5px; font-weight: 700; letter-spacing: -.015em; }
-.crew-tile .load { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
-.crew-tile .alsonames {
-  display: block; font-size: 11px; color: var(--ink-3); margin-top: 2px;
+.crew-row:active { transform: scale(.985); box-shadow: var(--sh-1); }
+.cr-mid { flex: 1; min-width: 0; }
+.crew-row .who {
+  display: block; font-size: 15.5px; font-weight: 700; letter-spacing: -.015em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.crew-row .guest {
+  display: block; font-size: 11px; font-weight: 550; color: var(--ink-3); margin-top: 1px;
+}
+.cr-load { display: flex; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
+.crew-row .load { font-size: 12.5px; color: var(--ink-2); }
+.crew-row .flag {
+  font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: var(--r-pill);
+  background: var(--red-bg); color: var(--red);
+}
+.crew-row .flag.amber { background: var(--yellow-bg); color: var(--yellow); }
+.crew-row .mini {
+  display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.crew-row .mini b { color: var(--ink-2); font-weight: 700; }
+.crew-row .mini i { font-style: normal; margin: 0 5px; opacity: .5; }
+.crew-row .mt-quiet { opacity: .8; }
+.cr-num {
+  flex: none; text-align: center; min-width: 40px;
+  font-size: 21px; font-weight: 750; letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.cr-num i { display: block; font-style: normal; font-size: 10px;
+  font-weight: 620; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.cr-num.zero { color: var(--ink-3); font-weight: 600; }
+
 .merge-names { display: flex; flex-wrap: wrap; gap: 6px; }
 .tagname {
   font-size: 12.5px; font-weight: 620; background: var(--panel-2);
   padding: 4px 10px; border-radius: var(--r-pill);
 }
-.crew-tile .flag {
-  display: inline-block; margin-top: 8px; padding: 3px 9px; border-radius: var(--r-pill);
-  background: var(--red-bg); color: var(--red); font-size: 11.5px; font-weight: 650;
-}
-.crew-tile .flag.amber { background: var(--yellow-bg); color: var(--yellow); }
 
 .crew-head { display: flex; align-items: center; }
-
 .unassigned-tile { text-align: left; }
 .unassigned-tile .ttl { font-size: 15px; }
 
@@ -511,8 +589,91 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 /* the read-only counters on a person's page */
 .tally button[disabled] { opacity: 1; pointer-events: none; }
 
-/* ------------------------------------------------------- crew diary */
-/* Diary entries carry no status colour — colour still only means status. */
+/* =====================================================================
+   The day, at a glance
+
+   The old diary made you scroll to the bottom to find out what had just
+   happened. The numbers come first now, then the newest line.
+   ===================================================================== */
+.glance {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 13px 6px; margin-bottom: 12px;
+}
+.glance > div { text-align: center; position: relative; }
+.glance > div + div::before {
+  content: ''; position: absolute; left: 0; top: 12%; bottom: 12%; width: 1px; background: var(--line);
+}
+.glance .n {
+  display: block; font-size: 24px; font-weight: 750; letter-spacing: -.035em;
+  font-variant-numeric: tabular-nums; line-height: 1.05;
+}
+.glance .l {
+  display: block; font-size: 10.5px; font-weight: 620; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-3); margin-top: 3px;
+}
+.glance .zero .n { color: var(--ink-3); font-weight: 600; }
+
+.today-card { display: block; text-decoration: none; color: inherit; padding-bottom: 12px; }
+.today-card .glance {
+  box-shadow: none; background: var(--panel-2); margin: 10px 0 0; padding: 11px 4px;
+}
+.tc-head { display: flex; align-items: baseline; justify-content: space-between; }
+.tc-head span:first-child { font-size: 17px; font-weight: 750; letter-spacing: -.02em; }
+.tc-date { font-size: 12.5px; color: var(--ink-3); font-weight: 600; }
+.facepile { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 11px; }
+.facepile .avatar.sm { margin-right: -10px; box-shadow: 0 0 0 2px var(--panel); }
+.facepile .avatar.sm:last-of-type { margin-right: 0; }
+.fp-note { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-left: 12px; }
+.fp-note.only { margin: 11px 0 0; }
+.tc-go { display: block; font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-top: 11px; }
+
+/* date stepper */
+.daynav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.daynav .icon-btn { background: var(--panel); box-shadow: var(--sh-2); border-radius: var(--r-sm); }
+.daynav .icon-btn[disabled] { opacity: .3; }
+.dn-date {
+  position: relative; flex: 1; text-align: center; cursor: pointer;
+  background: var(--panel); box-shadow: var(--sh-2); border-radius: var(--r-sm);
+  padding: 8px 10px; min-height: var(--tap);
+  display: flex; flex-direction: column; justify-content: center;
+}
+.dn-date b { font-size: 14.5px; font-weight: 700; letter-spacing: -.015em; }
+.dn-date span { font-size: 11.5px; color: var(--ink-3); font-weight: 600; margin-top: 1px; }
+.dn-date input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; border: 0; }
+
+/* whose day you are looking at */
+.who-strip {
+  display: flex; gap: 7px; overflow-x: auto; padding: 2px 4px 10px;
+  margin: 0 -4px; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.who-strip::-webkit-scrollbar { display: none; }
+.who-chip {
+  display: flex; align-items: center; gap: 6px; flex: none; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 650; letter-spacing: -.01em;
+  border: 0; border-radius: var(--r-pill); padding: 5px 12px 5px 6px;
+  background: var(--panel); color: var(--ink-2); box-shadow: var(--sh-1);
+  transition: background var(--t) var(--ease), color var(--t) var(--ease);
+}
+.who-chip.all { padding-left: 13px; }
+.who-chip i {
+  font-style: normal; font-size: 11px; font-weight: 700;
+  color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.who-chip.on { background: var(--ink); color: #fff; box-shadow: var(--sh-2); }
+.who-chip.on i { color: rgba(255, 255, 255, .6); }
+.who-chip.on .avatar { background: rgba(255, 255, 255, .16); color: #fff; }
+
+.stream-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 2px 4px 8px; font-size: 12.5px; font-weight: 650; color: var(--ink-2);
+}
+.linky {
+  border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 650;
+  color: var(--ink-3); cursor: pointer; padding: 4px 0;
+}
+
+/* ------------------------------------------------------- diary lines */
 .diary-tile { display: block; text-decoration: none; background: var(--panel-2); }
 .diary-tile::before { display: none; }
 .diary-tile .ttl { font-size: 15px; }
@@ -530,8 +691,14 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   font-size: 13px; font-weight: 700; color: var(--ink-2);
   font-variant-numeric: tabular-nums; padding-top: 1px;
 }
-.log-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
-.log-kind { font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; }
+.log-dot {
+  display: block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--tn); margin: 7px 0 0 2px;
+}
+.tone-quiet .log-dot, .tone-written .log-dot { background: none; box-shadow: inset 0 0 0 1.5px var(--tn); }
+.log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.log-kind { font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; color: var(--tn); }
+.tone-plain .log-kind, .tone-written .log-kind { color: var(--ink); }
 a.day-who { display: block; text-decoration: none; }
 a.day-who:active { opacity: .6; }
 
@@ -539,21 +706,20 @@ a.day-who:active { opacity: .6; }
   font-size: 12.5px; font-weight: 620; color: var(--ink-2);
   margin: 0 4px 8px; letter-spacing: -.005em;
 }
-.crew-tile .today {
-  display: block; font-size: 11.5px; font-weight: 600; color: var(--ink-2);
-  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
-}
+.tally-inline { font-weight: 550; color: var(--ink-3); }
 .log-item.to-job .log-job { text-decoration: underline; text-underline-offset: 2px; }
 
-.log-auto {
+.log-hand {
   font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
   color: var(--ink-3); border: 1px solid var(--line); border-radius: var(--r-pill);
   padding: 1px 7px;
 }
 .log-who {
-  font-size: 11.5px; font-weight: 620; color: var(--ink-2);
-  background: var(--panel-2); padding: 2px 8px; border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 650; color: var(--ink-2);
+  background: var(--panel-2); padding: 2px 9px 2px 2px; border-radius: var(--r-pill);
 }
+.log-who .avatar.sm { width: 19px; height: 19px; font-size: 9px; background: var(--panel); }
 .log-amt { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: auto; }
 .log-job { font-size: 12px; color: var(--ink-2); margin-top: 3px; font-weight: 550; }
 .log-note { font-size: 14px; line-height: 1.45; margin-top: 4px; white-space: pre-wrap; }
@@ -712,7 +878,13 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .k-wo .kcode { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
 .k-wo .kno   { font-size: 11px; color: #98a2ae; letter-spacing: .04em; }
 .k-wo .kttl  { font-size: 17px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.k-wo .kmeta { font-size: 13px; color: #a3adb9; margin-top: 3px; }
+.k-wo .kmeta { font-size: 13px; color: #a3adb9; margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the live line reads on the dark wall too: its own tones are re-pointed,
+   the status ones already are */
+body.kiosk .tone-live { --tn: #e8eef5; }
+body.kiosk .tone-plain, body.kiosk .tone-quiet, body.kiosk .tone-written { --tn: #98a2ae; }
+.k-wo .kpulse { color: var(--tn); font-weight: 700; }
 .k-wo .keta  { text-align: right; font-size: 14px; color: #c3ccd6; white-space: nowrap; }
 .k-wo .keta b { display: block; font-size: 17px; font-weight: 620; }
 .k-wo .keta .late { color: #ff8078; }

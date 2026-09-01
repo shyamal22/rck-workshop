@@ -33,8 +33,10 @@ someone here chasing it.
 - The workshop sets **Managed by** on the work order. Six are preloaded — Milian,
   Clint, Ryder, Sebastion, Lyndon and Barry — and anyone can be added, either from
   the crew board or straight from the work order.
-- The **crew board** shows each person as a tile: open jobs, and a red flag if any
-  of them are overdue. Tapping one lists everything they hold and what they've fixed.
+- The **crew board** is one row per person: open jobs, a red flag if any are
+  overdue, what they have done today, and today's count. Whoever needs attention
+  is at the top — most overdue, then most open, then busiest. Tapping a row lists
+  everything they hold and what they've fixed.
 - Jobs with nobody on them are pushed to the top of the crew board, since an
   unowned job is the one that goes quiet.
 - Assigning changes nothing operationally — it doesn't touch gear colour or status.
@@ -53,15 +55,20 @@ admin** — and anyone can add a type of their own.
 - Quote and order entries take an **amount**, so what a repair was quoted at sits
   in the record next to the day it was chased. These are a note of what was
   quoted, **not** the cost ledger — nothing here reaches the cost tracker.
-- The **Daily diary** shows a whole day across everyone, grouped by person and in
-  time order, with a date stepper and a printable day sheet for the manager.
-- Each person's page carries their own last five days.
+- The **Daily diary** opens on the day's four numbers — reported, updates, files,
+  closed — then everyone who was on the tools as a row of chips you can tap to
+  filter, then the day itself as one stream, **newest first**. The latest thing
+  that happened is the first thing you read; nobody scrolls to the bottom to find
+  out what is going on. A date stepper moves between days and the whole day prints
+  as a sheet for the manager.
+- A person's own page leads with today, the same way, then their open jobs, then
+  their earlier days.
 
 **Most of the diary writes itself.** Anything done to a work order — reporting the
 damage, updating it, adding a note, arranging a repairer, uploading paperwork,
 signing it off — appears in that person's diary for the day, linked to the job.
-Those lines are marked **captured** so a manager can tell them apart from what
-someone typed themselves.
+Almost everything in a diary arrives this way, so it is the exception that carries
+a mark: a line someone typed themselves says **written by hand**.
 
 Those lines are not a copy of the work; they *are* the work, read back. Every
 action on a job is already stored with who did it and when, and that record syncs
@@ -123,12 +130,36 @@ two directions.
 - Set the **expected back-in-service date**. Everyone sees the countdown, and
   anything past its date shows as overdue in red.
 - Say who is doing the work:
-  - **RCK workshop crew** — add comments as the job goes along.
+  - **RCK workshop crew** — post updates as the job goes along.
   - **External company** — record the company, their job/invoice number and cost,
     and upload the report or invoice they send back.
 - Upload photos and paperwork at any point; they attach to the work order and appear
   on the printed history.
 - Sign the job off with **what was done**. The gear turns green automatically.
+
+### Saying what's happening
+
+A plain comment never told you whether someone was fixing the thing or only
+talking about it, so a job could carry six notes and still tell you nothing.
+Posting one now means saying which it is — write the line, then tap the one that
+fits:
+
+| | means |
+|---|---|
+| **Working on it** | spanners on it now — no typing needed, one tap says it |
+| **Waiting on** | parts, a quote, the repairer. Type what for and the card says it |
+| **Hit a problem** | needs a decision |
+| **Had a look** | checked it over, nothing done yet |
+| **Just info** | nothing for anyone to do |
+
+The newest one becomes the job's **live line**, and it follows the job everywhere:
+on the work-order card, at the top of the job, on the wall screen, in the diary and
+on the printed sheet. So the board answers *is this moving?* without anyone opening
+anything — including when the answer is **No word yet**, which is the one a
+workshop most needs to see.
+
+Colour keeps its meaning: red is bad news, yellow is held up, dark is happening
+now, grey is only words.
 
 **On the workshop wall**
 - The **Workshop screen** (`#/screen`) is a full-screen board: counts of working /
