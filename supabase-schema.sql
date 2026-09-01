@@ -202,10 +202,14 @@ create table if not exists crew_log (
   work_order_id uuid references work_orders(id) on delete set null,
   amount        numeric,
   files         jsonb not null default '[]'::jsonb,
+  auto          boolean not null default false,      -- captured, not hand-written
   author        text not null default '',
   role          text not null default '',
   created_at    timestamptz not null default now()
 );
+
+-- for anyone who ran the diary section before auto-capture existed
+alter table crew_log add column if not exists auto boolean not null default false;
 
 create index if not exists crew_log_day_idx on crew_log (entry_date, at);
 create index if not exists crew_log_who_idx on crew_log (crew_name, entry_date);

@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.2.0';
+const VERSION = '2.3.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -217,6 +217,19 @@ const CREW_LOG_TYPES = [
 
 const builtinLogType = k => CREW_LOG_TYPES.find(t => t.key === k);
 
+/* Work on a job writes itself into the doer's diary, so a day's timeline
+   builds up on its own instead of waiting for someone to write it up.
+   A kind missing from here is not captured — file uploads are summarised
+   by their caller as one line rather than one per photo. */
+const AUTO_LOG_LABELS = {
+  created:  'Damage reported',
+  comment:  'Note added to a job',
+  status:   'Job updated',
+  external: 'Repairer arranged',
+  complete: 'Job completed',
+  reopen:   'Job reopened'
+};
+
 function logLabel(e) {
   if (e && e.label) return e.label;
   const b = builtinLogType(e && e.kind);
@@ -229,6 +242,7 @@ function allLogTypes() {
   const out = CREW_LOG_TYPES.slice();
   const seen = new Set(out.map(t => t.key));
   DB.crew_log.forEach(e => {
+    if (e.auto) return;
     if (e.kind && !seen.has(e.kind)) { seen.add(e.kind); out.push({ key: e.kind, label: logLabel(e) }); }
   });
   return out;
@@ -675,8 +689,34 @@ function activeOrders() {
    ================================================================ */
 function whoami() { return S.name || 'Unnamed user'; }
 
+/** Puts what someone just did on a job into their own diary for today. */
+async function autoDiary(workOrderId, kind, body, opts) {
+  const label = (opts && opts.label) || AUTO_LOG_LABELS[kind];
+  if (!label) return;
+  const who = matchCrew(whoami()) || whoami();
+  if (!who) return;
+  const now = new Date();
+  await Store.insert('crew_log', {
+    id: uid(),
+    crew_name: who,
+    entry_date: today(),
+    at: now.toISOString(),
+    kind: 'auto_' + kind,
+    label,
+    // keep it to the gist; the work order holds the full record
+    body: String(body || '').split('\n').slice(0, 3).join('\n').slice(0, 400),
+    work_order_id: workOrderId || null,
+    amount: null,
+    files: [],
+    auto: true,
+    author: whoami(),
+    role: S.role,
+    created_at: now.toISOString()
+  });
+}
+
 async function logUpdate(workOrderId, kind, body, meta) {
-  return Store.insert('wo_updates', {
+  const saved = await Store.insert('wo_updates', {
     id: uid(),
     work_order_id: workOrderId,
     created_at: new Date().toISOString(),
@@ -686,6 +726,8 @@ async function logUpdate(workOrderId, kind, body, meta) {
     body: body || '',
     meta: meta || {}
   });
+  await autoDiary(workOrderId, kind, body);
+  return saved;
 }
 
 async function createWorkOrder(data, files) {
@@ -710,6 +752,7 @@ async function createWorkOrder(data, files) {
 
   for (const f of files || []) {
     const up = await Store.upload(f);
+    // no diary line per photo — the report itself is already one entry
     await logUpdate(saved.id, 'file', 'Photo of the damage', up);
   }
 
@@ -1588,7 +1631,10 @@ function wireWorkshopPanel(view, o) {
     this.disabled = true;
     await Store.patch('work_orders', o.id, patch);
     if (notes.length) {
-      await logUpdate(o.id, patch.repairer !== o.repairer ? 'external' : 'status', notes.join('\n'), {
+      // normalise both sides: an unset repairer is null on one and undefined
+      // on the other, which used to log every plain save as "repairer arranged"
+      const repairerChanged = (patch.repairer || '') !== (o.repairer || '');
+      await logUpdate(o.id, repairerChanged ? 'external' : 'status', notes.join('\n'), {
         status_from: o.status, status_to: patch.status
       });
     }
@@ -1614,6 +1660,8 @@ function wireWorkshopPanel(view, o) {
         await logUpdate(o.id, 'file', note || (o.repairer === 'external' ? 'Paperwork from external repairer' : 'Attachment'), up);
         n++;
       }
+      if (n) await autoDiary(o.id, 'file',
+        note || `${n} file${n === 1 ? '' : 's'} added`, { label: 'Paperwork added' });
       toast(`${n} file${n === 1 ? '' : 's'} added`);
       render();
     };
@@ -2442,6 +2490,7 @@ function logRow(e, opts) {
       <div class="log-body">
         <div class="log-head">
           <span class="log-kind">${esc(logLabel(e))}</span>
+          ${e.auto ? '<span class="log-auto">captured</span>' : ''}
           ${o.showWho && e.crew_name ? `<span class="log-who">${esc(e.crew_name)}</span>` : ''}
           ${e.amount != null && e.amount !== '' ? `<span class="log-amt">${money(e.amount)}</span>` : ''}
         </div>
@@ -3192,6 +3241,16 @@ function renderSetup(view) {
       <h2>You</h2>
       <label class="field"><span>Your name</span>
         <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
+      ${(() => {
+        const m = matchCrew(S.name);
+        if (!S.name) return '';
+        return m
+          ? `<p class="muted small">Work you do on a job is logged to
+             <strong>${esc(m)}</strong>'s diary automatically.</p>`
+          : `<div class="banner">Your name doesn't match anyone on the maintenance crew, so
+             what you do on a job is logged under "<strong>${esc(S.name)}</strong>" rather than
+             a crew member's diary. Set it to match a crew name if it should be theirs.</div>`;
+      })()}
       <label class="field"><span>This device is used by</span>
         <select id="sRole">
           <option value="crew" ${S.role === 'crew' ? 'selected' : ''}>Crew — report damage, see status</option>

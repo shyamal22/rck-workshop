@@ -57,6 +57,17 @@ admin** — and anyone can add a type of their own.
   time order, with a date stepper and a printable day sheet for the manager.
 - Each person's page carries their own last five days.
 
+**Most of the diary writes itself.** Anything done to a work order — reporting the
+damage, updating it, adding a note, arranging a repairer, uploading paperwork,
+signing it off — drops a line into that person's diary for the day, linked to the
+job. Those lines are marked **captured** so a manager can tell them apart from
+what someone typed themselves.
+
+Capture files under the name on the device, so a phone's name in Settings needs to
+match the crew name for the entries to land in the right diary. Settings says
+which it is. Someone not on the maintenance crew still gets their own line — the
+work is never filed under somebody else.
+
 ## What it does
 
 **For the crew**
