@@ -217,3 +217,12 @@ create index if not exists crew_log_who_idx on crew_log (crew_name, entry_date);
 alter table crew_log enable row level security;
 drop policy if exists crew_log_all on crew_log;
 create policy crew_log_all on crew_log for all to anon, authenticated using (true) with check (true);
+
+-- =====================================================================
+--  One person, many devices
+--
+--  People use the app from a phone, a laptop and the workshop machine, and
+--  each device carries its own name. Aliases let those all resolve to one
+--  person, so their jobs and their diary are not split three ways.
+-- =====================================================================
+alter table crew add column if not exists aliases jsonb not null default '[]'::jsonb;

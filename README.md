@@ -69,11 +69,30 @@ to every phone, so the diary shows **everyone's** day on any device and reaches
 back to before the diary existed. Nothing has to be captured first, and the diary
 can never drift out of step with the jobs it describes.
 
-Entries appear under the name on the device that did the work. A phone's name in
-Settings should match the crew name so the day lands on the right tile; Settings
-says which it is. Someone not on the maintenance crew still gets their own day,
-shown under **Also active** on the crew board — the work is never filed under
-somebody else and never disappears.
+Entries appear under the name on the device that did the work. Someone not on the
+maintenance crew still gets their own day, shown under **Also active** on the crew
+board — the work is never filed under somebody else and never disappears.
+
+### One person, several devices
+
+Most people have the tool on a phone and a laptop, and the two are usually named
+differently — *Clint*, *Clint - phone*, *Clint Laptop*. Left alone that is three
+people with a third of a day each.
+
+**⋮ → Link devices to people** fixes it. The screen reads the names that have
+actually done work, suggests the ones that look like the same person, and picks the
+real name (not the device name) to keep. Confirming a group:
+
+- merges the three diaries into one, so the tally is the person's whole day across
+  every device;
+- moves anything **assigned** to a folded name onto the kept one, so jobs given to
+  a placeholder land on the person really holding them;
+- leaves the folded names off the crew board, listed instead as *also …* under the
+  person they belong to.
+
+Any name can be linked by hand, and **Separate** undoes it. Nothing is deleted or
+rewritten in the job history — the original name stays on every update; linking only
+says which names are the same person. So a mistake costs one tap to undo.
 
 Photos and paperwork ride along on the line that captured them, so a photo added
 to a job shows as a photo in the diary rather than a mention of one.
@@ -272,7 +291,7 @@ push to `main` updates it automatically.
 | `app.js` | The whole application |
 | `app.css` | Styling, including the wall screen and the printed documents |
 | `config.js` | Your Supabase URL and key |
-| `supabase-schema.sql` | Run once in Supabase to create the database |
+| `supabase-schema.sql` | Run in Supabase to create the database. Safe to re-run — do so after an update that adds a column |
 | `sw.js` | Offline caching |
 
 ## The other RCK apps in this repository

@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.6.0';
+const VERSION = '2.7.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -250,9 +250,9 @@ function allLogTypes() {
 const logDay = e => (e.entry_date || (e.at || '').slice(0, 10) || '');
 
 function logFor(name, date) {
-  const n = String(name || '').toLowerCase();
+  const n = personOf(name).toLowerCase();
   return allEntries()
-    .filter(e => String(e.crew_name || '').toLowerCase() === n && (!date || logDay(e) === date))
+    .filter(e => entryPerson(e).toLowerCase() === n && (!date || logDay(e) === date))
     .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
 }
 
@@ -272,10 +272,25 @@ function everyoneWithActivity() {
   const seen = new Set();
   const out = [];
   allEntries().forEach(e => {
-    const n = String(e.crew_name || '').trim();
+    const n = entryPerson(e);
     if (n && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
   });
   return out;
+}
+
+/** Every raw device name seen anywhere, for the screen that links them up. */
+function allDeviceNames() {
+  const seen = new Map();
+  const add = n => {
+    const k = String(n || '').trim();
+    if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
+  };
+  DB.crew.forEach(c => { add(c.name); (c.aliases || []).forEach(add); });
+  CREW_SEED.forEach(add);
+  DB.work_orders.forEach(o => add(o.assigned_to));
+  DB.wo_updates.forEach(u => add(u.author));
+  DB.crew_log.forEach(e => add(e.crew_name));
+  return Array.from(seen.values());
 }
 
 const logById = id => DB.crew_log.find(e => e.id === id);
@@ -363,7 +378,7 @@ function derivedEntries() {
 
     out.push({
       id: 'wo:' + u.id,
-      crew_name: author,
+      crew_name: personOf(author),
       entry_date: u.created_at.slice(0, 10),
       at: u.created_at,
       kind: 'auto_' + u.kind,
@@ -383,7 +398,7 @@ function derivedEntries() {
     const pics = b.files.filter(f => /^image\//.test(f.type || '')).length;
     out.push({
       id: 'wof:' + b.wo + ':' + i,
-      crew_name: b.author,
+      crew_name: personOf(b.author),
       entry_date: b.at.slice(0, 10),
       at: b.at,
       kind: 'auto_file',
@@ -464,7 +479,7 @@ function crewNames() {
   };
   DB.crew.filter(c => c.active !== false).forEach(c => add(c.name));
   CREW_SEED.forEach(add);
-  DB.work_orders.forEach(o => add(o.assigned_to));
+  DB.work_orders.forEach(o => add(assignedTo(o)));
   return out;
 }
 
@@ -479,12 +494,53 @@ function crewAndActive() {
   return out;
 }
 
+/* ------------------------------------------------------------------------
+   One person, several devices. Each crew row can carry alias names — the
+   phone, the laptop, the workshop machine — and everything that groups by a
+   name resolves through here first, so a person's jobs and their diary stay
+   in one place instead of being split across whatever their device is called.
+   ------------------------------------------------------------------------ */
+let aliasCache = null;
+let aliasKey = '';
+
+function aliasMap() {
+  const key = JSON.stringify(DB.crew.map(c => [c.name, c.aliases, c.active]));
+  if (aliasCache && aliasKey === key) return aliasCache;
+  const m = new Map();
+  DB.crew.forEach(c => {
+    if (c.active === false) return;
+    const canon = String(c.name || '').trim();
+    if (!canon) return;
+    m.set(canon.toLowerCase(), canon);
+    (Array.isArray(c.aliases) ? c.aliases : []).forEach(a => {
+      const k = String(a || '').trim().toLowerCase();
+      if (k && k !== canon.toLowerCase()) m.set(k, canon);
+    });
+  });
+  aliasKey = key; aliasCache = m;
+  return m;
+}
+
+/** The person behind a device name. Unknown names are left as they are. */
+function personOf(raw) {
+  const n = String(raw || '').trim();
+  return n ? (aliasMap().get(n.toLowerCase()) || n) : '';
+}
+
+/** The other names this person's work arrives under. */
+function aliasesOf(name) {
+  const c = DB.crew.find(x => String(x.name || '').toLowerCase() === String(name || '').toLowerCase());
+  return c && Array.isArray(c.aliases) ? c.aliases.filter(Boolean) : [];
+}
+
+const entryPerson = e => personOf(e && e.crew_name);
+
 const matchCrew = name => {
   const n = String(name || '').trim().toLowerCase();
-  return crewNames().find(x => x.toLowerCase() === n) || null;
+  return aliasMap().get(n) || crewNames().find(x => x.toLowerCase() === n) || null;
 };
 
-const assignedTo = o => String(o.assigned_to || '').trim();
+const assignedTo = o => personOf(o.assigned_to);
 
 function ordersFor(name) {
   const n = name.toLowerCase();
@@ -1040,6 +1096,7 @@ const SCREENS = {
   '/crew':           { title: 'Maintenance crew', render: renderCrewBoard },
   '/crew-unassigned': { title: 'Unassigned jobs',  render: renderUnassigned, back: true },
   '/crew-today':      { title: 'Daily diary',      render: renderCrewDiary,  back: true },
+  '/crew-merge':      { title: 'Same person?',     render: renderCrewMerge,  back: true },
   '/crew-log':        { title: 'Diary entry',      render: renderCrewLogForm, back: true },
   '/costs':          { title: 'Costs',        render: renderCostsBoard },
   '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
@@ -2612,6 +2669,193 @@ function crewBanner() {
     : '';
 }
 
+/* ================================================================
+   Screen — linking a person's devices together
+   ================================================================ */
+
+/** Device words, so "Clint Laptop" and "Clint - phone" compare as "clint". */
+const DEVICE_WORDS = /\b(mobile|phone|cell|laptop|ipad|tablet|tab|pc|desktop|computer|workshop|office|device|app|work)\b/gi;
+
+function nameStem(n) {
+  const cleaned = String(n || '').toLowerCase()
+    .replace(DEVICE_WORDS, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .trim();
+  return (cleaned.split(/\s+/)[0] || '');
+}
+
+/** Two names look like the same person if one stem starts the other. */
+function looksSame(a, b) {
+  const x = nameStem(a), y = nameStem(b);
+  if (x.length < 3 || y.length < 3) return false;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
+
+/** Groups of names that are probably one person and aren't linked yet.
+    Grouped transitively: "Milian" and "Mill Road" never match each other,
+    but both match "Mil", so all three belong to the same person. */
+function suggestedGroups() {
+  const names = allDeviceNames().filter(n => personOf(n).toLowerCase() === n.toLowerCase());
+  const parent = new Map(names.map(n => [n, n]));
+  const find = a => { while (parent.get(a) !== a) a = parent.get(a); return a; };
+
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      if (!looksSame(names[i], names[j])) continue;
+      const ra = find(names[i]), rb = find(names[j]);
+      if (ra !== rb) parent.set(ra, rb);
+    }
+  }
+
+  const buckets = new Map();
+  names.forEach(n => {
+    const r = find(n);
+    if (!buckets.has(r)) buckets.set(r, []);
+    buckets.get(r).push(n);
+  });
+  return Array.from(buckets.values()).filter(g => g.length > 1);
+}
+
+/** Which of a group reads like the person rather than the machine. */
+const DEVICE_TEST = new RegExp(DEVICE_WORDS.source, 'i');
+function bestKeeper(group) {
+  const score = n => (DEVICE_TEST.test(n) ? 0 : 1000)
+    + String(n).trim().split(/\s+/).length * 20 + String(n).length;
+  return group.slice().sort((a, b) => score(b) - score(a))[0];
+}
+
+/** Fold a list of names into one person. The keeper holds everything. */
+async function linkNames(keeper, others) {
+  const keep = String(keeper).trim();
+  const extras = others.map(n => String(n).trim()).filter(n => n && n.toLowerCase() !== keep.toLowerCase());
+  if (!extras.length) return;
+
+  // whatever the folded-in names were carrying comes with them
+  const carried = [];
+  extras.forEach(n => {
+    carried.push(n);
+    aliasesOf(n).forEach(a => carried.push(a));
+  });
+
+  let row = DB.crew.find(c => String(c.name || '').toLowerCase() === keep.toLowerCase());
+  if (!row) {
+    row = { id: uid(), name: keep, active: true, aliases: [], created_at: new Date().toISOString() };
+    await Store.insert('crew', row);
+  }
+
+  const merged = [];
+  const seen = new Set([keep.toLowerCase()]);
+  (row.aliases || []).concat(carried).forEach(a => {
+    const k = String(a || '').trim();
+    if (k && !seen.has(k.toLowerCase())) { seen.add(k.toLowerCase()); merged.push(k); }
+  });
+  await Store.patch('crew', row.id, { aliases: merged });
+
+  // the folded-in crew rows step aside so they stop showing as people
+  for (const n of extras) {
+    const dupe = DB.crew.find(c => String(c.name || '').toLowerCase() === n.toLowerCase());
+    if (dupe && dupe.id !== row.id) await Store.patch('crew', dupe.id, { active: false, aliases: [] });
+  }
+
+  // jobs move with the person so nothing is left behind on an old name
+  for (const o of DB.work_orders) {
+    const a = String(o.assigned_to || '').trim();
+    if (a && extras.some(n => n.toLowerCase() === a.toLowerCase())) {
+      await Store.patch('work_orders', o.id, { assigned_to: keep });
+    }
+  }
+}
+
+function renderCrewMerge(view) {
+  const groups = suggestedGroups();
+  const people = crewNames();
+  const loose = allDeviceNames()
+    .filter(n => personOf(n).toLowerCase() === n.toLowerCase())
+    .filter(n => !people.some(p => p.toLowerCase() === n.toLowerCase()) || aliasesOf(n).length === 0);
+
+  $('#title').textContent = 'Same person?';
+
+  view.innerHTML = `
+    ${crewBanner()}
+    <div class="card">
+      <h2>One person, several devices</h2>
+      <p class="muted small" style="margin:0">People log in from a phone, a laptop and the workshop
+      machine, and each carries its own name. Link them and their jobs and diary come together
+      under one person.</p>
+    </div>
+
+    ${groups.length ? `
+      <div class="section-title">Looks like the same person</div>
+      ${groups.map((g, i) => `
+        <div class="card">
+          <div class="merge-names">${g.map(n => `<span class="tagname">${esc(n)}</span>`).join('')}</div>
+          <label class="field mt"><span>Keep them all under</span>
+            <select id="keep${i}">
+              ${(() => { const best = bestKeeper(g);
+                 return [best].concat(g.filter(n => n !== best))
+                   .map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(''); })()}
+            </select></label>
+          <button class="btn primary wide" data-join="${i}">Combine these ${g.length}</button>
+        </div>`).join('')}` : ''}
+
+    <div class="section-title">Everyone the app has seen</div>
+    ${allDeviceNames().map(n => {
+      const person = personOf(n);
+      const isAlias = person.toLowerCase() !== n.toLowerCase();
+      const mine = aliasesOf(n);
+      return `
+        <div class="card row spread" style="padding:12px 13px;gap:10px">
+          <div class="grow" style="min-width:0">
+            <strong>${esc(n)}</strong>
+            ${isAlias ? `<div class="tiny muted">counted as ${esc(person)}</div>` : ''}
+            ${mine.length ? `<div class="tiny muted">also: ${mine.map(esc).join(', ')}</div>` : ''}
+          </div>
+          ${isAlias
+            ? `<button class="btn sm" data-split="${esc(n)}">Separate</button>`
+            : `<button class="btn sm" data-into="${esc(n)}">Link…</button>`}
+        </div>`;
+    }).join('')}`;
+
+  $$('[data-join]', view).forEach(b => b.onclick = async function () {
+    const g = groups[+b.dataset.join];
+    const keep = $('#keep' + b.dataset.join, view).value;
+    this.disabled = true;
+    this.textContent = 'Combining…';
+    await linkNames(keep, g);
+    toast(`Combined under ${keep}`);
+    render();
+  });
+
+  $$('[data-into]', view).forEach(b => b.onclick = async () => {
+    const from = b.dataset.into;
+    const targets = crewAndActive().filter(n => n.toLowerCase() !== from.toLowerCase());
+    if (!targets.length) return toast('Nobody else to link to yet');
+    const pick = prompt(
+      `"${from}" is the same person as which of these?\n\n` +
+      targets.map((n, i) => `${i + 1}. ${n}`).join('\n') +
+      `\n\nType the number, or a name:`);
+    if (!pick) return;
+    const byNum = targets[Number(pick.trim()) - 1];
+    const keeper = byNum || targets.find(n => n.toLowerCase() === pick.trim().toLowerCase());
+    if (!keeper) return toast('Did not recognise that');
+    await linkNames(keeper, [from]);
+    toast(`${from} now counts as ${keeper}`);
+    render();
+  });
+
+  $$('[data-split]', view).forEach(b => b.onclick = async () => {
+    const alias = b.dataset.split;
+    const person = personOf(alias);
+    const row = DB.crew.find(c => String(c.name || '').toLowerCase() === person.toLowerCase());
+    if (!row) return;
+    await Store.patch('crew', row.id, {
+      aliases: (row.aliases || []).filter(a => String(a).toLowerCase() !== alias.toLowerCase())
+    });
+    toast(`${alias} separated out again`);
+    render();
+  });
+}
+
 function renderCrewBoard(view) {
   const names = crewNames();
   const others = crewAndActive().filter(n => !names.some(c => c.toLowerCase() === n.toLowerCase()));
@@ -2642,6 +2886,7 @@ function renderCrewBoard(view) {
           <button class="crew-tile ${tone}" data-name="${esc(n)}" style="--i:${Math.min(i, 14)}">
             <span class="avatar">${esc(initials(n))}</span>
             <span class="who">${esc(n)}</span>
+            ${aliasesOf(n).length ? `<span class="alsonames">also ${esc(aliasesOf(n).join(', '))}</span>` : ''}
             <span class="load">${st.open === 0 ? 'No open jobs'
               : `${st.open} open job${st.open === 1 ? '' : 's'}`}</span>
             ${(() => { const line = tallyLine(dayTally(n, today()));
@@ -2668,7 +2913,11 @@ function renderCrewBoard(view) {
         }).join('')}
       </div>` : ''}
 
-    <button class="btn wide mt" id="addCrew">${icon('plus')}Add someone to the crew</button>`;
+    <div class="btn-row mt">
+      <button class="btn" id="addCrew">${icon('plus')}Add someone</button>
+      <a class="btn ${suggestedGroups().length ? 'primary' : ''}" href="#/crew-merge">${icon('people')}Link devices${
+        suggestedGroups().length ? ` (${suggestedGroups().length})` : ''}</a>
+    </div>`;
 
   const loose_ = $('#looseTile', view);
   if (loose_) loose_.onclick = () => go('#/crew-unassigned');
@@ -2821,7 +3070,7 @@ function renderCrewDiary(view) {
   const order = crewAndActive();
   const groups = {};
   entries.forEach(e => {
-    const who = String(e.crew_name || '').trim() || 'Unattributed';
+    const who = entryPerson(e) || 'Unattributed';
     (groups[who] = groups[who] || []).push(e);
   });
   const people = Object.keys(groups).sort((a, b) => {
