@@ -239,3 +239,24 @@ alter table crew add column if not exists aliases jsonb not null default '[]'::j
 --  untouched, and a hidden name is still there to assign a job to.
 -- =====================================================================
 alter table crew add column if not exists hidden_at timestamptz;
+
+-- =====================================================================
+--  Manuals — the books the crew need on site
+--
+--  Operator and workshop manuals, parts books, service schedules. Not
+--  tied to a machine or a job: a manual covers a model, and the same
+--  book serves every one of them. Uploading it once puts it in
+--  everyone's pocket.
+-- =====================================================================
+create table if not exists manuals (
+  id         uuid primary key default gen_random_uuid(),
+  title      text not null default '',
+  note       text not null default '',
+  file       jsonb not null default '{}'::jsonb,   -- { url, name, type, size }
+  added_by   text not null default '',
+  created_at timestamptz not null default now()
+);
+
+alter table manuals enable row level security;
+drop policy if exists manuals_all on manuals;
+create policy manuals_all on manuals for all to anon, authenticated using (true) with check (true);

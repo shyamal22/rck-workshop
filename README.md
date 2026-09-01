@@ -14,15 +14,36 @@ the last job is signed off the gear goes green again on its own.
 
 ## Opening the app
 
-The landing page offers two doors:
+The landing page offers three doors:
 
 - **Maintenance** — gear status, damage reports, work orders, repair history.
 - **Maintenance crew** — who is managing which job, and how each of them is tracking.
+- **Manuals** — the operator and workshop books, on every phone.
 
 **Costs** is still there, in the ⋮ menu rather than on the landing page. It records
 planned and actual spend per asset and stays deliberately unconnected to
 maintenance: a repair cost on a work order does **not** reach the cost tracker,
 and a cost never changes a machine's colour.
+
+## Manuals
+
+Operator manuals, workshop manuals, parts books, service schedules. Upload one and
+it is in every phone on site — no rummaging through a ute for a soaked paper copy.
+
+- **Add a manual**: choose the file, give it a title. The file name is offered as
+  the title, so usually there is nothing to type. A note is optional — *"covers the
+  2019 model onwards"* is the kind of thing that saves someone ten minutes.
+- Each manual gets **a tile of its own** under its title, showing what kind of file
+  it is and how big. Tapping opens it in its own tab, so the app stays where you
+  left it. PDFs are the safe bet — they open on anything.
+- Tiles are alphabetical, and once there are more than a handful a **search box**
+  appears, matching the title, the note and the file name.
+- Anyone can add one; anyone can remove one. Removing takes it off the shelf and
+  leaves the file itself in storage.
+
+Manuals are deliberately their own thing. They are not attached to a machine or a
+job — a manual covers a *model*, and the same book serves every one of them. Nothing
+here carries a status colour, because colour still only means whether gear is working.
 
 ## Maintenance crew
 

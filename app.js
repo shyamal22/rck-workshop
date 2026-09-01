@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.9.0';
+const VERSION = '2.10.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -188,6 +188,7 @@ const ICONS = {
   chart:   '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   coin:    '<circle cx="12" cy="12" r="8.2"/><path d="M14.4 9.3a2.9 2.9 0 0 0-2.4-1.1c-1.5 0-2.5.8-2.5 1.9 0 2.6 5 1.3 5 3.9 0 1.1-1 1.9-2.5 1.9a2.9 2.9 0 0 1-2.5-1.2"/><path d="M12 6.6v10.8"/>',
   people:  '<circle cx="9" cy="8" r="3.4"/><path d="M3.2 20a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.3a3.4 3.4 0 0 1 0 5.5"/><path d="M17.6 14.6A5.8 5.8 0 0 1 21 20"/>',
+  book:    '<path d="M4 5.2A1.7 1.7 0 0 1 5.7 3.5H19v14H5.7A1.7 1.7 0 0 0 4 19.2z"/><path d="M4 19.2a1.7 1.7 0 0 0 1.7 1.7H19v-3.4"/><path d="M8 7.5h7"/>',
   broom:   '<path d="M13.5 4.5l6 6"/><path d="M11 12.5l-4.6 4.6a4 4 0 0 0-1.1 2.1L5 21l1.8-.3a4 4 0 0 0 2.1-1.1l4.6-4.6"/><path d="M9.4 10.9l3.7 3.7 4.2-4.2a2.6 2.6 0 0 0-3.7-3.7z"/>',
   spanner: '<path d="M15.5 8.5a3.8 3.8 0 0 0 4.6 4.6l-8 8a2.6 2.6 0 0 1-3.7-3.7l8-8a3.8 3.8 0 0 0-4.6-4.6l3 3-1.9 1.9-3-3a3.8 3.8 0 0 0 5.6 1.8z"/>'
 };
@@ -200,6 +201,7 @@ function icon(name) {
 let costsTableMissing = false;
 let crewTableMissing = false;
 let logTableMissing = false;
+let manualsTableMissing = false;
 
 /* What a workshop day is actually made of. Anyone can add a type; it is kept
    on the entry itself so a phone that has never seen it still reads right. */
@@ -770,7 +772,7 @@ const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 /* ================================================================
    Local cache — the app opens instantly and stays readable offline
    ================================================================ */
-const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], crew: [], crew_log: [], localSeq: 0 };
+const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], crew: [], crew_log: [], manuals: [], localSeq: 0 };
 
 function cacheKey() { return 'rckw.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -784,6 +786,7 @@ function loadCache() {
       DB.costs = raw.costs || [];
       DB.crew = raw.crew || [];
       DB.crew_log = raw.crew_log || [];
+      DB.manuals = raw.manuals || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -832,7 +835,7 @@ async function rest(path, opts) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [gear, orders, updates, costs, crew, log] = await Promise.all([
+    const [gear, orders, updates, costs, crew, log, manuals] = await Promise.all([
       rest('gear?select=*&order=code.asc', { headers: restHeaders() }),
       rest('work_orders?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }),
@@ -840,7 +843,8 @@ const Store = {
       // the app must keep working if it doesn't.
       rest('costs?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }).catch(() => null),
       rest('crew?select=*&order=created_at.asc', { headers: restHeaders() }).catch(() => null),
-      rest('crew_log?select=*&order=at.desc&limit=8000', { headers: restHeaders() }).catch(() => null)
+      rest('crew_log?select=*&order=at.desc&limit=8000', { headers: restHeaders() }).catch(() => null),
+      rest('manuals?select=*&order=title.asc&limit=2000', { headers: restHeaders() }).catch(() => null)
     ]);
     DB.gear = gear || [];
     DB.work_orders = orders || [];
@@ -851,6 +855,8 @@ const Store = {
     else crewTableMissing = true;
     if (log) { DB.crew_log = log; logTableMissing = false; }
     else logTableMissing = true;
+    if (manuals) { DB.manuals = manuals; manualsTableMissing = false; }
+    else manualsTableMissing = true;
     saveCache();
   },
 
@@ -1206,6 +1212,7 @@ function sectionOf(path) {
   if (path === '/screen') return 'kiosk';
   if (path.startsWith('/crew')) return 'crew';
   if (path.startsWith('/costs')) return 'costs';
+  if (path.startsWith('/manuals')) return 'manuals';
   return 'maintenance';
 }
 
@@ -1243,6 +1250,8 @@ const SCREENS = {
   '/crew-merge':      { title: 'Same person?',     render: renderCrewMerge,  back: true },
   '/crew-fresh':      { title: 'Start fresh',      render: renderCrewFresh,  back: true },
   '/crew-log':        { title: 'Diary entry',      render: renderCrewLogForm, back: true },
+  '/manuals':        { title: 'Manuals',      render: renderManuals },
+  '/manuals/new':    { title: 'Add a manual', render: renderManualForm, back: true },
   '/costs':          { title: 'Costs',        render: renderCostsBoard },
   '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
   '/costs/summary':  { title: 'Cost tracker', render: renderCostSummary },
@@ -1293,7 +1302,7 @@ function render() {
   const section = sectionOf(route.path);
   document.body.classList.toggle('in-costs', section === 'costs');
   paintTabs(section, route.path);
-  $('#homeBtn').hidden = !['costs', 'maintenance', 'crew'].includes(section) || (back || screen.back);
+  $('#homeBtn').hidden = !['costs', 'maintenance', 'crew', 'manuals'].includes(section) || (back || screen.back);
 
   const view = $('#view');
   view.innerHTML = '';
@@ -2839,9 +2848,170 @@ function renderHub(view) {
           ? `${unassigned} job${unassigned === 1 ? '' : 's'} not assigned to anyone`
           : (open ? 'Every open job has someone on it' : 'Nothing outstanding')}</span>
       </a>
+      <a class="hub-card" href="#/manuals">
+        <span class="hub-icon">${icon('book')}</span>
+        <b>Manuals</b>
+        <span class="hub-sub">Operator and workshop books, on every phone</span>
+        <span class="hub-stat">${DB.manuals.length
+          ? `${DB.manuals.length} manual${DB.manuals.length === 1 ? '' : 's'} on file`
+          : 'Nothing uploaded yet'}</span>
+      </a>
     </div>
 
     <p class="muted small center mt">Costs are still in the ⋮ menu.</p>`;
+}
+
+/* ================================================================
+   Manuals — the books the crew need on site
+
+   Not tied to a machine or a job: a manual covers a model, and the same
+   book serves every one of them. Uploaded once, it is in everyone's
+   pocket. Nothing here carries a status colour — colour still only means
+   whether gear is working.
+   ================================================================ */
+function manualsBanner() {
+  return manualsTableMissing
+    ? `<div class="banner">The manuals table isn't in the database yet, so anything
+       you add here stays on this phone. Run the <strong>Manuals</strong> section at the
+       end of <code>supabase-schema.sql</code> in Supabase — it is safe to re-run —
+       then reopen the app.</div>`
+    : '';
+}
+
+const manualsSorted = () => DB.manuals.slice()
+  .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }));
+
+/** What kind of book this is, from the file itself. */
+function fileKind(f) {
+  const t = String((f && f.type) || '').toLowerCase();
+  const n = String((f && f.name) || '').toLowerCase();
+  if (t.includes('pdf') || n.endsWith('.pdf')) return 'PDF';
+  if (t.startsWith('image/')) return 'Image';
+  if (/word|document/.test(t) || /\.docx?$/.test(n)) return 'Word';
+  if (/sheet|excel/.test(t) || /\.xlsx?$/.test(n)) return 'Sheet';
+  const ext = (n.split('.').pop() || '').toUpperCase();
+  return ext && ext.length <= 4 ? ext : 'File';
+}
+
+function fileSize(f) {
+  const b = Number((f && f.size) || 0);
+  if (!b) return '';
+  if (b < 1024 * 1024) return Math.max(1, Math.round(b / 1024)) + ' KB';
+  return (b / (1024 * 1024)).toFixed(b < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+}
+
+let manualQuery = '';
+
+function renderManuals(view) {
+  const all = manualsSorted();
+  const needle = manualQuery.trim().toLowerCase();
+  const list = needle
+    ? all.filter(m => `${m.title} ${m.note || ''} ${(m.file || {}).name || ''}`.toLowerCase().includes(needle))
+    : all;
+
+  view.innerHTML = `
+    ${manualsBanner()}
+    ${all.length > 6 ? `<label class="field"><input type="text" id="mq"
+      placeholder="Search manuals" value="${esc(manualQuery)}"></label>` : ''}
+
+    ${list.length ? `<div class="manual-grid">
+      ${list.map((m, i) => {
+        const f = m.file || {};
+        const size = fileSize(f);
+        return `
+          <a class="manual-card" href="${esc(f.url || '#')}" ${f.url ? 'target="_blank" rel="noopener"' : ''}
+             data-id="${esc(m.id)}" style="--i:${Math.min(i, 14)}">
+            <span class="m-kind">${esc(fileKind(f))}</span>
+            <span class="m-title">${esc(m.title || f.name || 'Untitled')}</span>
+            ${m.note ? `<span class="m-note">${esc(m.note)}</span>` : ''}
+            <span class="m-meta">${[size, m.added_by ? 'added by ' + m.added_by : ''].filter(Boolean).join(' · ')}</span>
+            ${f.pending || f.local ? '<span class="m-meta">Held on this device until there is signal.</span>' : ''}
+          </a>`;
+      }).join('')}
+    </div>` : all.length
+      ? `<div class="empty"><b>Nothing matches</b>No manual has "${esc(manualQuery.trim())}" in it.</div>`
+      : `<div class="empty"><b>No manuals yet</b>Upload the operator and workshop books
+         and they will be in everyone's pocket.</div>`}
+
+    <div class="btn-row mt">
+      <a class="btn primary" href="#/manuals/new">${icon('plus')}Add a manual</a>
+    </div>`;
+
+  const q = $('#mq', view);
+  if (q) q.oninput = () => {
+    manualQuery = q.value;
+    const at = q.selectionStart;
+    renderManuals(view);
+    const again = $('#mq', view);
+    if (again) { again.focus(); again.setSelectionRange(at, at); }
+  };
+}
+
+function renderManualForm(view) {
+  $('#title').textContent = 'Add a manual';
+  view.innerHTML = `
+    ${manualsBanner()}
+    <div class="card">
+      <label class="field"><span>What is it?</span>
+        <input type="text" id="mTitle" placeholder="e.g. Wirtgen W100 operator manual" autocomplete="off">
+      </label>
+      <label class="field"><span>Anything worth noting (optional)</span>
+        <input type="text" id="mNote" placeholder="e.g. covers the 2019 model onwards">
+      </label>
+      <input type="file" id="mFile" hidden>
+      <button class="btn wide" id="mPick">${icon('clip')}Choose the file</button>
+      <p class="small muted mt" id="mChosen">A PDF is best — it opens on any phone.</p>
+      <button class="btn primary wide mt" id="mSave">Add it</button>
+    </div>
+
+    ${DB.manuals.length ? `
+      <div class="section-title">Already there (${DB.manuals.length})</div>
+      <div class="card">
+        ${manualsSorted().map(m => `
+          <div class="m-row">
+            <span class="grow">${esc(m.title || (m.file || {}).name || 'Untitled')}</span>
+            <button class="linky danger" data-drop="${esc(m.id)}">Remove</button>
+          </div>`).join('')}
+      </div>` : ''}`;
+
+  let picked = null;
+  const input = $('#mFile', view);
+  $('#mPick', view).onclick = () => input.click();
+  input.onchange = () => {
+    picked = (input.files || [])[0] || null;
+    $('#mChosen', view).textContent = picked
+      ? `${picked.name} · ${fileSize(picked) || 'ready'}`
+      : 'A PDF is best — it opens on any phone.';
+    // save typing: the file name makes a decent title if none was given
+    const t = $('#mTitle', view);
+    if (picked && !t.value.trim()) {
+      t.value = picked.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    }
+  };
+
+  $('#mSave', view).onclick = async function () {
+    const title = $('#mTitle', view).value.trim();
+    if (!picked) return toast('Choose the file first');
+    if (!title) return toast('Give it a title');
+    this.disabled = true;
+    this.textContent = 'Uploading…';
+    const up = await Store.upload(picked);
+    await Store.insert('manuals', {
+      id: uid(), title, note: $('#mNote', view).value.trim(),
+      file: up, added_by: whoami(), created_at: new Date().toISOString()
+    });
+    toast('Manual added');
+    go('#/manuals');
+  };
+
+  $$('[data-drop]', view).forEach(b => b.onclick = async () => {
+    const m = DB.manuals.find(x => x.id === b.dataset.drop);
+    if (!m) return;
+    if (!confirm(`Remove "${m.title || 'this manual'}"?\n\nThe file itself stays in storage.`)) return;
+    await Store.remove('manuals', m.id);
+    toast('Removed');
+    render();
+  });
 }
 
 /* ================================================================
