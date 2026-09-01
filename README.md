@@ -117,6 +117,15 @@ two directions.
   date, and the gear needing attention. It refreshes every 15 seconds and keeps the
   screen awake by itself.
 
+**Printed documents** carry the RCK look from the quotation template — navy
+banded headings, gold labels, a cream panel of the key facts — and print their
+backgrounds properly rather than coming out as bare text.
+
+The **work order** reads in the order someone needs it: who and what at the top,
+then the state of it in a highlighted box, then **what is wrong**, **how it was
+fixed**, **cost** (always shown, "Not recorded" when it hasn't been entered),
+then comments and history, attachments and photos, and sign-off lines.
+
 **Reports** — one button each:
 - **Fleet status** — every machine, colour, location, due date, plus all open jobs.
 - **Repair history** — whole fleet or one machine, any date range: every repair,

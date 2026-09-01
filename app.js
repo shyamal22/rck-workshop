@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.5.0';
+const VERSION = '2.6.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -2171,15 +2171,33 @@ function downloadCsv(rows, filename) {
 /* ================================================================
    Printable documents
    ================================================================ */
-function docHead(title, subtitle) {
+function docHead(title, subtitle, meta) {
   return `
     <div class="doc-head">
-      <div class="org">RCK</div>
-      <h1>${esc(title)}</h1>
-      <div>${esc(subtitle || '')}</div>
-      <div style="font-size:9.5pt;color:#555">Generated ${fmtDateTime(new Date().toISOString())}${S.name ? ' by ' + esc(S.name) : ''}</div>
+      <div>
+        <div class="org-name">RCK NZ</div>
+        <div class="org-sub">Asphalt &amp; Civil Contracting</div>
+        <div class="org-sub">Workshop — plant &amp; equipment</div>
+      </div>
+      <div>
+        <div class="doc-kind">${esc(title).toUpperCase()}</div>
+        <div class="doc-meta">
+          ${(meta || []).map(m => `<div><b>${esc(m[0])}:</b> ${esc(m[1])}</div>`).join('')}
+          ${subtitle ? `<div>${esc(subtitle)}</div>` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="rule"></div>`;
+}
+
+function docFoot(right) {
+  return `
+    <div class="foot">
+      <span>RCK NZ · Workshop · generated ${fmtDateTime(new Date().toISOString())}${S.name ? ' by ' + esc(S.name) : ''}</span>
+      <span>${esc(right || '')}</span>
     </div>`;
 }
+
 /** Render, wait for any photos to load (so they aren't blank on the PDF), then print. */
 async function printDoc(html) {
   const area = $('#printArea');
@@ -2196,58 +2214,108 @@ async function printDoc(html) {
   setTimeout(() => window.print(), 80);
 }
 function badge(sev, closed) {
-  return `<span class="badge">${closed ? 'FIXED — GREEN' : sev === 'red' ? 'OUT OF OPERATION — RED' : 'USABLE — YELLOW'}</span>`;
+  if (closed) return '<span class="badge done">Fixed</span>';
+  return sev === 'red'
+    ? '<span class="badge stop">Out of operation</span>'
+    : '<span class="badge warn">Damaged — usable</span>';
 }
 
 function printWorkOrder(o) {
   const g = gearById(o.gear_id) || {};
   const closed = !isOpen(o);
+  const cancelled = o.status === 'cancelled';
   const ups = updatesFor(o.id);
+  const down = daysBetween(o.reported_at, o.completed_at || new Date().toISOString());
+  const due = o.target_date ? dueText(o.target_date) : null;
+
+  // the one line someone should read first
+  const state = cancelled ? { cls: 'badge', word: 'Cancelled', line: 'This work order was cancelled.' }
+    : closed ? { cls: 'badge done', word: 'Fixed — back in service',
+        line: `Completed ${fmtDate(o.completed_at)}${o.completed_by ? ' by ' + o.completed_by : ''}` +
+              (down != null ? ` · ${down} day${down === 1 ? '' : 's'} out of service` : '') }
+    : o.severity === 'red' ? { cls: 'badge stop', word: 'Out of operation — do not use',
+        line: `${statusLabel(o.status)}` + (down != null ? ` · ${down} day${down === 1 ? '' : 's'} down so far` : '') +
+              (o.target_date ? ` · due back ${fmtDate(o.target_date)}${due.late ? ' (OVERDUE)' : ''}` : ' · no return date set') }
+    : { cls: 'badge warn', word: 'Damaged — still usable',
+        line: `${statusLabel(o.status)}` + (down != null ? ` · ${down} day${down === 1 ? '' : 's'} outstanding` : '') +
+              (o.target_date ? ` · due to be fixed ${fmtDate(o.target_date)}${due.late ? ' (OVERDUE)' : ''}` : ' · no fix date set') };
+
+  const repairer = o.repairer === 'external'
+    ? `External — ${o.external_company || 'company not named'}`
+    : o.repairer === 'internal' ? 'RCK workshop crew' : 'Not decided';
+
+  const comments = ups.filter(u => u.kind !== 'file');
 
   printDoc(`
-    ${docHead('Work order ' + woNo(o), `${g.code || ''} — ${g.name || catLabel(catOf(g))}`)}
-    <p>${badge(o.severity, closed)}</p>
+    ${docHead('Work order', '', [
+      ['No', woNo(o)],
+      ['Raised', fmtDate(o.reported_at)],
+      ['Gear', g.code || '—']
+    ])}
 
-    <h2>Gear</h2>
+    <div class="facts">
+      <div class="col">
+        <div class="lab">Gear</div>
+        <div class="big">${esc(g.code || '')}</div>
+        <div class="line">${esc(g.name || '')}</div>
+        ${g.make_model ? `<div class="line">${esc(g.make_model)}</div>` : ''}
+        <div class="line">${esc(catLabel(catOf(g)))}</div>
+      </div>
+      <div class="col">
+        <div class="lab">Reported by</div>
+        <div class="big">${esc(o.reported_by || '—')}</div>
+        <div class="line">${fmtDateTime(o.reported_at)}</div>
+        <div class="line">${esc(o.location_at_report || g.location || 'Location not recorded')}</div>
+      </div>
+      <div class="col">
+        <div class="lab">Managed by</div>
+        <div class="big">${esc(assignedTo(o) || 'Unassigned')}</div>
+        <div class="line">${esc(repairer)}</div>
+        ${o.external_ref ? `<div class="line">Their ref: ${esc(o.external_ref)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="callout">
+      <div class="state"><span class="${state.cls}">${esc(state.word)}</span></div>
+      <div class="sub">${esc(state.line)}</div>
+    </div>
+
+    <h2>What is wrong</h2>
+    <p class="prose"><strong>${esc(o.title)}</strong></p>
+    ${o.description ? `<p class="prose">${esc(o.description)}</p>`
+      : '<p class="prose quiet">No further detail was given when it was reported.</p>'}
+
+    <h2>How it was fixed</h2>
+    ${o.work_done
+      ? `<p class="prose">${esc(o.work_done)}</p>
+         <table class="kv">
+           <tr><td>Completed</td><td>${fmtDateTime(o.completed_at)}</td></tr>
+           <tr><td>Signed off by</td><td>${esc(o.completed_by || '—')}</td></tr>
+           <tr><td>Time out of service</td><td>${down != null ? `${down} day${down === 1 ? '' : 's'}` : '—'}</td></tr>
+         </table>`
+      : `<p class="prose quiet">${['Not finished yet. Status: ' + statusLabel(o.status) + '.',
+           o.target_date ? 'Expected back in service ' + fmtDate(o.target_date) + '.'
+                         : 'No return date has been set.'].join(' ')}</p>`}
+
+    <h2>Cost</h2>
+    <div class="figure">
+      <div class="lab">Repair cost (NZD)</div>
+      <div class="amt">${o.cost != null && o.cost !== '' ? money(o.cost) : 'Not recorded'}</div>
+    </div>
     <table class="kv">
-      <tr><td>Code</td><td><strong>${esc(g.code || '')}</strong></td></tr>
-      <tr><td>Name</td><td>${esc(g.name || '')}</td></tr>
-      <tr><td>Type</td><td>${catLabel(catOf(g))}</td></tr>
-      <tr><td>Make / model</td><td>${esc(g.make_model || '—')}</td></tr>
-      <tr><td>Location</td><td>${esc(o.location_at_report || g.location || '—')}</td></tr>
+      <tr><td>Repaired by</td><td>${esc(repairer)}</td></tr>
+      <tr><td>Their reference</td><td>${esc(o.external_ref || '—')}</td></tr>
+      <tr><td>Invoice on file</td><td>${ups.some(u => u.kind === 'file') ? 'Yes — see attachments below' : 'No'}</td></tr>
     </table>
 
-    <h2>Fault reported</h2>
-    <table class="kv">
-      <tr><td>Fault</td><td><strong>${esc(o.title)}</strong></td></tr>
-      <tr><td>Reported by</td><td>${esc(o.reported_by || '—')}</td></tr>
-      <tr><td>Reported</td><td>${fmtDateTime(o.reported_at)}</td></tr>
-      <tr><td>Still usable?</td><td>${o.severity === 'red' ? 'NO — out of operation' : 'Yes — damaged but usable'}</td></tr>
-    </table>
-    ${o.description ? `<p class="note">${esc(o.description)}</p>` : ''}
-
-    <h2>Repair</h2>
-    <table class="kv">
-      <tr><td>Status</td><td>${statusLabel(o.status)}</td></tr>
-      <tr><td>Managed by</td><td>${esc(assignedTo(o) || 'Not assigned')}</td></tr>
-      <tr><td>Expected back in service</td><td>${o.target_date ? fmtDate(o.target_date) : 'Not set'}</td></tr>
-      <tr><td>Repaired by</td><td>${o.repairer === 'external'
-        ? 'External — ' + esc(o.external_company || '—') : o.repairer === 'internal' ? 'RCK workshop crew' : 'Not decided'}</td></tr>
-      ${o.external_ref ? `<tr><td>Their reference</td><td>${esc(o.external_ref)}</td></tr>` : ''}
-      ${o.cost != null ? `<tr><td>Cost</td><td>$${esc(Number(o.cost).toFixed(2))}</td></tr>` : ''}
-      ${closed ? `<tr><td>Completed</td><td>${fmtDateTime(o.completed_at)} · ${esc(o.completed_by || '')}</td></tr>` : ''}
-      ${closed ? `<tr><td>Days out</td><td>${daysBetween(o.reported_at, o.completed_at) ?? '—'}</td></tr>` : ''}
-    </table>
-    ${o.work_done ? `<p class="note"><strong>Work done:</strong> ${esc(o.work_done)}</p>` : ''}
-
-    <h2>History</h2>
+    <h2>Comments &amp; history</h2>
     <table>
       <tr><th style="width:34mm">When</th><th style="width:32mm">Who</th><th>Entry</th></tr>
-      ${ups.map(u => `<tr class="avoid-break">
+      ${comments.map(u => `<tr class="avoid-break">
         <td>${fmtDateTime(u.created_at)}</td>
-        <td>${esc(u.author || '')}${u.role === 'workshop' ? '<br><em>Workshop</em>' : ''}</td>
-        <td class="note">${esc(u.body || '')}${u.kind === 'file' && u.meta && u.meta.name ? `<br><em>Attached: ${esc(u.meta.name)}</em>` : ''}</td>
-      </tr>`).join('') || '<tr><td colspan="3">No entries.</td></tr>'}
+        <td>${esc(u.author || '—')}${u.role === 'workshop' ? '<br><span class="quiet">Workshop</span>' : ''}</td>
+        <td class="note">${esc(u.body || '')}</td>
+      </tr>`).join('') || '<tr><td colspan="3" class="quiet">Nothing recorded.</td></tr>'}
     </table>
 
     ${photoSheet(ups)}
@@ -2255,22 +2323,30 @@ function printWorkOrder(o) {
     <div class="sig">
       <div>Workshop sign-off &amp; date</div>
       <div>Returned to operator &amp; date</div>
-    </div>`);
+    </div>
+
+    ${docFoot(woNo(o) + ' · ' + (g.code || ''))}`);
 }
 
 /** Photos attached to a work order, laid out for the printed sheet. */
 function photoSheet(updates) {
   const photos = updates.filter(u => u.kind === 'file' && u.meta && u.meta.url && /^image\//.test(u.meta.type || ''));
-  if (!photos.length) return '';
+  const docs = updates.filter(u => u.kind === 'file' && u.meta && u.meta.url && !/^image\//.test(u.meta.type || ''));
+  if (!photos.length && !docs.length) return '';
   return `
-    <h2>Photos</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:4mm">
+    <h2>Attachments</h2>
+    ${docs.length ? `<table>
+      <tr><th style="width:34mm">Added</th><th style="width:32mm">By</th><th>File</th></tr>
+      ${docs.map(d => `<tr><td>${fmtDate(d.created_at)}</td><td>${esc(d.author || '')}</td>
+        <td>${esc(d.meta.name || 'file')}${d.body ? ` — ${esc(d.body)}` : ''}</td></tr>`).join('')}
+    </table>` : ''}
+    ${photos.length ? `<div class="shots">
       ${photos.map(p => `
-        <div class="avoid-break" style="width:80mm">
-          <img src="${esc(p.meta.url)}" style="width:100%;border:.6pt solid #999">
-          <div style="font-size:9pt;color:#444">${esc(p.body || '')} — ${fmtDate(p.created_at)}</div>
-        </div>`).join('')}
-    </div>`;
+        <figure class="avoid-break">
+          <img src="${esc(p.meta.url)}" alt="">
+          <figcaption>${esc(p.body || 'Photo')} — ${fmtDate(p.created_at)}${p.author ? ', ' + esc(p.author) : ''}</figcaption>
+        </figure>`).join('')}
+    </div>` : ''}`;
 }
 
 function printGearHistory(g) { printHistory(g, '', ''); }
@@ -2330,7 +2406,8 @@ function printHistory(g, from, to) {
                 ups.filter(u => u.kind === 'file').map(u => esc((u.meta || {}).name || 'file')).join(', ')}</td></tr>` : ''}
           </table>
         </div>`;
-    }).join('') : '<p>No repairs recorded for this period.</p>'}`);
+    }).join('') : '<p class="quiet">No repairs recorded for this period.</p>'}
+    ${docFoot(g ? g.code + ' · repair history' : 'Fleet repair history')}`);
 }
 
 function printFleetStatus() {
@@ -2368,8 +2445,9 @@ function printFleetStatus() {
           <td>${woNo(o)}</td><td><strong>${esc(g.code || '')}</strong></td>
           <td>${esc(o.title)}</td><td>${statusLabel(o.status)}</td>
           <td>${o.target_date ? fmtDate(o.target_date) : 'not set'}</td></tr>`;
-      }).join('') || '<tr><td colspan="5">Nothing outstanding.</td></tr>'}
-    </table>`);
+      }).join('') || '<tr><td colspan="5" class="quiet">Nothing outstanding.</td></tr>'}
+    </table>
+    ${docFoot('Fleet status')}`);
 }
 
 /* ================================================================
@@ -2810,8 +2888,9 @@ function printDiaryDay(day, people, groups) {
             <td>${e.amount != null && e.amount !== '' ? money(e.amount) : ''}</td>
           </tr>`;
         }).join('')}
-      </table>`).join('') : '<p>Nothing logged for this day.</p>'}
-    <div class="sig"><div>Workshop manager &amp; date</div></div>`);
+      </table>`).join('') : '<p class="quiet">Nothing logged for this day.</p>'}
+    <div class="sig"><div>Workshop manager &amp; date</div></div>
+    ${docFoot('Workshop diary · ' + fmtDate(day))}`);
 }
 
 /* ------------------------------------------------- add / edit an entry */
@@ -3445,8 +3524,9 @@ function printCosts(list, assets, t) {
           <td class="note">${esc(c.description || '')}</td>
           <td>${c.payment_on ? fmtDate(c.payment_on) : '—'}</td>
           <td>${money(c.amount)}</td></tr>`;
-      }).join('') || '<tr><td colspan="6">Nothing in this period.</td></tr>'}
-    </table>`);
+      }).join('') || '<tr><td colspan="6" class="quiet">Nothing in this period.</td></tr>'}
+    </table>
+    ${docFoot('Cost report')}`);
 }
 
 function exportCostsCsv(list) {

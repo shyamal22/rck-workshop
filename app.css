@@ -796,19 +796,100 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   #printArea { display: block !important; }
 }
 
-#printArea, .doc { color: #000; font-size: 11.5pt; }
+/* ---------------------------------------------------------------------
+   RCK document theme, taken from the quotation template: navy rules and
+   banded headings, gold small-caps labels, a cream facts panel.
+   --------------------------------------------------------------------- */
+#printArea, .doc {
+  color: #1a1a1a; font-size: 10.5pt; line-height: 1.45;
+  /* without this browsers drop every background when printing */
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+
+.doc .doc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10mm; }
+.doc .org-name { font-size: 21pt; font-weight: 800; letter-spacing: -.5pt; line-height: 1; }
+.doc .org-sub  { font-size: 9pt; color: #3b4557; margin-top: 1.4mm; }
+.doc .doc-kind { font-size: 21pt; font-weight: 800; letter-spacing: -.4pt; line-height: 1; text-align: right; }
+.doc .doc-meta { text-align: right; font-size: 9.5pt; margin-top: 1.6mm; }
+.doc .doc-meta div { margin-top: .6mm; }
+.doc .doc-meta b { font-weight: 700; }
+.doc .rule { height: 3.2pt; background: #1f2a44; margin: 3.5mm 0 5mm; }
+
+/* the cream panel of key facts */
+.doc .facts { background: #f4efe6; padding: 4mm 5mm; margin-bottom: 4.5mm; display: flex; gap: 9mm; }
+.doc .facts .col { flex: 1; min-width: 0; }
+.doc .lab {
+  font-size: 8pt; font-weight: 800; letter-spacing: .09em;
+  text-transform: uppercase; color: #b8860b; margin-bottom: 1.2mm;
+}
+.doc .facts .big { font-size: 12pt; font-weight: 700; }
+.doc .facts .line { font-size: 9.5pt; color: #2b3444; margin-top: .5mm; }
+
+/* the one thing to read first */
+.doc .callout {
+  background: #f8f2e4; border-left: 4.5pt solid #b8860b;
+  padding: 3.5mm 4.5mm; margin-bottom: 5mm;
+}
+.doc .callout .state { font-size: 13pt; font-weight: 800; letter-spacing: -.2pt; }
+.doc .callout .sub { font-size: 9.5pt; color: #3b4557; margin-top: 1mm; }
+
+/* banded section headings */
 .doc h1 { font-size: 19pt; margin-bottom: 2mm; }
-.doc .doc-head { border-bottom: 2.5pt solid #000; padding-bottom: 3mm; margin-bottom: 5mm; }
-.doc .doc-head .org { font-size: 10pt; letter-spacing: .16em; text-transform: uppercase; font-weight: 700; }
-.doc h2 { font-size: 12pt; margin: 6mm 0 2mm; padding-bottom: 1.2mm; border-bottom: .8pt solid #000; }
-.doc table { width: 100%; border-collapse: collapse; font-size: 10.5pt; margin-bottom: 3mm; }
-.doc th, .doc td { border: .6pt solid #999; padding: 2mm 2.4mm; text-align: left; vertical-align: top; }
-.doc th { background: #eee; font-size: 9.5pt; text-transform: uppercase; letter-spacing: .04em; }
-.doc .kv { width: 100%; border: 0; }
-.doc .kv td { border: 0; padding: 1.1mm 0; }
-.doc .kv td:first-child { width: 42mm; color: #444; font-size: 10pt; }
+.doc h2 {
+  background: #1f2a44; color: #fff; font-size: 9.5pt; font-weight: 700;
+  letter-spacing: .09em; text-transform: uppercase;
+  padding: 2mm 3mm; margin: 6mm 0 3mm; border: 0;
+}
+.doc h2:first-of-type { margin-top: 0; }
+/* a heading must never be the last thing on a page */
+.doc h2 { break-after: avoid; page-break-after: avoid; }
+.doc .doc-head, .doc .facts, .doc .callout, .doc .figure { break-inside: avoid; page-break-inside: avoid; }
+
+.doc table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-bottom: 3mm; }
+.doc th {
+  background: #1f2a44; color: #fff; font-size: 8.5pt; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+  padding: 2mm 2.6mm; text-align: left; border: 0;
+}
+.doc td { padding: 2.2mm 2.6mm; text-align: left; vertical-align: top; border: 0; border-bottom: .5pt solid #ddd6ca; }
+.doc tr:last-child td { border-bottom: 0; }
+.doc tbody tr:nth-child(even) td { background: #faf8f4; }
+
+/* label/value pairs read as a list, not a grid */
+.doc .kv { width: 100%; border: 0; margin-bottom: 2mm; }
+.doc .kv td { border: 0; padding: 1.3mm 0; background: none !important; }
+.doc .kv td:first-child { width: 46mm; color: #5a6472; font-size: 9.5pt; }
+.doc .kv td:last-child { font-weight: 600; }
+
+.doc .prose { font-size: 10.5pt; white-space: pre-wrap; margin: 0 0 3mm; }
+.doc .quiet { color: #6b7482; font-weight: 400; }
+
+/* the figure that gets looked for first */
+.doc .figure {
+  display: inline-block; min-width: 62mm; background: #f4efe6;
+  border-left: 4.5pt solid #b8860b; padding: 2.8mm 6mm 2.8mm 4mm; margin-bottom: 3.5mm;
+}
+.doc .figure .amt { font-size: 17pt; font-weight: 800; letter-spacing: -.4pt; }
+
 .doc .sig { margin-top: 12mm; display: flex; gap: 14mm; }
-.doc .sig div { flex: 1; border-top: .8pt solid #000; padding-top: 2mm; font-size: 9.5pt; }
-.doc .badge { display: inline-block; padding: .8mm 2.4mm; border: 1.2pt solid #000; font-weight: 700; font-size: 9.5pt; }
+.doc .sig div { flex: 1; border-top: .8pt solid #1f2a44; padding-top: 2mm; font-size: 9pt; color: #3b4557; }
+
+.doc .foot {
+  margin-top: 8mm; padding-top: 2.5mm; border-top: .8pt solid #d8d2c8;
+  display: flex; justify-content: space-between; font-size: 8.5pt; color: #6b7482;
+}
+
+.doc .badge {
+  display: inline-block; padding: 1mm 2.6mm; font-weight: 800; font-size: 8.5pt;
+  letter-spacing: .06em; text-transform: uppercase; color: #fff; background: #1f2a44;
+}
+.doc .badge.stop { background: #a3231f; }
+.doc .badge.warn { background: #b8860b; }
+.doc .badge.done { background: #1c6b41; }
+
 .doc .avoid-break { break-inside: avoid; page-break-inside: avoid; }
 .doc .note { white-space: pre-wrap; }
+.doc .shots { display: flex; flex-wrap: wrap; gap: 4mm; }
+.doc .shots figure { width: 82mm; margin: 0; }
+.doc .shots img { width: 100%; border: .5pt solid #ddd6ca; display: block; }
+.doc .shots figcaption { font-size: 8.5pt; color: #6b7482; margin-top: 1mm; }
