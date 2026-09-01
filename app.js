@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.4.0';
+const VERSION = '2.5.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -240,8 +240,7 @@ const logTakesMoney = k => !!(builtinLogType(k) || {}).money;
 function allLogTypes() {
   const out = CREW_LOG_TYPES.slice();
   const seen = new Set(out.map(t => t.key));
-  DB.crew_log.forEach(e => {
-    if (e.auto) return;
+  writtenEntries().forEach(e => {
     if (e.kind && !seen.has(e.kind)) { seen.add(e.kind); out.push({ key: e.kind, label: logLabel(e) }); }
   });
   return out;
@@ -252,12 +251,12 @@ const logDay = e => (e.entry_date || (e.at || '').slice(0, 10) || '');
 
 function logFor(name, date) {
   const n = String(name || '').toLowerCase();
-  return DB.crew_log
+  return allEntries()
     .filter(e => String(e.crew_name || '').toLowerCase() === n && (!date || logDay(e) === date))
     .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
 }
 
-const logOnDay = date => DB.crew_log
+const logOnDay = date => allEntries()
   .filter(e => logDay(e) === date)
   .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
 
@@ -268,7 +267,149 @@ function logDays(name) {
   return Array.from(seen).sort().reverse();
 }
 
+/** Everyone who has done anything, so nobody's day is missing from the board. */
+function everyoneWithActivity() {
+  const seen = new Set();
+  const out = [];
+  allEntries().forEach(e => {
+    const n = String(e.crew_name || '').trim();
+    if (n && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
+  });
+  return out;
+}
+
 const logById = id => DB.crew_log.find(e => e.id === id);
+
+/* ------------------------------------------------------------------------
+   The captured half of the diary is not a second copy of the work — it is
+   the work, read back. Every action on a job is already stored with who did
+   it and when, and that record syncs to every phone. Deriving from it means
+   the diary shows everyone, reaches back to before the diary existed, and
+   can never drift out of step with the jobs it describes.
+   ------------------------------------------------------------------------ */
+const DERIVED_LABELS = {
+  created:  'Damage reported',
+  comment:  'Note added to a job',
+  status:   'Job updated',
+  external: 'Repairer arranged',
+  complete: 'Job completed',
+  reopen:   'Job reopened'
+};
+
+let derivedCache = null;
+let derivedKey = '';
+
+function derivedEntries() {
+  const last = DB.wo_updates[DB.wo_updates.length - 1];
+  const key = DB.wo_updates.length + ':' + (last ? last.id : '');
+  if (derivedCache && derivedKey === key) return derivedCache;
+
+  const rows = DB.wo_updates.slice()
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+
+  // Files arrive one row per file. Group the ones uploaded together — same
+  // job, same person, seconds apart — so three photos read as one line. Time
+  // buckets were wrong here: paperwork added later in the same ten minutes
+  // was being swallowed into the report it followed.
+  // Files group while they are consecutive on that job: anything else
+  // happening on the job — a comment, a status change — ends the batch. Time
+  // alone was the wrong signal, since a whole day's work can land in minutes.
+  const GAP = 2 * 60 * 1000;
+  const batches = [];
+  const openFor = new Map();
+
+  rows.forEach(u => {
+    if (!u.author || !u.created_at) return;
+    const key = `${u.work_order_id}|${String(u.author).toLowerCase()}`;
+
+    if (u.kind !== 'file') {
+      // something else happened on this job — whatever was being uploaded is done
+      openFor.forEach((b, k) => { if (k.split('|')[0] === u.work_order_id) openFor.delete(k); });
+      return;
+    }
+
+    const cur = openFor.get(key);
+    const t = new Date(u.created_at).getTime();
+    if (cur && t - cur.lastT <= GAP) {
+      if (u.meta && u.meta.url) cur.files.push(u.meta);
+      cur.lastT = t;
+      if (!cur.body && u.body) cur.body = u.body;
+      return;
+    }
+    const b = { at: u.created_at, lastT: t, author: u.author, wo: u.work_order_id,
+                files: u.meta && u.meta.url ? [u.meta] : [], body: u.body || '', used: false };
+    batches.push(b);
+    openFor.set(key, b);
+  });
+
+  const out = [];
+
+  rows.forEach(u => {
+    if (u.kind === 'file') return;
+    const label = DERIVED_LABELS[u.kind];
+    const author = String(u.author || '').trim();
+    if (!label || !author || !u.created_at) return;
+
+    // photos taken with a damage report belong on that one line
+    let files = [];
+    if (u.kind === 'created') {
+      const t = new Date(u.created_at).getTime();
+      const b = batches.find(x => !x.used && x.wo === u.work_order_id
+        && String(x.author).toLowerCase() === author.toLowerCase()
+        && new Date(x.at).getTime() >= t
+        && new Date(x.at).getTime() - t <= GAP);
+      if (b) { files = b.files; b.used = true; }
+    }
+
+    out.push({
+      id: 'wo:' + u.id,
+      crew_name: author,
+      entry_date: u.created_at.slice(0, 10),
+      at: u.created_at,
+      kind: 'auto_' + u.kind,
+      label,
+      body: u.body || '',
+      work_order_id: u.work_order_id,
+      amount: null,
+      files,
+      auto: true,
+      author,
+      role: u.role || ''
+    });
+  });
+
+  batches.forEach((b, i) => {
+    if (b.used || !b.files.length) return;
+    const pics = b.files.filter(f => /^image\//.test(f.type || '')).length;
+    out.push({
+      id: 'wof:' + b.wo + ':' + i,
+      crew_name: b.author,
+      entry_date: b.at.slice(0, 10),
+      at: b.at,
+      kind: 'auto_file',
+      label: pics === b.files.length ? `Photo${b.files.length === 1 ? '' : 's'} added`
+           : pics ? 'Photos and paperwork added' : 'Paperwork added',
+      body: b.body || '',
+      work_order_id: b.wo,
+      amount: null,
+      files: b.files,
+      auto: true,
+      author: b.author,
+      role: ''
+    });
+  });
+
+  out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  derivedKey = key;
+  derivedCache = out;
+  return out;
+}
+
+/** Hand-written entries only — the captured ones are derived, so any older
+    captured copies still sitting in the table are ignored rather than doubled. */
+const writtenEntries = () => DB.crew_log.filter(e => !e.auto);
+
+const allEntries = () => derivedEntries().concat(writtenEntries());
 
 /** A day's work for one person, counted from their diary. */
 function dayTally(name, date) {
@@ -324,6 +465,17 @@ function crewNames() {
   DB.crew.filter(c => c.active !== false).forEach(c => add(c.name));
   CREW_SEED.forEach(add);
   DB.work_orders.forEach(o => add(o.assigned_to));
+  return out;
+}
+
+/** The crew, plus anyone else whose day has something in it. Nobody who has
+    done work is left off the board just because they aren't on the list. */
+function crewAndActive() {
+  const out = crewNames().slice();
+  const seen = new Set(out.map(n => n.toLowerCase()));
+  everyoneWithActivity().forEach(n => {
+    if (!seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
+  });
   return out;
 }
 
@@ -718,8 +870,11 @@ function activeOrders() {
    ================================================================ */
 function whoami() { return S.name || 'Unnamed user'; }
 
-/** Puts what someone just did on a job into their own diary for today. */
-async function autoDiary(workOrderId, kind, body, opts) {
+/** Kept only so older call sites stay harmless — the diary is derived from
+    the work orders now, so nothing needs to be written a second time. */
+async function autoDiary() { /* intentionally does nothing */ }
+
+async function autoDiaryRetired(workOrderId, kind, body, opts) {
   const o = opts || {};
   const label = o.label || AUTO_LOG_LABELS[kind];
   if (!label) return;
@@ -2381,6 +2536,7 @@ function crewBanner() {
 
 function renderCrewBoard(view) {
   const names = crewNames();
+  const others = crewAndActive().filter(n => !names.some(c => c.toLowerCase() === n.toLowerCase()));
   const loose = unassignedOrders();
   const todayCount = logOnDay(today()).length;
 
@@ -2417,6 +2573,22 @@ function renderCrewBoard(view) {
           </button>`;
       }).join('')}
     </div>
+
+    ${others.length ? `
+      <div class="section-title">Also active</div>
+      <p class="muted small" style="margin:-4px 4px 9px">Not on the maintenance crew, but has worked on jobs.</p>
+      <div class="crew-grid">
+        ${others.map((n, i) => {
+          const line = tallyLine(dayTally(n, today()));
+          return `
+            <button class="crew-tile status-green" data-name="${esc(n)}" style="--i:${Math.min(i, 14)}">
+              <span class="avatar">${esc(initials(n))}</span>
+              <span class="who">${esc(n)}</span>
+              <span class="load">${logDays(n).length} day${logDays(n).length === 1 ? '' : 's'} logged</span>
+              ${line ? `<span class="today">Today: ${esc(line)}</span>` : ''}
+            </button>`;
+        }).join('')}
+      </div>` : ''}
 
     <button class="btn wide mt" id="addCrew">${icon('plus')}Add someone to the crew</button>`;
 
@@ -2518,9 +2690,10 @@ function renderCrewPerson(view) {
    ================================================================ */
 function logBanner() {
   return logTableMissing
-    ? `<div class="banner">The diary table isn't in the database yet. Run the
-       <strong>Crew diary</strong> section at the end of <code>supabase-schema.sql</code>
-       in Supabase, then reopen the app. Entries won't save until then.</div>`
+    ? `<div class="banner">Work on jobs is showing here as normal. Your own
+       written notes can't be saved yet though — run the <strong>Crew diary</strong>
+       section at the end of <code>supabase-schema.sql</code> in Supabase to turn
+       those on.</div>`
     : '';
 }
 
@@ -2567,7 +2740,7 @@ function renderCrewDiary(view) {
   const entries = logOnDay(day);
 
   // group by person, keeping the order the crew board uses
-  const order = crewNames();
+  const order = crewAndActive();
   const groups = {};
   entries.forEach(e => {
     const who = String(e.crew_name || '').trim() || 'Unattributed';
@@ -2594,7 +2767,7 @@ function renderCrewDiary(view) {
     ${people.length ? people.map(who => {
       const t = dayTally(who, day);
       return `
-      <div class="section-title">${esc(who)}</div>
+      <a class="section-title day-who" href="#/crew/${encodeURIComponent(who)}">${esc(who)}</a>
       <div class="tally-line">${esc(tallyLine(t) || `${t.entries} entries`)}</div>
       <div class="card log-card">${groups[who].map(e => logRow(e)).join('')}</div>`;
     }).join('') : `<div class="empty"><b>Nothing logged</b>No one has written anything for this day yet.</div>`}

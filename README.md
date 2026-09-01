@@ -59,14 +59,21 @@ admin** — and anyone can add a type of their own.
 
 **Most of the diary writes itself.** Anything done to a work order — reporting the
 damage, updating it, adding a note, arranging a repairer, uploading paperwork,
-signing it off — drops a line into that person's diary for the day, linked to the
-job. Those lines are marked **captured** so a manager can tell them apart from
-what someone typed themselves.
+signing it off — appears in that person's diary for the day, linked to the job.
+Those lines are marked **captured** so a manager can tell them apart from what
+someone typed themselves.
 
-Capture files under the name on the device, so a phone's name in Settings needs to
-match the crew name for the entries to land in the right diary. Settings says
-which it is. Someone not on the maintenance crew still gets their own line — the
-work is never filed under somebody else.
+Those lines are not a copy of the work; they *are* the work, read back. Every
+action on a job is already stored with who did it and when, and that record syncs
+to every phone, so the diary shows **everyone's** day on any device and reaches
+back to before the diary existed. Nothing has to be captured first, and the diary
+can never drift out of step with the jobs it describes.
+
+Entries appear under the name on the device that did the work. A phone's name in
+Settings should match the crew name so the day lands on the right tile; Settings
+says which it is. Someone not on the maintenance crew still gets their own day,
+shown under **Also active** on the crew board — the work is never filed under
+somebody else and never disappears.
 
 Photos and paperwork ride along on the line that captured them, so a photo added
 to a job shows as a photo in the diary rather than a mention of one.
