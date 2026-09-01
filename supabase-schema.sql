@@ -260,3 +260,52 @@ create table if not exists manuals (
 alter table manuals enable row level security;
 drop policy if exists manuals_all on manuals;
 create policy manuals_all on manuals for all to anon, authenticated using (true) with check (true);
+
+-- =====================================================================
+--  Planned servicing and maintenance
+--
+--  The other half of the job: the work you do so the gear doesn't break,
+--  rather than because it has. A plan is a rule — this service, every so
+--  many months and/or so many hours — and the log is what actually
+--  happened. When it is next due is worked out from the two, never
+--  stored, so it can't drift.
+--
+--  Deliberately separate from work orders. A service falling due does
+--  not take a machine out of operation, and does not change its colour
+--  on the gear board: that still answers only "can we use it today".
+-- =====================================================================
+alter table gear add column if not exists hours     numeric;
+alter table gear add column if not exists hours_at  timestamptz;
+alter table gear add column if not exists hours_by  text not null default '';
+
+create table if not exists service_plans (
+  id           uuid primary key default gen_random_uuid(),
+  gear_id      uuid references gear(id) on delete cascade,
+  name         text not null default '',
+  every_months integer,                      -- either, or both; whichever comes first
+  every_hours  integer,
+  starts_on    date,                          -- the clock starts here until the first service
+  start_hours  numeric,
+  note         text not null default '',
+  active       boolean not null default true,
+  created_at   timestamptz not null default now()
+);
+
+create table if not exists service_log (
+  id         uuid primary key default gen_random_uuid(),
+  plan_id    uuid references service_plans(id) on delete cascade,
+  gear_id    uuid,
+  name       text not null default '',        -- kept on the row, so history reads
+  done_on    date not null default current_date,
+  hours      numeric,
+  done_by    text not null default '',
+  note       text not null default '',
+  created_at timestamptz not null default now()
+);
+
+alter table service_plans enable row level security;
+alter table service_log   enable row level security;
+drop policy if exists service_plans_all on service_plans;
+drop policy if exists service_log_all   on service_log;
+create policy service_plans_all on service_plans for all to anon, authenticated using (true) with check (true);
+create policy service_log_all   on service_log   for all to anon, authenticated using (true) with check (true);

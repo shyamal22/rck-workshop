@@ -180,6 +180,9 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .status-green  { --s: var(--green);  --s-bg: var(--green-bg); }
 .status-orange { --s: var(--yellow); --s-bg: var(--yellow-bg); }  /* stored as 'orange', shown yellow */
 .status-red    { --s: var(--red);    --s-bg: var(--red-bg); }
+/* Not a fourth status: "nothing to go on yet", used only where a servicing
+   date cannot be worked out because no reading has been taken. */
+.status-grey   { --s: var(--ink-3);  --s-bg: var(--panel-2); }
 
 /* On a tinted card the grey text scale is too pale to read, so darken it. */
 .gear-card, .wo, .card.accent, .tally button { --ink-2: #49535d; --ink-3: #5f6972; }
@@ -760,6 +763,25 @@ a.day-who:active { opacity: .6; }
 }
 
 .hub-card:nth-child(3) { animation-delay: 140ms; }
+
+/* =====================================================================
+   Planned servicing
+
+   The colour answers a different question from the gear board — when is
+   this next due, not can we use it today — so a machine can be green
+   there and red here. Same three tones, because it is still status.
+   ===================================================================== */
+.chipwrap { display: flex; flex-wrap: wrap; gap: 7px; }
+.tagname.tap {
+  border: 0; font: inherit; cursor: pointer; color: var(--ink);
+  transition: transform var(--t-fast) var(--ease);
+}
+.tagname.tap:active { transform: scale(.95); }
+.gear-card .hrs {
+  position: absolute; right: 12px; bottom: 11px;
+  font-size: 11.5px; font-weight: 700; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
 
 /* =====================================================================
    Manuals

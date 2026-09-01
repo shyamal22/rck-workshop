@@ -17,13 +17,47 @@ the last job is signed off the gear goes green again on its own.
 The landing page offers three doors:
 
 - **Maintenance** — gear status, damage reports, work orders, repair history.
-- **Maintenance crew** — who is managing which job, and how each of them is tracking.
+- **Planned servicing and maintenance** — services and inspections, before anything breaks.
 - **Manuals** — the operator and workshop books, on every phone.
 
-**Costs** is still there, in the ⋮ menu rather than on the landing page. It records
-planned and actual spend per asset and stays deliberately unconnected to
-maintenance: a repair cost on a work order does **not** reach the cost tracker,
-and a cost never changes a machine's colour.
+**Maintenance crew** and **Costs** are both in the ⋮ menu rather than on the landing
+page. Nothing about either has changed — they are one tap further away.
+
+**Costs** records planned and actual spend per asset and stays deliberately
+unconnected to maintenance: a repair cost on a work order does **not** reach the
+cost tracker, and a cost never changes a machine's colour.
+
+## Planned servicing and maintenance
+
+The other half of the job: the work done so gear doesn't break, rather than because
+it has.
+
+A **plan** is a rule — this service, every so many months and/or every so many
+hours. The **log** is what actually happened. When something is next due is worked
+out from the two every time it is asked for, never stored, so it cannot drift out
+of step with the record.
+
+- **Set one up** from a machine's page. Presets fill the form in — 250/500/1000
+  hour service, six-monthly, annual, CoF, grease and check over — so thirty-odd
+  machines aren't an evening's typing. Nothing is forced; write your own.
+- **Months and hours are answered separately, and the tighter one wins.** A machine
+  that sat in the yard all winter still comes up for its annual; one on double
+  shifts comes up on hours long before the date.
+- **Hour-based plans need a reading.** Put the hour meter in on the machine's page.
+  Until someone does, those plans say *"not enough to go on"* rather than pretending
+  everything is fine.
+- **Due soon** is the fortnight before a date, or the last tenth of an hours
+  interval. Before that it is up to date; past it, overdue.
+- **Mark it done** and the clock starts again from the date and hours you put in.
+  What was done stays on the record against the machine.
+- The **Due** tab is the planner's list, worst first. The **Machines** tab is every
+  machine and how it is tracking, with the machines that have no plan at all called
+  out — nothing will ever come due against them.
+
+Servicing is deliberately apart from work orders. A service falling due does **not**
+take a machine out of operation and does **not** change its colour on the gear
+board: that still answers only *can we use it today*. A truck can be green there and
+red here, and both are true.
 
 ## Manuals
 
