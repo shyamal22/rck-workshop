@@ -118,129 +118,6 @@ create policy workshop_files_write on storage.objects
   with check (bucket_id = 'workshop-files');
 
 -- =====================================================================
---  Costs — planned and actual spend against each asset.
---
---  Deliberately independent of work orders: nothing here feeds the
---  maintenance side and nothing there feeds this. A repair cost recorded
---  on a work order does NOT appear in the cost tracker, and vice versa.
--- =====================================================================
-create table if not exists costs (
-  id          uuid primary key default gen_random_uuid(),
-  gear_id     uuid not null references gear(id) on delete cascade,
-  kind        text not null default 'actual' check (kind in ('planned','actual')),
-  amount      numeric not null default 0,
-  description text not null default '',
-  incurred_on date,                                  -- when the cost was incurred
-  payment_on  date,                                  -- when payment is/was due
-  files       jsonb not null default '[]'::jsonb,    -- invoices and attachments
-  created_by  text not null default '',
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
-
-create index if not exists costs_gear_idx     on costs (gear_id);
-create index if not exists costs_incurred_idx on costs (incurred_on);
-create index if not exists costs_payment_idx  on costs (payment_on);
-
-drop trigger if exists costs_touch on costs;
-create trigger costs_touch before update on costs
-  for each row execute function touch_work_order();
-
-alter table costs enable row level security;
-drop policy if exists costs_all on costs;
-create policy costs_all on costs for all to anon, authenticated using (true) with check (true);
-
--- =====================================================================
---  Maintenance crew — who is managing each work order
---
---  Separate from `repairer`, which says whether the spanners are RCK's or
---  an external company's. Every job has an RCK person accountable for it
---  either way.
--- =====================================================================
-alter table work_orders add column if not exists assigned_to text not null default '';
-create index if not exists work_orders_assigned_idx on work_orders (assigned_to);
-
-create table if not exists crew (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null unique,
-  active     boolean not null default true,
-  created_at timestamptz not null default now()
-);
-
-alter table crew enable row level security;
-drop policy if exists crew_all on crew;
-create policy crew_all on crew for all to anon, authenticated using (true) with check (true);
-
--- The starting crew. Re-running this never duplicates or renames anyone.
-insert into crew (name, created_at) values
-  ('Milian',    now()),
-  ('Clint',     now() + interval '1 second'),
-  ('Ryder',     now() + interval '2 seconds'),
-  ('Sebastion', now() + interval '3 seconds'),
-  ('Lyndon',    now() + interval '4 seconds'),
-  ('Barry',     now() + interval '5 seconds')
-on conflict (name) do nothing;
-
--- =====================================================================
---  Crew diary — what each person did today
---
---  Same idea as the job diary in Dispatch, but for the workshop: quotes,
---  parts, time on the tools, trips to a repairer. An entry can point at a
---  work order but doesn't have to — plenty of a day isn't one job.
---
---  Amounts here are a note of what a quote or an order came to. They are
---  NOT the cost ledger and never reach the cost tracker.
--- =====================================================================
-create table if not exists crew_log (
-  id            uuid primary key default gen_random_uuid(),
-  crew_name     text not null default '',
-  entry_date    date not null default current_date,
-  at            timestamptz not null default now(),   -- when it happened
-  kind          text not null default 'note',         -- see CREW_LOG_TYPES in app.js
-  label         text not null default '',             -- shown name, so added types survive
-  body          text not null default '',
-  work_order_id uuid references work_orders(id) on delete set null,
-  amount        numeric,
-  files         jsonb not null default '[]'::jsonb,
-  auto          boolean not null default false,      -- captured, not hand-written
-  author        text not null default '',
-  role          text not null default '',
-  created_at    timestamptz not null default now()
-);
-
--- for anyone who ran the diary section before auto-capture existed
-alter table crew_log add column if not exists auto boolean not null default false;
-
-create index if not exists crew_log_day_idx on crew_log (entry_date, at);
-create index if not exists crew_log_who_idx on crew_log (crew_name, entry_date);
-
-alter table crew_log enable row level security;
-drop policy if exists crew_log_all on crew_log;
-create policy crew_log_all on crew_log for all to anon, authenticated using (true) with check (true);
-
--- =====================================================================
---  One person, many devices
---
---  People use the app from a phone, a laptop and the workshop machine, and
---  each device carries its own name. Aliases let those all resolve to one
---  person, so their jobs and their diary are not split three ways.
--- =====================================================================
-alter table crew add column if not exists aliases jsonb not null default '[]'::jsonb;
-
--- =====================================================================
---  A clean slate
---
---  Names pile up: seeded ones, device names, anyone who ever touched a
---  job. hidden_at takes a name off the crew board until that person does
---  something on or after that moment — so the board empties and then
---  refills with whoever is actually working, on its own.
---
---  Nothing is deleted. The diary, the work orders and the history are
---  untouched, and a hidden name is still there to assign a job to.
--- =====================================================================
-alter table crew add column if not exists hidden_at timestamptz;
-
--- =====================================================================
 --  Manuals — the books the crew need on site
 --
 --  Operator and workshop manuals, parts books, service schedules. Not
@@ -309,3 +186,19 @@ drop policy if exists service_plans_all on service_plans;
 drop policy if exists service_log_all   on service_log;
 create policy service_plans_all on service_plans for all to anon, authenticated using (true) with check (true);
 create policy service_log_all   on service_log   for all to anon, authenticated using (true) with check (true);
+
+-- =====================================================================
+--  Removed features
+--
+--  The maintenance crew and costs sections were taken out of the app.
+--  Their tables are deliberately NOT dropped here — this file is re-run
+--  routinely, and a drop would destroy the record the moment anyone did.
+--  They simply sit unused and cost nothing.
+--
+--  To clear them out for good, run these by hand, once, knowingly:
+--
+--    drop table if exists crew_log;
+--    drop table if exists crew;
+--    drop table if exists costs;
+--    alter table work_orders drop column if exists assigned_to;
+-- =====================================================================

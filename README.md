@@ -20,12 +20,13 @@ The landing page offers three doors:
 - **Planned servicing and maintenance** — services and inspections, before anything breaks.
 - **Manuals** — the operator and workshop books, on every phone.
 
-**Maintenance crew** and **Costs** are both in the ⋮ menu rather than on the landing
-page. Nothing about either has changed — they are one tap further away.
+Everything else — the work orders list, reports, the wall screen, managing the
+fleet and settings — is in the ⋮ menu.
 
-**Costs** records planned and actual spend per asset and stays deliberately
-unconnected to maintenance: a repair cost on a work order does **not** reach the
-cost tracker, and a cost never changes a machine's colour.
+The **maintenance crew** and **costs** sections were removed. Their database tables
+are left in place rather than dropped, since `supabase-schema.sql` is re-run
+routinely and a drop would destroy the record the first time anyone did; the end of
+that file has the statements to clear them out by hand if you ever want to.
 
 ## Planned servicing and maintenance
 
@@ -79,115 +80,6 @@ Manuals are deliberately their own thing. They are not attached to a machine or 
 job — a manual covers a *model*, and the same book serves every one of them. Nothing
 here carries a status colour, because colour still only means whether gear is working.
 
-## Maintenance crew
-
-Every work order has an RCK person accountable for it — **separately** from whether
-the spanners are RCK's or an external company's. A job sent to Hydraulink still has
-someone here chasing it.
-
-- The workshop sets **Managed by** on the work order. Six are preloaded — Milian,
-  Clint, Ryder, Sebastion, Lyndon and Barry — and anyone can be added, either from
-  the crew board or straight from the work order.
-- The **crew board** is one row per person: open jobs, a red flag if any are
-  overdue, what they have done today, and today's count. Whoever needs attention
-  is at the top — most overdue, then most open, then busiest. Tapping a row lists
-  everything they hold and what they've fixed.
-- Jobs with nobody on them are pushed to the top of the crew board, since an
-  unowned job is the one that goes quiet.
-- Assigning changes nothing operationally — it doesn't touch gear colour or status.
-  It only answers who is on what.
-
-### The daily diary
-
-Same idea as the job diary in Dispatch, but for the workshop. Each person logs
-what they did as the day goes: **on the tools, inspection, quote requested,
-quote received, parts ordered, parts arrived, dropped at a repairer, picked up,
-admin** — and anyone can add a type of their own.
-
-- An entry carries a time (24-hour, the way a diary is written), a note, and
-  photos or paperwork. It can point at a work order but doesn't have to — plenty
-  of a day isn't one job.
-- Quote and order entries take an **amount**, so what a repair was quoted at sits
-  in the record next to the day it was chased. These are a note of what was
-  quoted, **not** the cost ledger — nothing here reaches the cost tracker.
-- The **Daily diary** opens on the day's four numbers — reported, updates, files,
-  closed — then everyone who was on the tools as a row of chips you can tap to
-  filter, then the day itself as one stream, **newest first**. The latest thing
-  that happened is the first thing you read; nobody scrolls to the bottom to find
-  out what is going on. A date stepper moves between days and the whole day prints
-  as a sheet for the manager.
-- A person's own page leads with today, the same way, then their open jobs, then
-  their earlier days.
-
-**Most of the diary writes itself.** Anything done to a work order — reporting the
-damage, updating it, adding a note, arranging a repairer, uploading paperwork,
-signing it off — appears in that person's diary for the day, linked to the job.
-Almost everything in a diary arrives this way, so it is the exception that carries
-a mark: a line someone typed themselves says **written by hand**.
-
-Those lines are not a copy of the work; they *are* the work, read back. Every
-action on a job is already stored with who did it and when, and that record syncs
-to every phone, so the diary shows **everyone's** day on any device and reaches
-back to before the diary existed. Nothing has to be captured first, and the diary
-can never drift out of step with the jobs it describes.
-
-Entries appear under the name on the device that did the work. Someone not on the
-maintenance crew still gets their own day, shown under **Also active** on the crew
-board — the work is never filed under somebody else and never disappears.
-
-### One person, several devices
-
-Most people have the tool on a phone and a laptop, and the two are usually named
-differently — *Clint*, *Clint - phone*, *Clint Laptop*. Left alone that is three
-people with a third of a day each.
-
-**⋮ → Link devices to people** fixes it. The screen reads the names that have
-actually done work, suggests the ones that look like the same person, and picks the
-real name (not the device name) to keep. Confirming a group:
-
-- merges the three diaries into one, so the tally is the person's whole day across
-  every device;
-- moves anything **assigned** to a folded name onto the kept one, so jobs given to
-  a placeholder land on the person really holding them;
-- leaves the folded names off the crew board, listed instead as *also …* under the
-  person they belong to.
-
-### Starting fresh
-
-Names pile up: the six the app shipped with, every phone and laptop anyone has
-signed in on, everyone who has ever touched a job. Eventually the crew board is a
-list of history rather than a list of people.
-
-**⋮ → Start fresh** clears it. Pick a date — tomorrow by default, so today finishes
-as it is — and every name comes off the board. From that date, a name comes back
-the moment that person does something: raises a job, updates one, adds a photo,
-signs one off. The board refills itself with whoever is actually working, and stays
-that way.
-
-**Nothing is deleted.** Every work order, every photo and the whole diary are
-untouched — step the diary back to any past day and it reads exactly as it did.
-A cleared name is still there to assign a job to, under *Not on the board* in the
-picker. And anyone holding an open job stays on the board regardless, so clearing
-can never quietly orphan live work. **Put them all back** undoes the whole thing.
-
-Any name can be linked by hand, and **Separate** undoes it. Nothing is deleted or
-rewritten in the job history — the original name stays on every update; linking only
-says which names are the same person. So a mistake costs one tap to undo.
-
-Photos and paperwork ride along on the line that captured them, so a photo added
-to a job shows as a photo in the diary rather than a mention of one.
-
-**The day is tallied.** Each person's day is counted from their diary — reported,
-updates, photos, documents, closed — and shown on their crew tile, at the top of
-their page, against each day, and on the printed day sheet. That is the
-"who got what done today" figure.
-
-Everything points at everything else: a captured diary line opens the job it came
-from, a work order names who is managing it and links to their page, and their
-page lists their jobs. Updating a job from the crew side and from the maintenance
-side are the same act on the same record — there is one work order, seen from
-two directions.
-
 ## What it does
 
 **For the crew**
@@ -226,8 +118,8 @@ fits:
 | **Just info** | nothing for anyone to do |
 
 The newest one becomes the job's **live line**, and it follows the job everywhere:
-on the work-order card, at the top of the job, on the wall screen, in the diary and
-on the printed sheet. So the board answers *is this moving?* without anyone opening
+on the work-order card, at the top of the job, on the wall screen and on the
+printed sheet. So the board answers *is this moving?* without anyone opening
 anything — including when the answer is **No word yet**, which is the one a
 workshop most needs to see.
 
@@ -260,20 +152,6 @@ the record of a machine's repairs is complete without anyone having to keep it.
 
 ---
 
-## Costs
-
-- **Assets** — the same fleet, showing actual and planned spend per machine.
-- Tapping one shows its running total, its variance and every entry against it.
-- **Adding a cost** takes: planned or actual, the amount, what it is for, the
-  date it was incurred, the date payment is due, and any number of invoices or
-  photos attached to it.
-- A **planned** cost can later be marked **actual** in place, which avoids the
-  double counting that comes from entering it twice.
-- **Tracker** — this month, last month, this quarter, the financial year
-  (April to March) or any custom range. Shows actual vs planned vs variance, a
-  month-by-month bar breakdown, spend per asset, and planned payments coming up.
-  Prints to PDF and exports to CSV.
-
 ## Setting it up
 
 Two jobs, about 15 minutes total, done once.
@@ -286,8 +164,8 @@ Two jobs, about 15 minutes total, done once.
 3. Wait about two minutes for the project to build.
 4. Open **SQL Editor** in the left sidebar → **New query**.
 5. Open `supabase-schema.sql` from this repo, copy the whole file, paste it in,
-   press **Run**. It should say *Success*. (Re-running it later is safe, and is
-   how you add the **Costs** section to a database created before costs existed.)
+   press **Run**. It should say *Success*. Re-running it later is safe, and is how
+   an older database picks up anything a newer version of the app needs.
 6. Go to **Settings → API** and copy two things:
    - **Project URL** — looks like `https://abcdefgh.supabase.co`
    - **anon public** key — a long string starting `eyJ…`

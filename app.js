@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.11.0';
+const VERSION = '3.0.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -198,42 +198,10 @@ function icon(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 }
 
-/** Set when the database has no costs table yet, so the app can say so
-    rather than looking empty and broken. */
-let costsTableMissing = false;
-let crewTableMissing = false;
-let logTableMissing = false;
+/** Set when the database is missing a table, so the app can say so rather
+    than looking empty and broken. */
 let manualsTableMissing = false;
 let serviceTableMissing = false;
-
-/* What a workshop day is actually made of. Anyone can add a type; it is kept
-   on the entry itself so a phone that has never seen it still reads right. */
-const CREW_LOG_TYPES = [
-  { key: 'on_tools',       label: 'On the tools' },
-  { key: 'inspection',     label: 'Inspection / service' },
-  { key: 'quote_request',  label: 'Quote requested' },
-  { key: 'quote_received', label: 'Quote received', money: true },
-  { key: 'parts_ordered',  label: 'Parts ordered',  money: true },
-  { key: 'parts_arrived',  label: 'Parts arrived' },
-  { key: 'dropped_off',    label: 'Dropped at repairer' },
-  { key: 'picked_up',      label: 'Picked up from repairer' },
-  { key: 'admin',          label: 'Admin / paperwork' },
-  { key: 'note',           label: 'Note' }
-];
-
-const builtinLogType = k => CREW_LOG_TYPES.find(t => t.key === k);
-
-/* Work on a job writes itself into the doer's diary, so a day's timeline
-   builds up on its own instead of waiting for someone to write it up.
-   A kind missing from here is not captured — file uploads are summarised
-   by their caller as one line rather than one per photo. */
-const AUTO_LOG_LABELS = {
-  comment:  'Note added to a job',
-  status:   'Job updated',
-  external: 'Repairer arranged',
-  complete: 'Job completed',
-  reopen:   'Job reopened'
-};
 
 /* A comment on its own never said whether someone was fixing the job or just
    talking about it, so a board full of notes told you nothing. Posting one now
@@ -243,18 +211,22 @@ const AUTO_LOG_LABELS = {
    Tone borrows the status vocabulary rather than inventing colours: red is bad
    news, yellow is held up, dark is happening now, grey is only words. */
 const NOTE_KINDS = [
-  { key: 'working', label: 'Working on it', diary: 'Working on a job',
-    tone: 'live',  hint: 'Spanners on it now' },
-  { key: 'waiting', label: 'Waiting on',    diary: 'Waiting on something',
-    tone: 'hold',  hint: 'Parts, a quote, the repairer' },
-  { key: 'problem', label: 'Hit a problem', diary: 'Problem on a job',
-    tone: 'stop',  hint: 'Needs a decision' },
-  { key: 'looked',  label: 'Had a look',    diary: 'Looked at a job',
-    tone: 'plain', hint: 'Checked it over, nothing done yet' },
-  { key: 'info',    label: 'Just info',     diary: 'Note added to a job',
-    tone: 'plain', hint: 'Nothing for anyone to do' }
+  { key: 'working', label: 'Working on it', tone: 'live',  hint: 'Spanners on it now' },
+  { key: 'waiting', label: 'Waiting on',    tone: 'hold',  hint: 'Parts, a quote, the repairer' },
+  { key: 'problem', label: 'Hit a problem', tone: 'stop',  hint: 'Needs a decision' },
+  { key: 'looked',  label: 'Had a look',    tone: 'plain', hint: 'Checked it over, nothing done yet' },
+  { key: 'info',    label: 'Just info',     tone: 'plain', hint: 'Nothing for anyone to do' }
 ];
 const noteKind = k => NOTE_KINDS.find(n => n.key === k) || null;
+
+/** What everything else on a job's history is, for the printed sheet. */
+const UPDATE_LABELS = {
+  created:  'Damage reported',
+  status:   'Job updated',
+  external: 'Repairer arranged',
+  complete: 'Job completed',
+  reopen:   'Job reopened'
+};
 const noteOf = u => noteKind(u && u.meta && u.meta.note);
 
 /** What is actually happening on a job right now, read back off its own
@@ -272,12 +244,12 @@ function jobPulse(o) {
     if (n) return { label: n.key === 'waiting' && u.body
                       ? 'Waiting on ' + firstLine(u.body).replace(/^waiting on\s*/i, '')
                       : n.label,
-                    tone: n.tone, at: u.created_at, who: personOf(u.author) };
+                    tone: n.tone, at: u.created_at, who: String(u.author || '').trim() };
     if (u.kind === 'complete' || u.kind === 'reopen') break;
   }
   if (o.repairer === 'external') {
     return { label: 'With ' + (o.external_company || 'an external repairer'),
-             tone: 'plain', at: o.updated_at, who: assignedTo(o) };
+             tone: 'plain', at: o.updated_at, who: '' };
   }
   const last = ups[ups.length - 1];
   return { label: 'No word yet', tone: 'quiet',
@@ -299,439 +271,10 @@ function ago(v) {
 
 const firstLine = t => String(t || '').split('\n')[0].trim();
 
-function logLabel(e) {
-  if (e && e.label) return e.label;
-  const b = builtinLogType(e && e.kind);
-  return b ? b.label : (e && e.kind ? e.kind : 'Note');
-}
-const logTakesMoney = k => !!(builtinLogType(k) || {}).money;
-
-/** Built-in types plus any anyone has added. */
-function allLogTypes() {
-  const out = CREW_LOG_TYPES.slice();
-  const seen = new Set(out.map(t => t.key));
-  writtenEntries().forEach(e => {
-    if (e.kind && !seen.has(e.kind)) { seen.add(e.kind); out.push({ key: e.kind, label: logLabel(e) }); }
-  });
-  return out;
-}
-
-/** A diary day is the day on the calendar, so a late entry stays on its day. */
-const logDay = e => (e.entry_date || (e.at || '').slice(0, 10) || '');
-
-function logFor(name, date) {
-  const n = personOf(name).toLowerCase();
-  return allEntries()
-    .filter(e => entryPerson(e).toLowerCase() === n && (!date || logDay(e) === date))
-    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
-}
-
-const logOnDay = date => allEntries()
-  .filter(e => logDay(e) === date)
-  .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
-
-/** The days one person has written anything on, newest first. */
-function logDays(name) {
-  const seen = new Set();
-  logFor(name).forEach(e => { const d = logDay(e); if (d) seen.add(d); });
-  return Array.from(seen).sort().reverse();
-}
-
-/** Everyone who has done anything, so nobody's day is missing from the board. */
-function everyoneWithActivity() {
-  const seen = new Set();
-  const out = [];
-  allEntries().forEach(e => {
-    const n = entryPerson(e);
-    if (n && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
-  });
-  return out;
-}
-
-/** Every raw device name seen anywhere, for the screen that links them up. */
-function allDeviceNames() {
-  const seen = new Map();
-  const add = n => {
-    const k = String(n || '').trim();
-    if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
-  };
-  DB.crew.forEach(c => { add(c.name); (c.aliases || []).forEach(add); });
-  CREW_SEED.forEach(add);
-  DB.work_orders.forEach(o => add(o.assigned_to));
-  DB.wo_updates.forEach(u => add(u.author));
-  DB.crew_log.forEach(e => add(e.crew_name));
-  return Array.from(seen.values());
-}
-
-const logById = id => DB.crew_log.find(e => e.id === id);
-
-/* ------------------------------------------------------------------------
-   The captured half of the diary is not a second copy of the work — it is
-   the work, read back. Every action on a job is already stored with who did
-   it and when, and that record syncs to every phone. Deriving from it means
-   the diary shows everyone, reaches back to before the diary existed, and
-   can never drift out of step with the jobs it describes.
-   ------------------------------------------------------------------------ */
-const DERIVED_TONES = {
-  created: 'stop', complete: 'done', reopen: 'stop', external: 'plain', status: 'plain'
-};
-
-const DERIVED_LABELS = {
-  created:  'Damage reported',
-  comment:  'Note added to a job',
-  status:   'Job updated',
-  external: 'Repairer arranged',
-  complete: 'Job completed',
-  reopen:   'Job reopened'
-};
-
-let derivedCache = null;
-let derivedKey = '';
-
-function derivedEntries() {
-  const last = DB.wo_updates[DB.wo_updates.length - 1];
-  const key = DB.wo_updates.length + ':' + (last ? last.id : '');
-  if (derivedCache && derivedKey === key) return derivedCache;
-
-  const rows = DB.wo_updates.slice()
-    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
-
-  // Files arrive one row per file. Group the ones uploaded together — same
-  // job, same person, seconds apart — so three photos read as one line. Time
-  // buckets were wrong here: paperwork added later in the same ten minutes
-  // was being swallowed into the report it followed.
-  // Files group while they are consecutive on that job: anything else
-  // happening on the job — a comment, a status change — ends the batch. Time
-  // alone was the wrong signal, since a whole day's work can land in minutes.
-  const GAP = 2 * 60 * 1000;
-  const batches = [];
-  const openFor = new Map();
-
-  rows.forEach(u => {
-    if (!u.author || !u.created_at) return;
-    const key = `${u.work_order_id}|${String(u.author).toLowerCase()}`;
-
-    if (u.kind !== 'file') {
-      // something else happened on this job — whatever was being uploaded is done
-      openFor.forEach((b, k) => { if (k.split('|')[0] === u.work_order_id) openFor.delete(k); });
-      return;
-    }
-
-    const cur = openFor.get(key);
-    const t = new Date(u.created_at).getTime();
-    if (cur && t - cur.lastT <= GAP) {
-      if (u.meta && u.meta.url) cur.files.push(u.meta);
-      cur.lastT = t;
-      if (!cur.body && u.body) cur.body = u.body;
-      return;
-    }
-    const b = { at: u.created_at, lastT: t, author: u.author, wo: u.work_order_id,
-                files: u.meta && u.meta.url ? [u.meta] : [], body: u.body || '', used: false };
-    batches.push(b);
-    openFor.set(key, b);
-  });
-
-  const out = [];
-
-  rows.forEach(u => {
-    if (u.kind === 'file') return;
-    const n = noteOf(u);
-    const label = n ? n.diary : DERIVED_LABELS[u.kind];
-    const author = String(u.author || '').trim();
-    if (!label || !author || !u.created_at) return;
-
-    // photos taken with a damage report belong on that one line
-    let files = [];
-    if (u.kind === 'created') {
-      const t = new Date(u.created_at).getTime();
-      const b = batches.find(x => !x.used && x.wo === u.work_order_id
-        && String(x.author).toLowerCase() === author.toLowerCase()
-        && new Date(x.at).getTime() >= t
-        && new Date(x.at).getTime() - t <= GAP);
-      if (b) { files = b.files; b.used = true; }
-    }
-
-    out.push({
-      id: 'wo:' + u.id,
-      crew_name: personOf(author),
-      entry_date: u.created_at.slice(0, 10),
-      at: u.created_at,
-      kind: 'auto_' + u.kind,
-      label,
-      tone: n ? n.tone : DERIVED_TONES[u.kind] || 'plain',
-      body: u.body || '',
-      work_order_id: u.work_order_id,
-      amount: null,
-      files,
-      auto: true,
-      author,
-      role: u.role || ''
-    });
-  });
-
-  batches.forEach((b, i) => {
-    if (b.used || !b.files.length) return;
-    const pics = b.files.filter(f => /^image\//.test(f.type || '')).length;
-    out.push({
-      id: 'wof:' + b.wo + ':' + i,
-      crew_name: personOf(b.author),
-      entry_date: b.at.slice(0, 10),
-      at: b.at,
-      kind: 'auto_file',
-      tone: 'plain',
-      label: pics === b.files.length ? `Photo${b.files.length === 1 ? '' : 's'} added`
-           : pics ? 'Photos and paperwork added' : 'Paperwork added',
-      body: b.body || '',
-      work_order_id: b.wo,
-      amount: null,
-      files: b.files,
-      auto: true,
-      author: b.author,
-      role: ''
-    });
-  });
-
-  out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  derivedKey = key;
-  derivedCache = out;
-  return out;
-}
-
-/** Hand-written entries only — the captured ones are derived, so any older
-    captured copies still sitting in the table are ignored rather than doubled. */
-const writtenEntries = () => DB.crew_log.filter(e => !e.auto);
-
-const allEntries = () => derivedEntries().concat(writtenEntries());
-
-/** A day's work for one person, counted from their diary. */
-function dayTally(name, date) {
-  const t = { entries: 0, reported: 0, updates: 0, photos: 0, docs: 0, closed: 0, notes: 0 };
-  logFor(name, date).forEach(e => {
-    t.entries++;
-    (Array.isArray(e.files) ? e.files : []).forEach(f => {
-      if (/^image\//.test(f.type || '')) t.photos++; else t.docs++;
-    });
-    if (!e.auto) { t.notes++; return; }
-    const k = String(e.kind || '').replace(/^auto_/, '');
-    if (k === 'complete') t.closed++;
-    else if (k === 'created') t.reported++;
-    else if (k !== 'file') t.updates++;
-  });
-  return t;
-}
-
-/** "3 updates · 2 photos · 1 closed" — zeros left out. */
-function tallyLine(t) {
-  const bits = [];
-  const add = (n, one, many) => { if (n) bits.push(`${n} ${n === 1 ? one : (many || one + 's')}`); };
-  add(t.reported, 'reported');
-  add(t.updates, 'update');
-  add(t.photos, 'photo');
-  add(t.docs, 'document');
-  add(t.closed, 'closed', 'closed');
-  add(t.notes, 'note');
-  return bits.join(' · ');
-}
-
-/** 24-hour, because that is how a diary is written. */
-function fmtTime(v) {
-  const d = new Date(v);
-  if (isNaN(d)) return '';
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-
-/** The crew RCK started with. Anyone can be added later. */
-const CREW_SEED = ['Milian', 'Clint', 'Ryder', 'Sebastion', 'Lyndon', 'Barry'];
-
-/** Everyone who can manage a job: the crew list, the built-in six as a
-    fallback before the database is migrated, and anyone already holding a
-    job who somehow isn't on either list — so no work can go invisible. */
-function crewNames() {
-  const out = [];
-  const seen = new Set();
-  const add = n => {
-    const k = String(n || '').trim();
-    if (k && !seen.has(k.toLowerCase())) { seen.add(k.toLowerCase()); out.push(k); }
-  };
-  DB.crew.filter(c => c.active !== false).forEach(c => add(c.name));
-  CREW_SEED.forEach(add);
-  DB.work_orders.forEach(o => add(assignedTo(o)));
-  return out;
-}
-
-/** The crew, plus anyone else whose day has something in it. Nobody who has
-    done work is left off the board just because they aren't on the list. */
-function crewAndActive() {
-  const out = crewNames().slice();
-  const seen = new Set(out.map(n => n.toLowerCase()));
-  everyoneWithActivity().forEach(n => {
-    if (!seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); }
-  });
-  return out;
-}
-
-/* ------------------------------------------------------------------------
-   A clean slate.
-
-   Names pile up — the six the app shipped with, every device anyone has
-   ever used, everyone who has ever touched a job — until the board is a
-   list of history rather than a list of people. Hiding a name takes it off
-   the board until that person does something new, so the board empties and
-   then refills with whoever is actually working. Nothing is deleted: the
-   diary, the jobs and the history are exactly as they were, and a hidden
-   name can still be given a job.
-   ------------------------------------------------------------------------ */
-/** Whether the database has the column this needs. Rows come back from
-    PostgREST with every column on them, so one row carrying the key is
-    proof; none carrying it, on a real database, means the SQL hasn't run. */
-function canRestNames() {
-  if (!connected() || !DB.crew.length) return true;
-  return DB.crew.some(c => Object.prototype.hasOwnProperty.call(c, 'hidden_at'));
-}
-
-function hiddenSince(name) {
-  const c = DB.crew.find(x => String(x.name || '').toLowerCase() === String(name || '').toLowerCase());
-  return c && c.hidden_at ? c.hidden_at : null;
-}
-
-/** The moment the whole board was last cleared, if it was. */
-function freshStartAt() {
-  const stamps = DB.crew.map(c => c.hidden_at).filter(Boolean).sort();
-  return stamps.length ? stamps[stamps.length - 1] : null;
-}
-
-/** Has this person done anything since they were hidden? */
-function activeSince(name, iso) {
-  const n = personOf(name).toLowerCase();
-  return allEntries().some(e => entryPerson(e).toLowerCase() === n && String(e.at || '') >= iso);
-}
-
-/** Who belongs on the crew board: everyone not hidden, everyone who has
-    worked since they were hidden, and — always — anyone holding an open
-    job, so hiding a name can never lose the work it is carrying. */
-function boardNames() {
-  const holding = new Set(activeOrders().map(o => assignedTo(o).toLowerCase()).filter(Boolean));
-  return crewAndActive().filter(n => {
-    const since = hiddenSince(n);
-    return !since || holding.has(n.toLowerCase()) || activeSince(n, since);
-  });
-}
-
-/** Names kept off the board, for the pickers that still need to reach them. */
-function restingNames() {
-  const on = new Set(boardNames().map(n => n.toLowerCase()));
-  return crewAndActive().filter(n => !on.has(n.toLowerCase()));
-}
-
-/** Clear the board from a given moment. Every name known today is put to
-    rest; whoever works after that comes back by working. */
-async function startFresh(fromISO) {
-  const now = new Date().toISOString();
-  for (const name of crewAndActive()) {
-    const row = DB.crew.find(c => String(c.name || '').toLowerCase() === name.toLowerCase());
-    if (row) await Store.patch('crew', row.id, { hidden_at: fromISO });
-    else await Store.insert('crew', { id: uid(), name, active: true, aliases: [],
-                                      hidden_at: fromISO, created_at: now });
-  }
-}
-
-/** Put every name back, exactly as it was. */
-async function undoFresh() {
-  for (const row of DB.crew.filter(c => c.hidden_at)) {
-    await Store.patch('crew', row.id, { hidden_at: null });
-  }
-}
-
-/* ------------------------------------------------------------------------
-   One person, several devices. Each crew row can carry alias names — the
-   phone, the laptop, the workshop machine — and everything that groups by a
-   name resolves through here first, so a person's jobs and their diary stay
-   in one place instead of being split across whatever their device is called.
-   ------------------------------------------------------------------------ */
-let aliasCache = null;
-let aliasKey = '';
-
-function aliasMap() {
-  const key = JSON.stringify(DB.crew.map(c => [c.name, c.aliases, c.active]));
-  if (aliasCache && aliasKey === key) return aliasCache;
-  const m = new Map();
-  DB.crew.forEach(c => {
-    if (c.active === false) return;
-    const canon = String(c.name || '').trim();
-    if (!canon) return;
-    m.set(canon.toLowerCase(), canon);
-    (Array.isArray(c.aliases) ? c.aliases : []).forEach(a => {
-      const k = String(a || '').trim().toLowerCase();
-      if (k && k !== canon.toLowerCase()) m.set(k, canon);
-    });
-  });
-  aliasKey = key; aliasCache = m;
-  return m;
-}
-
-/** The person behind a device name. Unknown names are left as they are. */
-function personOf(raw) {
-  const n = String(raw || '').trim();
-  return n ? (aliasMap().get(n.toLowerCase()) || n) : '';
-}
-
-/** The other names this person's work arrives under. */
-function aliasesOf(name) {
-  const c = DB.crew.find(x => String(x.name || '').toLowerCase() === String(name || '').toLowerCase());
-  return c && Array.isArray(c.aliases) ? c.aliases.filter(Boolean) : [];
-}
-
-const entryPerson = e => personOf(e && e.crew_name);
-
-const matchCrew = name => {
-  const n = String(name || '').trim().toLowerCase();
-  return aliasMap().get(n) || crewNames().find(x => x.toLowerCase() === n) || null;
-};
-
-const assignedTo = o => personOf(o.assigned_to);
-
-function ordersFor(name) {
-  const n = name.toLowerCase();
-  return DB.work_orders.filter(o => assignedTo(o).toLowerCase() === n);
-}
-
-/** How one person is tracking: what they hold, and what is slipping. */
-function crewStats(name) {
-  const mine = ordersFor(name);
-  const open = mine.filter(isOpen);
-  return {
-    open: open.length,
-    red: open.filter(o => o.severity === 'red').length,
-    overdue: open.filter(o => { const d = daysFromToday(o.target_date); return d !== null && d < 0; }).length,
-    noDate: open.filter(o => !o.target_date).length,
-    done: mine.filter(o => o.status === 'complete').length,
-    oldest: open.map(o => o.reported_at).filter(Boolean).sort()[0] || null
-  };
-}
-
-const unassignedOrders = () => activeOrders().filter(o => !assignedTo(o));
-
-async function addCrewMember(name) {
-  const clean = String(name || '').trim();
-  if (!clean || matchCrew(clean)) return;
-  await Store.insert('crew', { id: uid(), name: clean, active: true, created_at: new Date().toISOString() });
-}
-
-
 function money(n) {
   const v = Number(n) || 0;
   return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-NZ',
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-/** Compact form for cards and tiles: $8,400 → $8.4k */
-function moneyShort(n) {
-  const v = Number(n) || 0;
-  const a = Math.abs(v);
-  const sign = v < 0 ? '-' : '';
-  if (a >= 1000000) return `${sign}$${(a / 1000000).toFixed(a >= 10000000 ? 0 : 1)}m`;
-  if (a >= 10000) return `${sign}$${(a / 1000).toFixed(a >= 100000 ? 0 : 1)}k`;
-  return sign + '$' + Math.round(a).toLocaleString('en-NZ');
 }
 
 let toastTimer;
@@ -775,7 +318,8 @@ const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 /* ================================================================
    Local cache — the app opens instantly and stays readable offline
    ================================================================ */
-const DB = { gear: [], work_orders: [], wo_updates: [], costs: [], crew: [], crew_log: [], manuals: [], service_plans: [], service_log: [], localSeq: 0 };
+const DB = { gear: [], work_orders: [], wo_updates: [], manuals: [],
+             service_plans: [], service_log: [], localSeq: 0 };
 
 function cacheKey() { return 'rckw.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -786,9 +330,6 @@ function loadCache() {
       DB.gear = raw.gear || [];
       DB.work_orders = raw.work_orders || [];
       DB.wo_updates = raw.wo_updates || [];
-      DB.costs = raw.costs || [];
-      DB.crew = raw.crew || [];
-      DB.crew_log = raw.crew_log || [];
       DB.manuals = raw.manuals || [];
       DB.service_plans = raw.service_plans || [];
       DB.service_log = raw.service_log || [];
@@ -840,15 +381,12 @@ async function rest(path, opts) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [gear, orders, updates, costs, crew, log, manuals, plans, svc] = await Promise.all([
+    const [gear, orders, updates, manuals, plans, svc] = await Promise.all([
       rest('gear?select=*&order=code.asc', { headers: restHeaders() }),
       rest('work_orders?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }),
-      // The cost table may not exist yet on an older database; the rest of
-      // the app must keep working if it doesn't.
-      rest('costs?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }).catch(() => null),
-      rest('crew?select=*&order=created_at.asc', { headers: restHeaders() }).catch(() => null),
-      rest('crew_log?select=*&order=at.desc&limit=8000', { headers: restHeaders() }).catch(() => null),
+      // A table may not exist yet on an older database; the rest of the app
+      // must keep working if it doesn't.
       rest('manuals?select=*&order=title.asc&limit=2000', { headers: restHeaders() }).catch(() => null),
       rest('service_plans?select=*&limit=4000', { headers: restHeaders() }).catch(() => null),
       rest('service_log?select=*&order=done_on.desc&limit=8000', { headers: restHeaders() }).catch(() => null)
@@ -856,12 +394,6 @@ const Store = {
     DB.gear = gear || [];
     DB.work_orders = orders || [];
     DB.wo_updates = (updates || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
-    if (costs) { DB.costs = costs; costsTableMissing = false; }
-    else costsTableMissing = true;
-    if (crew) { DB.crew = crew; crewTableMissing = false; }
-    else crewTableMissing = true;
-    if (log) { DB.crew_log = log; logTableMissing = false; }
-    else logTableMissing = true;
     if (manuals) { DB.manuals = manuals; manualsTableMissing = false; }
     else manualsTableMissing = true;
     if (plans && svc) { DB.service_plans = plans; DB.service_log = svc; serviceTableMissing = false; }
@@ -1085,36 +617,6 @@ function activeOrders() {
    ================================================================ */
 function whoami() { return S.name || 'Unnamed user'; }
 
-/** Kept only so older call sites stay harmless — the diary is derived from
-    the work orders now, so nothing needs to be written a second time. */
-async function autoDiary() { /* intentionally does nothing */ }
-
-async function autoDiaryRetired(workOrderId, kind, body, opts) {
-  const o = opts || {};
-  const label = o.label || AUTO_LOG_LABELS[kind];
-  if (!label) return;
-  const who = matchCrew(whoami()) || whoami();
-  if (!who) return;
-  const now = new Date();
-  await Store.insert('crew_log', {
-    id: uid(),
-    crew_name: who,
-    entry_date: today(),
-    at: now.toISOString(),
-    kind: 'auto_' + kind,
-    label,
-    // keep it to the gist; the work order holds the full record
-    body: String(body || '').split('\n').slice(0, 3).join('\n').slice(0, 400),
-    work_order_id: workOrderId || null,
-    amount: null,
-    files: o.files || [],
-    auto: true,
-    author: whoami(),
-    role: S.role,
-    created_at: now.toISOString()
-  });
-}
-
 async function logUpdate(workOrderId, kind, body, meta) {
   const saved = await Store.insert('wo_updates', {
     id: uid(),
@@ -1126,7 +628,6 @@ async function logUpdate(workOrderId, kind, body, meta) {
     body: body || '',
     meta: meta || {}
   });
-  await autoDiary(workOrderId, kind, body);
   return saved;
 }
 
@@ -1156,12 +657,6 @@ async function createWorkOrder(data, files) {
     shots.push(up);
     await logUpdate(saved.id, 'file', 'Photo of the damage', up);
   }
-
-  // One diary line for the whole report, carrying the photos, rather than
-  // one per photo.
-  await autoDiary(saved.id, 'created',
-    `${data.title}${shots.length ? ` — ${shots.length} photo${shots.length === 1 ? '' : 's'}` : ''}`,
-    { label: 'Damage reported', files: shots });
 
   if (data.location) {
     await Store.patch('gear', data.gear_id, {
@@ -1219,8 +714,6 @@ function go(hash) { location.hash = hash; }
 function sectionOf(path) {
   if (path === '/') return 'hub';
   if (path === '/screen') return 'kiosk';
-  if (path.startsWith('/crew')) return 'crew';
-  if (path.startsWith('/costs')) return 'costs';
   if (path.startsWith('/manuals')) return 'manuals';
   if (path.startsWith('/service')) return 'service';
   return 'maintenance';
@@ -1236,11 +729,6 @@ const TABS = {
     { href: '#/service',       label: 'Due',      icon: 'orders', on: p => p === '/service' },
     { href: '#/service/fleet', label: 'Machines', icon: 'grid',   on: p => p !== '/service' }
   ],
-  costs: [
-    { href: '#/costs',         label: 'Assets',   icon: 'grid',  on: p => p === '/costs' || /^\/costs\/[^/]+$/.test(p) && p !== '/costs/new' && p !== '/costs/summary' },
-    { href: '#/costs/summary', label: 'Tracker',  icon: 'chart', on: p => p === '/costs/summary' },
-    { href: '#/costs/new',     label: 'Add cost', icon: 'plus',  on: p => p === '/costs/new' || p.startsWith('/costs/edit/'), primary: true }
-  ]
 };
 
 function paintTabs(section, path) {
@@ -1258,19 +746,10 @@ function paintTabs(section, path) {
 const SCREENS = {
   '/':          { title: 'RCK Workshop',  render: renderHub },
   '/gear':      { title: 'Gear',          render: renderBoard },
-  '/crew':           { title: 'Maintenance crew', render: renderCrewBoard },
-  '/crew-unassigned': { title: 'Unassigned jobs',  render: renderUnassigned, back: true },
-  '/crew-today':      { title: 'Daily diary',      render: renderCrewDiary,  back: true },
-  '/crew-merge':      { title: 'Same person?',     render: renderCrewMerge,  back: true },
-  '/crew-fresh':      { title: 'Start fresh',      render: renderCrewFresh,  back: true },
-  '/crew-log':        { title: 'Diary entry',      render: renderCrewLogForm, back: true },
   '/service':        { title: 'Planned servicing', render: renderServiceBoard },
   '/service/fleet':  { title: 'Every machine',    render: renderServiceFleet },
   '/manuals':        { title: 'Manuals',      render: renderManuals },
   '/manuals/new':    { title: 'Add a manual', render: renderManualForm, back: true },
-  '/costs':          { title: 'Costs',        render: renderCostsBoard },
-  '/costs/new':      { title: 'Add a cost',   render: renderCostForm,    back: true },
-  '/costs/summary':  { title: 'Cost tracker', render: renderCostSummary },
   '/orders':    { title: 'Work orders',   render: renderOrders },
   '/report':    { title: 'Report damage', render: renderReport,   back: true },
   '/reports':   { title: 'Reports',       render: renderReports,  back: true },
@@ -1285,7 +764,7 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = ['/gear', '/orders', '/costs'].includes(path);
+  const keepsPlace = ['/gear', '/orders'].includes(path);
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
@@ -1304,10 +783,6 @@ function render() {
   if (!screen && route.path.startsWith('/service/done/')) { screen = { title: 'Mark it done', render: renderServiceDone }; back = true; }
   else if (!screen && route.path.startsWith('/service/plan/')) { screen = { title: 'Service', render: renderServicePlan }; back = true; }
   else if (!screen && route.path.startsWith('/service/')) { screen = { title: 'Servicing', render: renderServiceGear }; back = true; }
-  else if (!screen && route.path.startsWith('/crew-log/edit/')) { screen = { title: 'Edit entry', render: renderCrewLogForm }; back = true; }
-  else if (!screen && route.path.startsWith('/crew/')) { screen = { title: 'Crew', render: renderCrewPerson }; back = true; }
-  else if (!screen && route.path.startsWith('/costs/edit/')) { screen = { title: 'Edit cost', render: renderCostForm }; back = true; }
-  else if (!screen && route.path.startsWith('/costs/')) { screen = { title: 'Costs', render: renderCostsAsset }; back = true; }
   else if (!screen && route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
   else if (!screen && route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
   else if (!screen && route.path.startsWith('/wo/')) { screen = { title: 'Work order', render: renderWorkOrder }; back = true; }
@@ -1319,9 +794,8 @@ function render() {
   $('#menu').hidden = true;
 
   const section = sectionOf(route.path);
-  document.body.classList.toggle('in-costs', section === 'costs');
   paintTabs(section, route.path);
-  $('#homeBtn').hidden = !['costs', 'maintenance', 'crew', 'manuals', 'service'].includes(section) || (back || screen.back);
+  $('#homeBtn').hidden = !['maintenance', 'manuals', 'service'].includes(section) || (back || screen.back);
 
   const view = $('#view');
   view.innerHTML = '';
@@ -1609,10 +1083,7 @@ function pulseLine(o, size) {
   const p = jobPulse(o);
   if (!p) return '';
   const when = p.at ? ago(p.at) : '';
-  // the card already names whoever is managing the job; saying it twice is
-  // noise, so the speaker is named only when it is somebody else
-  const who = p.who && p.who !== assignedTo(o) ? p.who : '';
-  const meta = [who, when].filter(Boolean).join(' \u00b7 ');
+  const meta = [p.who, when].filter(Boolean).join(' \u00b7 ');
   return `<div class="pulse tone-${p.tone}${size === 'big' ? ' big' : ''}">
     <span class="pdot"></span>
     <span class="pl">${esc(p.label)}</span>
@@ -1639,7 +1110,6 @@ function woCard(o, i) {
           ? `<span>Completed ${fmtDate(o.completed_at)}</span>`
           : `<span class="${due.late ? 'overdue' : ''}">${due.none ? 'No fix date set' : due.text}</span>`}
         ${o.repairer === 'external' ? `<span>External${o.external_company ? ' · ' + esc(o.external_company) : ''}</span>` : ''}
-        ${assignedTo(o) ? `<span class="who">${esc(assignedTo(o))}</span>` : `<span class="who none">Unassigned</span>`}
       </div>
     </button>`;
 }
@@ -1865,9 +1335,6 @@ function renderWorkOrder(view) {
     <div class="card">
       <table class="data">
         <tr><th>Status</th><td>${statusLabel(o.status)}</td></tr>
-        <tr><th>Managed by</th><td>${assignedTo(o)
-          ? `<a href="#/crew/${encodeURIComponent(assignedTo(o))}">${esc(assignedTo(o))}</a>`
-          : '<span class="muted">nobody yet</span>'}</td></tr>
         <tr><th>Reported</th><td>${esc(o.reported_by || '—')} · ${fmtDateTime(o.reported_at)}</td></tr>
         <tr><th>Location</th><td>${esc(o.location_at_report || g.location || '—')}</td></tr>
         <tr><th>Back in service</th><td>${o.target_date
@@ -1964,22 +1431,6 @@ function workshopPanel(o) {
         </label>
       </div>
 
-      <label class="field"><span>Managed by</span>
-        <select id="wAssign">
-          <option value="">Nobody yet</option>
-          ${(() => {
-            const pick = n => `<option value="${esc(n)}" ${
-              assignedTo(o).toLowerCase() === n.toLowerCase() ? 'selected' : ''}>${esc(n)}</option>`;
-            const on = boardNames();
-            const off = restingNames();
-            // a cleared name is still reachable — it just isn't in the way
-            return on.map(pick).join('')
-              + (off.length ? `<optgroup label="Not on the board">${off.map(pick).join('')}</optgroup>` : '');
-          })()}
-          <option value="__new">+ Add someone…</option>
-        </select>
-      </label>
-
       <label class="field"><span>Expected back in service</span>
         <input type="date" id="wTarget" value="${esc((o.target_date || '').slice(0, 10))}">
       </label>
@@ -2030,35 +1481,9 @@ function wireWorkshopPanel(view, o) {
     repairer.onchange = () => { $('#extBox', view).hidden = repairer.value !== 'external'; };
   }
 
-  const assign = $('#wAssign', view);
-  if (assign) {
-    let previous = assign.value;
-    assign.onchange = async () => {
-      if (assign.value !== '__new') { previous = assign.value; return; }
-      const typed = (prompt('Who is managing this job?\n\nEnter their name to add them to the crew.') || '').trim();
-      if (!typed) { assign.value = previous; return; }
-      const existing = matchCrew(typed);
-      const name = existing || typed;
-      if (existing) {
-        toast(`${existing} is already on the crew`);
-      } else {
-        await addCrewMember(name);
-        const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name;
-        assign.insertBefore(opt, assign.querySelector('option[value="__new"]'));
-      }
-      assign.value = name;
-      previous = name;
-    };
-  }
-
   const save = $('#wSave', view);
   if (save) save.onclick = async function () {
-    const assign = $('#wAssign', view).value;
-    if (assign === '__new') return toast('Name the person first');
-
     const patch = {
-      assigned_to: assign,
       status: $('#wStatus', view).value,
       severity: $('#wSeverity', view).value,
       target_date: $('#wTarget', view).value || null,
@@ -2070,11 +1495,6 @@ function wireWorkshopPanel(view, o) {
     };
 
     const notes = [];
-    if (patch.assigned_to !== assignedTo(o)) {
-      notes.push(patch.assigned_to
-        ? `Assigned to ${patch.assigned_to}`
-        : `Unassigned${assignedTo(o) ? ' (was ' + assignedTo(o) + ')' : ''}`);
-    }
     if (patch.status !== o.status) notes.push(`Status: ${statusLabel(o.status)} → ${statusLabel(patch.status)}`);
     if (patch.severity !== o.severity) notes.push(`Now ${STATUS_TEXT[patch.severity].toLowerCase()}`);
     if ((patch.target_date || '') !== (o.target_date || '')) {
@@ -2123,8 +1543,7 @@ function wireWorkshopPanel(view, o) {
         const pics = added.filter(f => /^image\//.test(f.type || '')).length;
         const label = pics === n ? `Photo${n === 1 ? '' : 's'} added`
                     : pics ? 'Photos and paperwork added' : 'Paperwork added';
-        await autoDiary(o.id, 'file', note || `${n} file${n === 1 ? '' : 's'} added`,
-          { label, files: added });
+  
       }
       toast(`${n} file${n === 1 ? '' : 's'} added`);
       render();
@@ -2412,7 +1831,7 @@ function exportCsv() {
       const g = gearById(o.gear_id) || {};
       return [woNo(o), g.code || '', g.name || '', catLabel(catOf(g)), o.title, o.description,
         o.severity === 'red' ? 'No — out of operation' : 'Yes — usable', statusLabel(o.status),
-        assignedTo(o), o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
+        o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
         o.repairer || '', o.external_company || '', o.external_ref || '', o.cost != null ? o.cost : '',
         o.completed_at ? fmtDateTime(o.completed_at) : '', o.completed_by || '', o.work_done || '',
         daysBetween(o.reported_at, o.completed_at) ?? ''];
@@ -2534,8 +1953,8 @@ function printWorkOrder(o) {
         <div class="line">${esc(o.location_at_report || g.location || 'Location not recorded')}</div>
       </div>
       <div class="col">
-        <div class="lab">Managed by</div>
-        <div class="big">${esc(assignedTo(o) || 'Unassigned')}</div>
+        <div class="lab">Repaired by</div>
+        <div class="big">${esc(o.repairer === 'external' ? (o.external_company || 'External') : o.repairer === 'internal' ? 'RCK workshop' : 'Not decided')}</div>
         <div class="line">${esc(repairer)}</div>
         ${o.external_ref ? `<div class="line">Their ref: ${esc(o.external_ref)}</div>` : ''}
       </div>
@@ -2584,7 +2003,7 @@ function printWorkOrder(o) {
       ${comments.map(u => { const n = noteOf(u); return `<tr class="avoid-break">
         <td>${fmtDateTime(u.created_at)}</td>
         <td>${esc(u.author || '—')}${u.role === 'workshop' ? '<br><span class="quiet">Workshop</span>' : ''}</td>
-        <td>${n ? `<strong>${esc(n.label)}</strong>` : esc(DERIVED_LABELS[u.kind] || 'Note')}</td>
+        <td>${n ? `<strong>${esc(n.label)}</strong>` : esc(UPDATE_LABELS[u.kind] || 'Note')}</td>
         <td class="note">${esc(u.body || '')}</td>
       </tr>`; }).join('') || '<tr><td colspan="4" class="quiet">Nothing recorded.</td></tr>'}
     </table>
@@ -2788,7 +2207,7 @@ function renderKiosk(view) {
                       <div class="kttl">${esc(o.title)}</div>
                       <div class="kmeta">${(() => { const p = jobPulse(o);
                         return `<b class="kpulse tone-${p.tone}">${esc(p.label)}</b>${p.at ? ' ' + esc(ago(p.at)) : ''}`; })()}${
-                        assignedTo(o) ? ' · ' + esc(assignedTo(o)) : ''}${o.repairer === 'external'
+                        o.repairer === 'external'
                         ? ' · ' + esc(o.external_company || 'external') : ''}</div>
                     </div>
                     <div class="keta">
@@ -2841,7 +2260,7 @@ function renderKiosk(view) {
 }
 
 /* ================================================================
-   Screen — the landing page: costs or maintenance
+   Screen — the landing page
    ================================================================ */
 function renderHub(view) {
   const gear = activeGear();
@@ -2882,7 +2301,7 @@ function renderHub(view) {
       </a>
     </div>
 
-    <p class="muted small center mt">Maintenance crew and costs are in the ⋮ menu.</p>`;
+    <p class="muted small center mt">Everything else is in the ⋮ menu.</p>`;
 }
 
 /* ================================================================
@@ -3502,1346 +2921,6 @@ function renderManualForm(view) {
 }
 
 /* ================================================================
-   Maintenance crew — who is managing what
-   ================================================================ */
-function crewBanner() {
-  return crewTableMissing
-    ? `<div class="banner">The crew table isn't in the database yet, so anyone you
-       add here won't stick. Run the <strong>Maintenance crew</strong> section at the
-       end of <code>supabase-schema.sql</code> in Supabase, then reopen the app.
-       Assigning jobs still works meanwhile.</div>`
-    : '';
-}
-
-/* ================================================================
-   Screen — linking a person's devices together
-   ================================================================ */
-
-/** Device words, so "Clint Laptop" and "Clint - phone" compare as "clint". */
-const DEVICE_WORDS = /\b(mobile|phone|cell|laptop|ipad|tablet|tab|pc|desktop|computer|workshop|office|device|app|work)\b/gi;
-
-function nameStem(n) {
-  const cleaned = String(n || '').toLowerCase()
-    .replace(DEVICE_WORDS, ' ')
-    .replace(/[^a-z\s]/g, ' ')
-    .trim();
-  return (cleaned.split(/\s+/)[0] || '');
-}
-
-/** Two names look like the same person if one stem starts the other. */
-function looksSame(a, b) {
-  const x = nameStem(a), y = nameStem(b);
-  if (x.length < 3 || y.length < 3) return false;
-  return x === y || x.startsWith(y) || y.startsWith(x);
-}
-
-/** Groups of names that are probably one person and aren't linked yet.
-    Grouped transitively: "Milian" and "Mill Road" never match each other,
-    but both match "Mil", so all three belong to the same person. */
-function suggestedGroups() {
-  // a name that has been put to rest is not worth nagging about
-  const resting = new Set(restingNames().map(n => n.toLowerCase()));
-  const names = allDeviceNames().filter(n =>
-    personOf(n).toLowerCase() === n.toLowerCase() && !resting.has(n.toLowerCase()));
-  const parent = new Map(names.map(n => [n, n]));
-  const find = a => { while (parent.get(a) !== a) a = parent.get(a); return a; };
-
-  for (let i = 0; i < names.length; i++) {
-    for (let j = i + 1; j < names.length; j++) {
-      if (!looksSame(names[i], names[j])) continue;
-      const ra = find(names[i]), rb = find(names[j]);
-      if (ra !== rb) parent.set(ra, rb);
-    }
-  }
-
-  const buckets = new Map();
-  names.forEach(n => {
-    const r = find(n);
-    if (!buckets.has(r)) buckets.set(r, []);
-    buckets.get(r).push(n);
-  });
-  return Array.from(buckets.values()).filter(g => g.length > 1);
-}
-
-/** Which of a group reads like the person rather than the machine. */
-const DEVICE_TEST = new RegExp(DEVICE_WORDS.source, 'i');
-function bestKeeper(group) {
-  const score = n => (DEVICE_TEST.test(n) ? 0 : 1000)
-    + String(n).trim().split(/\s+/).length * 20 + String(n).length;
-  return group.slice().sort((a, b) => score(b) - score(a))[0];
-}
-
-/** Fold a list of names into one person. The keeper holds everything. */
-async function linkNames(keeper, others) {
-  const keep = String(keeper).trim();
-  const extras = others.map(n => String(n).trim()).filter(n => n && n.toLowerCase() !== keep.toLowerCase());
-  if (!extras.length) return;
-
-  // whatever the folded-in names were carrying comes with them
-  const carried = [];
-  extras.forEach(n => {
-    carried.push(n);
-    aliasesOf(n).forEach(a => carried.push(a));
-  });
-
-  let row = DB.crew.find(c => String(c.name || '').toLowerCase() === keep.toLowerCase());
-  if (!row) {
-    row = { id: uid(), name: keep, active: true, aliases: [], created_at: new Date().toISOString() };
-    await Store.insert('crew', row);
-  }
-
-  const merged = [];
-  const seen = new Set([keep.toLowerCase()]);
-  (row.aliases || []).concat(carried).forEach(a => {
-    const k = String(a || '').trim();
-    if (k && !seen.has(k.toLowerCase())) { seen.add(k.toLowerCase()); merged.push(k); }
-  });
-  await Store.patch('crew', row.id, { aliases: merged });
-
-  // the folded-in crew rows step aside so they stop showing as people
-  for (const n of extras) {
-    const dupe = DB.crew.find(c => String(c.name || '').toLowerCase() === n.toLowerCase());
-    if (dupe && dupe.id !== row.id) await Store.patch('crew', dupe.id, { active: false, aliases: [] });
-  }
-
-  // jobs move with the person so nothing is left behind on an old name
-  for (const o of DB.work_orders) {
-    const a = String(o.assigned_to || '').trim();
-    if (a && extras.some(n => n.toLowerCase() === a.toLowerCase())) {
-      await Store.patch('work_orders', o.id, { assigned_to: keep });
-    }
-  }
-}
-
-function renderCrewFresh(view) {
-  const started = freshStartAt();
-  const resting = restingNames();
-  const back = boardNames();
-  const holding = activeOrders().filter(o => assignedTo(o)).length;
-
-  // default to the start of tomorrow, so today finishes as it is
-  const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(0, 0, 0, 0);
-  const tomorrow = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-
-  $('#title').textContent = 'Start fresh';
-
-  const ready = canRestNames();
-
-  view.innerHTML = `
-    ${crewBanner()}
-    ${ready ? '' : `<div class="banner">This needs one line added to the database first.
-      Run <code>supabase-schema.sql</code> in Supabase again — it is safe to re-run —
-      then reopen the app. Everything else keeps working meanwhile.</div>`}
-    ${started ? `
-      <div class="card accent status-green">
-        <h2 style="font-size:17px">The board was cleared</h2>
-        <p class="small mt" style="margin-bottom:0">Counting from <strong>${esc(fmtDate(started))}</strong>.
-          ${resting.length} name${resting.length === 1 ? '' : 's'} put to rest,
-          ${back.length} back on the board.</p>
-      </div>` : ''}
-
-    <div class="card">
-      <h2>${started ? 'Clear it again' : 'Clear the crew board'}</h2>
-      <p class="small mt">Names pile up — the six the app came with, every phone and
-        laptop anyone has signed in on, everyone who has ever touched a job. This
-        takes them all off the board. From the date you pick, a name comes back the
-        moment that person does something: raises a job, updates one, adds a photo,
-        signs one off.</p>
-
-      <div class="banner info" style="margin-top:12px">
-        <strong>Nothing is deleted.</strong> Every work order, every photo and the
-        whole diary stay exactly as they are — step the diary back to any past day
-        and it reads the same as it does now. A cleared name can still be given a
-        job, under <em>Not on the board</em> in the picker.
-      </div>
-
-      ${holding ? `<p class="small mt">${holding} open job${holding === 1 ? ' has' : 's have'}
-        somebody on ${holding === 1 ? 'it' : 'them'} — ${holding === 1 ? 'that person stays' : 'those people stay'}
-        on the board either way, so no live work goes quiet.</p>` : ''}
-
-      <label class="field mt"><span>Start counting from</span>
-        <input type="date" id="fDate" value="${esc(tomorrow)}">
-      </label>
-      <button class="btn primary wide" id="fGo" ${ready ? '' : 'disabled'}>Clear the board</button>
-    </div>
-
-    ${resting.length ? `
-      <div class="section-title">Resting (${resting.length})</div>
-      <p class="muted small" style="margin:-4px 4px 9px">Off the board until they work again.</p>
-      <div class="card">
-        <div class="merge-names">${resting.map(n => `<span class="tagname">${esc(n)}</span>`).join('')}</div>
-      </div>
-      <button class="btn wide mt" id="fUndo">Put them all back</button>` : ''}`;
-
-  $('#fGo', view).onclick = async function () {
-    const d = $('#fDate', view).value;
-    if (!d) return toast('Pick a date first');
-    const iso = new Date(d + 'T00:00:00').toISOString();
-    const n = crewAndActive().length;
-    if (!confirm(`Take all ${n} names off the crew board and count again from ${fmtDate(d)}?\n\n`
-      + 'Nothing is deleted — people come back as they work.')) return;
-    this.disabled = true;
-    this.textContent = 'Clearing…';
-    await startFresh(iso);
-    toast('Board cleared — it fills up as people work');
-    go('#/crew');
-  };
-
-  const undo = $('#fUndo', view);
-  if (undo) undo.onclick = async function () {
-    this.disabled = true;
-    await undoFresh();
-    toast('Everyone is back');
-    render();
-  };
-}
-
-function renderCrewMerge(view) {
-  const groups = suggestedGroups();
-  const people = crewNames();
-  const loose = allDeviceNames()
-    .filter(n => personOf(n).toLowerCase() === n.toLowerCase())
-    .filter(n => !people.some(p => p.toLowerCase() === n.toLowerCase()) || aliasesOf(n).length === 0);
-
-  $('#title').textContent = 'Same person?';
-
-  view.innerHTML = `
-    ${crewBanner()}
-    <div class="card">
-      <h2>One person, several devices</h2>
-      <p class="muted small" style="margin:0">People log in from a phone, a laptop and the workshop
-      machine, and each carries its own name. Link them and their jobs and diary come together
-      under one person.</p>
-    </div>
-
-    ${groups.length ? `
-      <div class="section-title">Looks like the same person</div>
-      ${groups.map((g, i) => `
-        <div class="card">
-          <div class="merge-names">${g.map(n => `<span class="tagname">${esc(n)}</span>`).join('')}</div>
-          <label class="field mt"><span>Keep them all under</span>
-            <select id="keep${i}">
-              ${(() => { const best = bestKeeper(g);
-                 return [best].concat(g.filter(n => n !== best))
-                   .map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(''); })()}
-            </select></label>
-          <button class="btn primary wide" data-join="${i}">Combine these ${g.length}</button>
-        </div>`).join('')}` : ''}
-
-    <div class="section-title">Everyone the app has seen</div>
-    ${allDeviceNames().map(n => {
-      const person = personOf(n);
-      const isAlias = person.toLowerCase() !== n.toLowerCase();
-      const mine = aliasesOf(n);
-      return `
-        <div class="card row spread" style="padding:12px 13px;gap:10px">
-          <div class="grow" style="min-width:0">
-            <strong>${esc(n)}</strong>
-            ${isAlias ? `<div class="tiny muted">counted as ${esc(person)}</div>` : ''}
-            ${mine.length ? `<div class="tiny muted">also: ${mine.map(esc).join(', ')}</div>` : ''}
-          </div>
-          ${isAlias
-            ? `<button class="btn sm" data-split="${esc(n)}">Separate</button>`
-            : `<button class="btn sm" data-into="${esc(n)}">Link…</button>`}
-        </div>`;
-    }).join('')}`;
-
-  $$('[data-join]', view).forEach(b => b.onclick = async function () {
-    const g = groups[+b.dataset.join];
-    const keep = $('#keep' + b.dataset.join, view).value;
-    this.disabled = true;
-    this.textContent = 'Combining…';
-    await linkNames(keep, g);
-    toast(`Combined under ${keep}`);
-    render();
-  });
-
-  $$('[data-into]', view).forEach(b => b.onclick = async () => {
-    const from = b.dataset.into;
-    const targets = crewAndActive().filter(n => n.toLowerCase() !== from.toLowerCase());
-    if (!targets.length) return toast('Nobody else to link to yet');
-    const pick = prompt(
-      `"${from}" is the same person as which of these?\n\n` +
-      targets.map((n, i) => `${i + 1}. ${n}`).join('\n') +
-      `\n\nType the number, or a name:`);
-    if (!pick) return;
-    const byNum = targets[Number(pick.trim()) - 1];
-    const keeper = byNum || targets.find(n => n.toLowerCase() === pick.trim().toLowerCase());
-    if (!keeper) return toast('Did not recognise that');
-    await linkNames(keeper, [from]);
-    toast(`${from} now counts as ${keeper}`);
-    render();
-  });
-
-  $$('[data-split]', view).forEach(b => b.onclick = async () => {
-    const alias = b.dataset.split;
-    const person = personOf(alias);
-    const row = DB.crew.find(c => String(c.name || '').toLowerCase() === person.toLowerCase());
-    if (!row) return;
-    await Store.patch('crew', row.id, {
-      aliases: (row.aliases || []).filter(a => String(a).toLowerCase() !== alias.toLowerCase())
-    });
-    toast(`${alias} separated out again`);
-    render();
-  });
-}
-
-/** Everyone worth a row, with the numbers each row needs, ordered so the
-    people who need attention are the ones you read first. */
-function crewRows(date) {
-  const onCrew = new Set(crewNames().map(n => n.toLowerCase()));
-  const order = boardNames();
-  return order.map(name => {
-    const st = crewStats(name);
-    const t = dayTally(name, date);
-    return { name, st, t, guest: !onCrew.has(name.toLowerCase()) };
-  }).sort((a, b) =>
-       (b.st.overdue - a.st.overdue)
-    || (b.st.open - a.st.open)
-    || (b.t.entries - a.t.entries)
-    // nothing to separate them: leave the list in the order it was set up,
-    // so a quiet morning shows the crew the way they are used to reading it
-    || (order.indexOf(a.name) - order.indexOf(b.name)));
-}
-
-/** A whole day for the whole workshop, counted the same way one person is. */
-function dayTotals(date) {
-  const t = { entries: 0, reported: 0, updates: 0, photos: 0, docs: 0, closed: 0, notes: 0, people: 0 };
-  const seen = new Set();
-  logOnDay(date).forEach(e => {
-    t.entries++;
-    const who = entryPerson(e); if (who) seen.add(who.toLowerCase());
-    (Array.isArray(e.files) ? e.files : []).forEach(f => {
-      if (/^image\//.test(f.type || '')) t.photos++; else t.docs++;
-    });
-    if (!e.auto) { t.notes++; return; }
-    const k = String(e.kind || '').replace(/^auto_/, '');
-    if (k === 'complete') t.closed++;
-    else if (k === 'created') t.reported++;
-    else if (k !== 'file') t.updates++;
-  });
-  t.people = seen.size;
-  return t;
-}
-
-/** The day at a glance — four numbers instead of a paragraph to scroll. */
-function glance(t) {
-  const cells = [
-    [t.reported, 'reported'],
-    [t.updates,  'updates'],
-    [t.photos + t.docs, 'files'],
-    [t.closed,   'closed']
-  ];
-  return `<div class="glance">${cells.map(([n, l]) =>
-    `<div class="${n ? '' : 'zero'}"><span class="n">${n}</span><span class="l">${l}</span></div>`).join('')}</div>`;
-}
-
-/** The little counted strip on a person's row. */
-function miniTally(t) {
-  if (!t.entries) return '<span class="mt-quiet">nothing yet today</span>';
-  const bits = [];
-  const add = (n, l) => { if (n) bits.push(`<b>${n}</b> ${l}`); };
-  add(t.reported, 'raised');
-  add(t.updates, 'updates');
-  add(t.photos + t.docs, 'files');
-  add(t.closed, 'closed');
-  add(t.notes, 'notes');
-  return bits.slice(0, 3).join('<i>\u00b7</i>');
-}
-
-function renderCrewBoard(view) {
-  const rows = crewRows(today());
-  const loose = unassignedOrders();
-  const tot = dayTotals(today());
-  const busy = rows.filter(r => r.t.entries).slice(0, 8);
-
-  view.innerHTML = `
-    ${crewBanner()}
-
-    <a class="card today-card" href="#/crew-today">
-      <div class="tc-head">
-        <span>Today</span>
-        <span class="tc-date">${esc(fmtDate(today()))}</span>
-      </div>
-      ${glance(tot)}
-      ${busy.length ? `<div class="facepile">${busy.map(r =>
-          `<span class="avatar sm" title="${esc(r.name)}">${esc(initials(r.name))}</span>`).join('')}
-        <span class="fp-note">${tot.people} ${tot.people === 1 ? 'person' : 'people'} on the tools</span></div>`
-        : '<div class="fp-note only">Nothing logged yet today</div>'}
-      <span class="tc-go">Open the diary \u2192</span>
-    </a>
-
-    ${loose.length ? `
-      <button class="wo status-red unassigned-tile" id="looseTile">
-        <div class="ttl">${loose.length} job${loose.length === 1 ? '' : 's'} with nobody on ${loose.length === 1 ? 'it' : 'them'}</div>
-        <div class="sub"><span>Tap to assign</span></div>
-      </button>` : ''}
-
-    <div class="section-title">Crew</div>
-    <div class="crew-list">
-      ${rows.map((r, i) => {
-        const tone = r.st.overdue ? 'status-red' : r.st.open ? 'status-orange' : 'status-green';
-        return `
-          <button class="crew-row ${tone}" data-name="${esc(r.name)}" style="--i:${Math.min(i, 14)}">
-            <span class="avatar">${esc(initials(r.name))}</span>
-            <span class="cr-mid">
-              <span class="who">${esc(r.name)}</span>${
-                r.guest ? '<span class="guest">not on the crew list</span>' : ''}
-              <span class="cr-load">
-                <span class="load">${r.st.open
-                  ? `${r.st.open} open job${r.st.open === 1 ? '' : 's'}` : 'No open jobs'}</span>
-                ${r.st.overdue ? `<span class="flag">${r.st.overdue} overdue</span>`
-                  : r.st.red ? `<span class="flag amber">${r.st.red} out of action</span>` : ''}
-              </span>
-              <span class="mini">${miniTally(r.t)}</span>
-            </span>
-            <span class="cr-num${r.t.entries ? '' : ' zero'}">${r.t.entries}<i>today</i></span>
-          </button>`;
-      }).join('') || '<div class="card muted small">Nobody on the crew yet.</div>'}
-    </div>
-
-    <div class="btn-row mt">
-      <button class="btn" id="addCrew">${icon('plus')}Add someone</button>
-      <a class="btn ${suggestedGroups().length ? 'primary' : ''}" href="#/crew-merge">${icon('people')}Link devices${
-        suggestedGroups().length ? ` (${suggestedGroups().length})` : ''}</a>
-      <a class="btn" href="#/crew-fresh">${icon('broom')}Start fresh</a>
-    </div>`;
-
-  const loose_ = $('#looseTile', view);
-  if (loose_) loose_.onclick = () => go('#/crew-unassigned');
-  $$('[data-name]', view).forEach(b => b.onclick = () => go('#/crew/' + encodeURIComponent(b.dataset.name)));
-
-  $('#addCrew', view).onclick = async () => {
-    const typed = (prompt('Name of the person to add to the maintenance crew:') || '').trim();
-    if (!typed) return;
-    if (matchCrew(typed)) return toast(`${matchCrew(typed)} is already on the crew`);
-    await addCrewMember(typed);
-    toast(`${typed} added`);
-    render();
-  };
-}
-
-/** "Sebastion" → "S", "Jo Baker" → "JB" */
-function initials(name) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0][0].toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-function renderUnassigned(view) {
-  const loose = unassignedOrders();
-  $('#title').textContent = 'Unassigned jobs';
-  view.innerHTML = loose.length
-    ? `<p class="muted small">Open the job and set <strong>Managed by</strong> in the workshop panel.</p>
-       ${loose.map(woCard).join('')}`
-    : `<div class="empty"><b>Nothing unassigned</b>Every open job has someone on it.</div>`;
-  wireWoCards(view);
-}
-
-function renderCrewPerson(view) {
-  const name = decodeURIComponent(route.path.split('/')[2] || '');
-  if (!name) { view.innerHTML = `<div class="empty"><b>Nobody selected</b></div>`; return; }
-
-  const st = crewStats(name);
-  const mine = ordersFor(name);
-  const open = mine.filter(isOpen).sort((a, b) => {
-    if (a.severity !== b.severity) return a.severity === 'red' ? -1 : 1;
-    return String(a.reported_at || '').localeCompare(String(b.reported_at || ''));
-  });
-  const done = mine.filter(o => !isOpen(o))
-    .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
-  const days = logDays(name);
-  const also = aliasesOf(name);
-  const todayRows = logFor(name, today());
-  const earlier = days.filter(d => d !== today()).slice(0, 4);
-
-  $('#title').textContent = name;
-
-  view.innerHTML = `
-    <div class="card crew-head">
-      <span class="avatar big">${esc(initials(name))}</span>
-      <div class="grow">
-        <h2 style="font-size:20px">${esc(name)}</h2>
-        <div class="muted small">${st.open ? `Managing ${st.open} open job${st.open === 1 ? '' : 's'}` : 'No open jobs'}</div>
-        ${also.length ? `<div class="tiny" style="color:var(--ink-3);margin-top:3px">also ${esc(also.join(', '))}</div>` : ''}
-      </div>
-    </div>
-
-    <div class="section-title">Today</div>
-    ${glance(dayTally(name, today()))}
-    ${todayRows.length
-      ? `<div class="card log-card stream">${todayRows.slice().reverse().map(e => logRow(e)).join('')}</div>`
-      : `<div class="card muted small">Nothing logged today.</div>`}
-    <a class="btn wide mt" href="#/crew-log?who=${encodeURIComponent(name)}">${icon('plus')}Log something by hand</a>
-
-    <div class="tally mt">
-      <button class="status-orange" disabled><span class="n">${st.open}</span><span class="l">Open</span></button>
-      <button class="status-red" disabled><span class="n">${st.overdue}</span><span class="l">Overdue</span></button>
-      <button class="status-green" disabled><span class="n">${st.done}</span><span class="l">Fixed</span></button>
-    </div>
-
-    ${st.noDate ? `<div class="banner">${st.noDate} of these ${st.noDate === 1 ? 'has' : 'have'} no
-      back-in-service date set, so nobody can tell if ${st.noDate === 1 ? 'it is' : 'they are'} slipping.</div>` : ''}
-
-    <div class="section-title">Open jobs (${open.length})</div>
-    ${open.length ? open.map(woCard).join('')
-      : `<div class="card muted small">Nothing outstanding.</div>`}
-
-    ${earlier.length ? `<div class="section-title">Earlier days</div>
-      ${earlier.map(d => `
-        <div class="log-day">
-          <div class="log-date">${fmtDate(d)} <span class="tally-inline">${esc(tallyLine(dayTally(name, d)) || '')}</span></div>
-          <div class="card log-card">${logFor(name, d).slice().reverse().map(e => logRow(e)).join('')}</div>
-        </div>`).join('')}
-      ${days.length > 5 ? `<p class="muted small center">Showing the last few days.
-        <a href="#/crew-today">Open the daily diary</a> for any other day.</p>` : ''}` : ''}
-
-    <div class="section-title">Completed (${done.length})</div>
-    ${done.length ? done.slice(0, 10).map(woCard).join('')
-      : `<div class="card muted small">Nothing completed yet.</div>`}
-    ${done.length > 10 ? `<p class="muted small center">Showing the 10 most recent.</p>` : ''}`;
-
-  wireWoCards(view);
-  wireLogRows(view);
-}
-
-/* ================================================================
-   Crew diary — what each person did today
-   ================================================================ */
-function logBanner() {
-  return logTableMissing
-    ? `<div class="banner">Work on jobs is showing here as normal. Your own
-       written notes can't be saved yet though — run the <strong>Crew diary</strong>
-       section at the end of <code>supabase-schema.sql</code> in Supabase to turn
-       those on.</div>`
-    : '';
-}
-
-/** One line of the diary. */
-function logRow(e, opts) {
-  const o = opts || {};
-  const wo = e.work_order_id ? orderById(e.work_order_id) : null;
-  const g = wo ? gearById(wo.gear_id) : null;
-  const files = Array.isArray(e.files) ? e.files : [];
-  const tone = e.tone || (e.auto ? 'plain' : 'written');
-  return `
-    <div class="log-item tone-${tone}${e.auto ? ' to-job' : ''}"
-         ${e.auto && e.work_order_id ? `data-wo="${e.work_order_id}"` : `data-log="${e.id}"`}>
-      <div class="log-time">${fmtTime(e.at)}<span class="log-dot"></span></div>
-      <div class="log-body">
-        <div class="log-head">
-          ${o.showWho && entryPerson(e)
-            ? `<span class="log-who"><span class="avatar sm">${esc(initials(entryPerson(e)))}</span>${
-                esc(entryPerson(e))}</span>` : ''}
-          <span class="log-kind">${esc(logLabel(e))}</span>
-          ${!e.auto ? '<span class="log-hand">written by hand</span>' : ''}
-          ${e.amount != null && e.amount !== '' ? `<span class="log-amt">${money(e.amount)}</span>` : ''}
-        </div>
-        ${wo ? `<div class="log-job">${esc(g ? g.code : '')} · ${woNo(wo)} — ${esc(wo.title)}</div>` : ''}
-        ${(() => { const t = trimNote(e, wo);
-          return t ? `<div class="log-note">${esc(t)}</div>` : ''; })()}
-        ${files.length ? `<div class="thumbs">${files.map(f => /^image\//.test(f.type || '')
-          ? `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`
-          : `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>`
-        ).join('')}</div>` : ''}
-        ${e.author && e.author !== entryPerson(e)
-          ? `<div class="log-by">from ${esc(e.author)}</div>` : ''}
-      </div>
-    </div>`;
-}
-
-/** The line above already names the job, so a note that only repeats its
-    title is noise. Keep whatever the note adds and drop the echo. */
-function trimNote(e, wo) {
-  let t = String(e.body || '').trim();
-  if (!t || !wo) return t;
-  const title = String(wo.title || '').trim();
-  if (title) {
-    const i = t.toLowerCase().indexOf(title.toLowerCase());
-    if (i >= 0) t = (t.slice(0, i) + t.slice(i + title.length)).trim();
-  }
-  t = t.replace(/^damage reported:?\s*/i, '').replace(/^[\u2014\-:,\s]+/, '').trim();
-  return t ? t[0].toUpperCase() + t.slice(1) : '';
-}
-
-/* ------------------------------------------- the whole day, everyone */
-const diaryState = { date: '', who: '', oldest: false };
-
-/** Captured lines open the job they came from; hand-written ones open to edit. */
-function wireLogRows(root) {
-  $$('[data-log]', root).forEach(b => b.onclick = () => go('#/crew-log/edit/' + b.dataset.log));
-  $$('.log-item[data-wo]', root).forEach(b => b.onclick = () => go('#/wo/' + b.dataset.wo));
-}
-
-function renderCrewDiary(view) {
-  if (!diaryState.date) diaryState.date = today();
-  const day = diaryState.date;
-  const all = logOnDay(day);
-
-  // group by person, keeping the order the crew board uses
-  const order = crewAndActive();
-  const groups = {};
-  all.forEach(e => {
-    const who = entryPerson(e) || 'Unattributed';
-    (groups[who] = groups[who] || []).push(e);
-  });
-  const people = Object.keys(groups).sort((a, b) => {
-    const ia = order.findIndex(n => n.toLowerCase() === a.toLowerCase());
-    const ib = order.findIndex(n => n.toLowerCase() === b.toLowerCase());
-    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-  });
-
-  // the filter only narrows what is shown; the day's totals stay the day's
-  if (diaryState.who && !people.some(n => n === diaryState.who)) diaryState.who = '';
-  const shown = diaryState.who ? groups[diaryState.who] : all;
-  const tot = dayTotals(day);
-
-  $('#title').textContent = 'Daily diary';
-
-  view.innerHTML = `
-    ${logBanner()}
-    <div class="daynav">
-      <button class="icon-btn" id="dPrev" aria-label="Previous day">
-        <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg></button>
-      <label class="dn-date">
-        <b>${esc(fmtDate(day))}</b>
-        <span>${day === today() ? 'today' : `${tot.entries} entr${tot.entries === 1 ? 'y' : 'ies'}`}</span>
-        <input type="date" id="dDate" value="${esc(day)}">
-      </label>
-      <button class="icon-btn" id="dNext" aria-label="Next day" ${day >= today() ? 'disabled' : ''}>
-        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
-    </div>
-
-    ${glance(tot)}
-
-    ${people.length ? `
-      <div class="who-strip">
-        <button class="who-chip all ${diaryState.who ? '' : 'on'}" data-who="">Everyone
-          <i>${tot.entries}</i></button>
-        ${people.map(n => `
-          <button class="who-chip ${diaryState.who === n ? 'on' : ''}" data-who="${esc(n)}">
-            <span class="avatar sm">${esc(initials(n))}</span>${esc(shortName(n))}
-            <i>${groups[n].length}</i></button>`).join('')}
-      </div>` : ''}
-
-    ${shown.length ? `
-      <div class="stream-head">
-        <span>${diaryState.who ? esc(diaryState.who) : 'Everyone'} \u00b7 ${shown.length}
-          entr${shown.length === 1 ? 'y' : 'ies'}</span>
-        <button class="linky" id="dFlip">${diaryState.oldest ? 'Oldest first' : 'Latest first'}</button>
-      </div>
-      <div class="card log-card stream">
-        ${(diaryState.oldest ? shown : shown.slice().reverse())
-          .map(e => logRow(e, { showWho: !diaryState.who, face: true })).join('')}
-      </div>`
-      : `<div class="empty"><b>Nothing logged</b>${day === today()
-          ? 'Nothing has happened on a job yet today.'
-          : 'No one worked on a job this day.'}</div>`}
-
-    <div class="btn-row mt">
-      <a class="btn primary" href="#/crew-log?date=${day}">${icon('plus')}Add an entry</a>
-      <button class="btn" id="dPrint">${icon('printer')}Print the day</button>
-    </div>`;
-
-  const step = n => {
-    const d = new Date(day + 'T00:00:00');
-    d.setDate(d.getDate() + n);
-    diaryState.date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    renderCrewDiary(view);
-  };
-  $('#dPrev', view).onclick = () => step(-1);
-  $('#dNext', view).onclick = () => step(1);
-  $('#dDate', view).onchange = e => { diaryState.date = e.target.value || today(); renderCrewDiary(view); };
-  const flip = $('#dFlip', view);
-  if (flip) flip.onclick = () => { diaryState.oldest = !diaryState.oldest; renderCrewDiary(view); };
-  $$('[data-who]', view).forEach(b => b.onclick = () => {
-    diaryState.who = b.dataset.who; renderCrewDiary(view);
-  });
-  $('#dPrint', view).onclick = () => printDiaryDay(day, people, groups);
-  wireLogRows(view);
-}
-
-/** "Clint Cunningham" \u2192 "Clint" — chips have no room for a surname. */
-function shortName(n) {
-  return String(n || '').trim().split(/\s+/)[0] || n;
-}
-
-function printDiaryDay(day, people, groups) {
-  printDoc(`
-    ${docHead('Workshop diary', fmtDate(day))}
-    ${people.length ? people.map(who => `
-      <h2>${esc(who)}</h2>
-      <p><strong>${esc(tallyLine(dayTally(who, day)) || 'no activity counted')}</strong></p>
-      <table>
-        <tr><th style="width:16mm">Time</th><th style="width:34mm">Entry</th>
-            <th style="width:38mm">Job</th><th>Detail</th><th style="width:24mm">Amount</th></tr>
-        ${groups[who].map(e => {
-          const wo = e.work_order_id ? orderById(e.work_order_id) : null;
-          const g = wo ? gearById(wo.gear_id) : null;
-          return `<tr class="avoid-break">
-            <td>${fmtTime(e.at)}</td>
-            <td>${esc(logLabel(e))}</td>
-            <td>${wo ? `<strong>${esc(g ? g.code : '')}</strong> ${woNo(wo)}` : '—'}</td>
-            <td class="note">${esc(e.body || '')}</td>
-            <td>${e.amount != null && e.amount !== '' ? money(e.amount) : ''}</td>
-          </tr>`;
-        }).join('')}
-      </table>`).join('') : '<p class="quiet">Nothing logged for this day.</p>'}
-    <div class="sig"><div>Workshop manager &amp; date</div></div>
-    ${docFoot('Workshop diary · ' + fmtDate(day))}`);
-}
-
-/* ------------------------------------------------- add / edit an entry */
-function renderCrewLogForm(view) {
-  const editing = route.path.startsWith('/crew-log/edit/');
-  const existing = editing ? logById(route.path.split('/')[3]) : null;
-  if (editing && !existing) { view.innerHTML = `<div class="empty"><b>Entry not found</b></div>`; return; }
-
-  const names = crewNames();
-  const draft = {
-    kind: existing ? existing.kind : 'on_tools',
-    files: existing && Array.isArray(existing.files) ? existing.files.slice() : [],
-    newFiles: []
-  };
-  const who = existing ? existing.crew_name : (route.query.who || (matchCrew(S.name) || ''));
-  const day = existing ? logDay(existing) : (route.query.date || today());
-  const at = existing ? new Date(existing.at) : new Date();
-  const timeVal = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
-
-  // jobs worth offering: whoever's, open first, then everything else
-  const jobs = DB.work_orders.slice().sort((a, b) => {
-    const ao = isOpen(a) ? 0 : 1, bo = isOpen(b) ? 0 : 1;
-    if (ao !== bo) return ao - bo;
-    return (b.number || 0) - (a.number || 0);
-  });
-
-  $('#title').textContent = editing ? 'Edit entry' : 'Diary entry';
-
-  view.innerHTML = `
-    ${logBanner()}
-    <div class="card">
-      <label class="field"><span>Who</span>
-        <select id="lWho">
-          ${names.map(n => `<option value="${esc(n)}" ${n.toLowerCase() === String(who).toLowerCase() ? 'selected' : ''}>${esc(n)}</option>`).join('')}
-        </select></label>
-      <div class="row" style="gap:10px">
-        <label class="field grow"><span>Day</span><input type="date" id="lDate" value="${esc(day)}"></label>
-        <label class="field grow"><span>Time</span><input type="time" id="lTime" value="${esc(timeVal)}"></label>
-      </div>
-    </div>
-
-    <div class="card">
-      <label class="field"><span>What happened</span>
-        <select id="lKind">
-          ${allLogTypes().map(t => `<option value="${esc(t.key)}" ${t.key === draft.kind ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
-          <option value="__new">+ Add a type…</option>
-        </select></label>
-
-      <label class="field" id="lAmtBox" ${logTakesMoney(draft.kind) ? '' : 'hidden'}>
-        <span>Amount (NZD)</span>
-        <input type="number" id="lAmt" step="0.01" inputmode="decimal" placeholder="0.00"
-               value="${existing && existing.amount != null ? esc(existing.amount) : ''}"></label>
-
-      <label class="field"><span>Notes</span>
-        <textarea id="lBody" placeholder="What you did, what you found, who you spoke to.">${esc(existing ? existing.body : '')}</textarea></label>
-
-      <label class="field"><span>Against a job (optional)</span>
-        <select id="lWo">
-          <option value="">Not about one job</option>
-          ${jobs.map(o => {
-            const g = gearById(o.gear_id) || {};
-            return `<option value="${o.id}" ${existing && existing.work_order_id === o.id ? 'selected' : ''}>${
-              esc(g.code || '')} · ${woNo(o)} — ${esc(o.title)}${isOpen(o) ? '' : ' (closed)'}</option>`;
-          }).join('')}
-        </select></label>
-    </div>
-
-    <div class="card">
-      <h2>Photos or paperwork</h2>
-      <input type="file" id="lFile" hidden multiple>
-      <button class="btn wide" id="lAddFile" type="button">${icon('camera')}Attach</button>
-      <div id="lFiles" class="mt"></div>
-    </div>
-
-    <button class="btn primary wide" id="lSave">${editing ? 'Save changes' : 'Add to the diary'}</button>
-    ${editing ? `<button class="btn wide mt" id="lDelete">Delete this entry</button>` : ''}`;
-
-  const kindSel = $('#lKind', view);
-  let previousKind = kindSel.value;
-  kindSel.onchange = () => {
-    if (kindSel.value === '__new') {
-      const typed = (prompt('Name the kind of entry, e.g. "Warranty claim":') || '').trim();
-      if (!typed) { kindSel.value = previousKind; }
-      else {
-        const existingType = allLogTypes().find(t => t.label.toLowerCase() === typed.toLowerCase());
-        const key = existingType ? existingType.key : typed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-        if (!existingType) {
-          const opt = document.createElement('option');
-          opt.value = key; opt.textContent = typed;
-          kindSel.insertBefore(opt, kindSel.querySelector('option[value="__new"]'));
-        }
-        kindSel.value = key;
-      }
-    }
-    previousKind = kindSel.value;
-    draft.kind = kindSel.value;
-    $('#lAmtBox', view).hidden = !logTakesMoney(draft.kind);
-  };
-
-  const fileInput = $('#lFile', view);
-  $('#lAddFile', view).onclick = () => fileInput.click();
-  fileInput.onchange = async () => {
-    for (const f of Array.from(fileInput.files || [])) draft.newFiles.push(await compressImage(f));
-    fileInput.value = '';
-    paintFiles();
-  };
-  paintFiles();
-
-  function paintFiles() {
-    const box = $('#lFiles', view);
-    const saved = draft.files.map((f, i) =>
-      `<div class="filerow"><a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>
-       <button class="btn sm" data-drop="${i}">Remove</button></div>`).join('');
-    const pending = draft.newFiles.map((f, i) =>
-      `<div class="filerow"><span class="attach">${icon('file')}${esc(f.name || 'file')}</span>
-       <button class="btn sm" data-dropnew="${i}">Remove</button></div>`).join('');
-    box.innerHTML = (saved + pending) || '<p class="muted small" style="margin:0">Nothing attached.</p>';
-    $$('[data-drop]', box).forEach(b => b.onclick = () => { draft.files.splice(+b.dataset.drop, 1); paintFiles(); });
-    $$('[data-dropnew]', box).forEach(b => b.onclick = () => { draft.newFiles.splice(+b.dataset.dropnew, 1); paintFiles(); });
-  }
-
-  $('#lSave', view).onclick = async function () {
-    const crew_name = $('#lWho', view).value;
-    const entry_date = $('#lDate', view).value || today();
-    const kind = kindSel.value;
-    if (kind === '__new') return toast('Name the type first');
-    if (!crew_name) return toast('Pick who this is for');
-
-    const [hh, mm] = ($('#lTime', view).value || '00:00').split(':');
-    const stamp = new Date(entry_date + 'T00:00:00');
-    stamp.setHours(Number(hh) || 0, Number(mm) || 0, 0, 0);
-
-    this.disabled = true;
-    this.textContent = 'Saving…';
-    const files = draft.files.slice();
-    for (const f of draft.newFiles) files.push(await Store.upload(f));
-
-    const amtRaw = $('#lAmt', view).value.trim();
-    const row = {
-      crew_name,
-      entry_date,
-      at: stamp.toISOString(),
-      kind,
-      label: kindSel.selectedOptions[0] ? kindSel.selectedOptions[0].textContent : '',
-      body: $('#lBody', view).value.trim(),
-      work_order_id: $('#lWo', view).value || null,
-      amount: logTakesMoney(kind) && amtRaw ? Number(amtRaw) : null,
-      files
-    };
-
-    if (editing) await Store.patch('crew_log', existing.id, row);
-    else await Store.insert('crew_log', Object.assign(
-      { id: uid(), author: whoami(), role: S.role, created_at: new Date().toISOString() }, row));
-
-    diaryState.date = entry_date;
-    toast(editing ? 'Saved' : 'Added to the diary');
-    go('#/crew/' + encodeURIComponent(crew_name));
-  };
-
-  const del = $('#lDelete', view);
-  if (del) del.onclick = async () => {
-    if (!confirm('Delete this diary entry?')) return;
-    const back = existing.crew_name;
-    await Store.remove('crew_log', existing.id);
-    toast('Deleted');
-    go('#/crew/' + encodeURIComponent(back));
-  };
-}
-
-/* ================================================================
-   Costs — a portal of its own, sharing only the asset list
-   ================================================================ */
-const costsFor = id => DB.costs
-  .filter(c => c.gear_id === id)
-  .sort((a, b) => String(costDate(b)).localeCompare(String(costDate(a))));
-
-const costById = id => DB.costs.find(c => c.id === id);
-
-/** The date a cost belongs to for period reporting. */
-const costDate = c => (c.incurred_on || (c.created_at || '').slice(0, 10) || '');
-
-function costTotals(list) {
-  return list.reduce((t, c) => {
-    const v = Number(c.amount) || 0;
-    if (c.kind === 'planned') t.planned += v; else t.actual += v;
-    return t;
-  }, { planned: 0, actual: 0 });
-}
-
-function costsInRange(from, to) {
-  return DB.costs.filter(c => {
-    const d = costDate(c);
-    if (from && d < from) return false;
-    if (to && d > to) return false;
-    return true;
-  });
-}
-
-function costsBanner() {
-  return costsTableMissing
-    ? `<div class="banner">The costs table isn't in the database yet. Run the
-       <strong>Costs</strong> section at the end of <code>supabase-schema.sql</code>
-       in Supabase, then reopen the app. Nothing entered here will save until then.</div>`
-    : '';
-}
-
-/* ---------------------------------------------------- costs: asset board */
-const costFilter = { cat: 'all', q: '' };
-
-function renderCostsBoard(view) {
-  const gear = sortedGear(activeGear());
-  if (!gear.length) {
-    view.innerHTML = costsBanner() + `<div class="empty"><b>No assets yet</b>Add the fleet from the maintenance side first.</div>`;
-    return;
-  }
-
-  const totals = costTotals(DB.costs);
-  const cats = allCategoryKeys().filter(k => gear.some(g => catOf(g) === k));
-
-  view.innerHTML = `
-    ${costsBanner()}
-    <div class="tally cost-tally">
-      <button class="cost-tile" data-jump="1"><span class="n">${moneyShort(totals.actual)}</span><span class="l">Actual, all time</span></button>
-      <button class="cost-tile" data-jump="1"><span class="n planned">${moneyShort(totals.planned)}</span><span class="l">Planned</span></button>
-      <button class="cost-tile" data-jump="1"><span class="n">${DB.costs.length}</span><span class="l">Entries</span></button>
-    </div>
-
-    <div class="filters">
-      <button class="chip" data-cat="all" aria-pressed="${costFilter.cat === 'all'}">All assets</button>
-      ${cats.map(k => `<button class="chip" data-cat="${esc(k)}" aria-pressed="${costFilter.cat === k}">${esc(catPlural(k))}</button>`).join('')}
-    </div>
-
-    <label class="field"><input type="text" id="cq" placeholder="Search code or name" value="${esc(costFilter.q)}"></label>
-    <div class="gear-grid" id="cgrid"></div>`;
-
-  $$('[data-cat]', view).forEach(b => b.onclick = () => { costFilter.cat = b.dataset.cat; renderCostsBoard(view); });
-  $$('[data-jump]', view).forEach(b => b.onclick = () => go('#/costs/summary'));
-  const q = $('#cq', view);
-  q.oninput = () => { costFilter.q = q.value; paint(); };
-  paint();
-
-  function paint() {
-    const needle = costFilter.q.trim().toLowerCase();
-    const list = gear.filter(g => {
-      if (costFilter.cat !== 'all' && catOf(g) !== costFilter.cat) return false;
-      if (needle && !`${g.code} ${g.name}`.toLowerCase().includes(needle)) return false;
-      return true;
-    });
-    const grid = $('#cgrid', view);
-    grid.innerHTML = list.map((g, i) => {
-      const mine = costsFor(g.id);
-      const t = costTotals(mine);
-      return `
-        <button class="gear-card cost-card" data-id="${g.id}" style="--i:${Math.min(i, 14)}">
-          <div class="code">${esc(g.code)}</div>
-          <div class="name">${esc(g.name || catLabel(catOf(g)))}</div>
-          <div class="cost-line"><span>Actual</span><b>${moneyShort(t.actual)}</b></div>
-          <div class="cost-line"><span>Planned</span><b class="planned">${moneyShort(t.planned)}</b></div>
-          <div class="loc">${mine.length ? `${mine.length} entr${mine.length === 1 ? 'y' : 'ies'}` : 'Nothing recorded'}</div>
-        </button>`;
-    }).join('') || `<div class="empty" style="grid-column:1/-1"><b>Nothing matches</b></div>`;
-    $$('.cost-card', grid).forEach(b => b.onclick = () => go('#/costs/' + b.dataset.id));
-  }
-}
-
-/* --------------------------------------------------- costs: one asset */
-function renderCostsAsset(view) {
-  const g = gearById(route.path.split('/')[2]);
-  if (!g) { view.innerHTML = `<div class="empty"><b>Asset not found</b></div>`; return; }
-
-  const list = costsFor(g.id);
-  const t = costTotals(list);
-  $('#title').textContent = g.code;
-
-  view.innerHTML = `
-    ${costsBanner()}
-    <div class="card">
-      <h2 style="font-size:19px">${esc(g.code)}</h2>
-      <div class="muted small">${esc(g.name || '')}${g.make_model ? ' · ' + esc(g.make_model) : ''}</div>
-      <div class="cost-totals mt">
-        <div><span class="l">Actual</span><b>${money(t.actual)}</b></div>
-        <div><span class="l">Planned</span><b class="planned">${money(t.planned)}</b></div>
-        <div><span class="l">Variance</span><b class="${t.actual > t.planned ? 'over' : ''}">${money(t.actual - t.planned)}</b></div>
-      </div>
-    </div>
-
-    <a class="btn primary wide" href="#/costs/new?gear=${g.id}">${icon('plus')}Add a cost</a>
-
-    <div class="section-title">Costs (${list.length})</div>
-    ${list.length ? list.map(costRow).join('')
-      : `<div class="card muted small">Nothing recorded against this asset yet.</div>`}`;
-
-  $$('[data-cost]', view).forEach(b => b.onclick = () => go('#/costs/edit/' + b.dataset.cost));
-}
-
-function costRow(c) {
-  const files = Array.isArray(c.files) ? c.files : [];
-  const due = c.payment_on ? dueText(c.payment_on) : null;
-  const chasing = c.kind === 'planned' && due && due.late;
-  return `
-    <button class="wo cost-entry ${c.kind}" data-cost="${c.id}">
-      <div class="hdr">
-        <span class="num">${c.kind === 'planned' ? 'PLANNED' : 'ACTUAL'}</span>
-        <span class="grow"></span>
-        <span class="amount">${money(c.amount)}</span>
-      </div>
-      <div class="ttl">${esc(c.description || 'No description')}</div>
-      <div class="sub">
-        <span>Incurred ${c.incurred_on ? fmtDate(c.incurred_on) : '—'}</span>
-        ${c.payment_on ? `<span class="${chasing ? 'overdue' : ''}">Payment ${fmtDate(c.payment_on)}</span>` : ''}
-        ${files.length ? `<span>${files.length} file${files.length === 1 ? '' : 's'}</span>` : ''}
-      </div>
-    </button>`;
-}
-
-/* ------------------------------------------- costs: add / edit one cost */
-function renderCostForm(view) {
-  const editing = route.path.startsWith('/costs/edit/');
-  const existing = editing ? costById(route.path.split('/')[3]) : null;
-  if (editing && !existing) { view.innerHTML = `<div class="empty"><b>Cost not found</b></div>`; return; }
-
-  const gear = sortedGear(activeGear());
-  if (!gear.length) { view.innerHTML = `<div class="empty"><b>No assets yet</b></div>`; return; }
-
-  const preset = existing ? existing.gear_id : (route.query.gear || '');
-  const draft = {
-    kind: existing ? existing.kind : 'actual',
-    files: existing && Array.isArray(existing.files) ? existing.files.slice() : [],
-    newFiles: []
-  };
-
-  view.innerHTML = `
-    ${costsBanner()}
-    <div class="card">
-      <label class="field"><span>Which asset?</span>
-        <select id="cGear">
-          <option value="">Choose…</option>
-          ${allCategoryKeys().filter(k => gear.some(x => catOf(x) === k)).map(k => `
-            <optgroup label="${esc(catPlural(k))}">
-              ${gear.filter(x => catOf(x) === k).map(x =>
-                `<option value="${x.id}" ${x.id === preset ? 'selected' : ''}>${esc(x.code)}${x.name ? ' — ' + esc(x.name) : ''}</option>`).join('')}
-            </optgroup>`).join('')}
-        </select></label>
-    </div>
-
-    <div class="card">
-      <h2>Planned or actual?</h2>
-      <div class="choice cost-choice" id="cKind">
-        <button type="button" data-kind="planned" aria-pressed="${draft.kind === 'planned'}">
-          <span class="bulb"></span>
-          <span><b>Planned</b><span>Expected, not yet incurred.</span></span>
-        </button>
-        <button type="button" data-kind="actual" aria-pressed="${draft.kind === 'actual'}">
-          <span class="bulb"></span>
-          <span><b>Actual</b><span>A cost that has been incurred.</span></span>
-        </button>
-      </div>
-    </div>
-
-    <div class="card">
-      <label class="field"><span>Amount (NZD)</span>
-        <input type="number" id="cAmt" step="0.01" inputmode="decimal" placeholder="0.00"
-               value="${existing && existing.amount != null ? esc(existing.amount) : ''}"></label>
-      <label class="field"><span>What is it for?</span>
-        <textarea id="cDesc" placeholder="e.g. 500-hour service, new drum teeth">${esc(existing ? existing.description : '')}</textarea></label>
-      <div class="row" style="gap:10px">
-        <label class="field grow"><span>Date incurred</span>
-          <input type="date" id="cInc" value="${esc(existing ? (existing.incurred_on || '') : today())}"></label>
-        <label class="field grow"><span>Payment date</span>
-          <input type="date" id="cPay" value="${esc(existing ? (existing.payment_on || '') : '')}"></label>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Invoice or paperwork</h2>
-      <input type="file" id="cFile" hidden multiple>
-      <button class="btn wide" id="cAddFile" type="button">${icon('clip')}Attach a file</button>
-      <div id="cFiles" class="mt"></div>
-    </div>
-
-    <button class="btn primary wide" id="cSave">${editing ? 'Save changes' : 'Save cost'}</button>
-    ${editing ? `
-      <div class="btn-row mt">
-        ${existing.kind === 'planned' ? `<button class="btn" id="cActualise">Mark as actual</button>` : ''}
-        <button class="btn" id="cDelete">Delete</button>
-      </div>` : ''}`;
-
-  $$('#cKind button', view).forEach(b => b.onclick = () => {
-    draft.kind = b.dataset.kind;
-    $$('#cKind button', view).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-  });
-
-  const fileInput = $('#cFile', view);
-  $('#cAddFile', view).onclick = () => fileInput.click();
-  fileInput.onchange = async () => {
-    for (const f of Array.from(fileInput.files || [])) draft.newFiles.push(await compressImage(f));
-    fileInput.value = '';
-    paintFiles();
-  };
-  paintFiles();
-
-  function paintFiles() {
-    const box = $('#cFiles', view);
-    const saved = draft.files.map((f, i) =>
-      `<div class="filerow"><a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>
-       <button class="btn sm" data-drop="${i}">Remove</button></div>`).join('');
-    const pending = draft.newFiles.map((f, i) =>
-      `<div class="filerow"><span class="attach">${icon('file')}${esc(f.name || 'file')}</span>
-       <button class="btn sm" data-dropnew="${i}">Remove</button></div>`).join('');
-    box.innerHTML = (saved + pending) || '<p class="muted small" style="margin:0">Nothing attached.</p>';
-    $$('[data-drop]', box).forEach(b => b.onclick = () => { draft.files.splice(+b.dataset.drop, 1); paintFiles(); });
-    $$('[data-dropnew]', box).forEach(b => b.onclick = () => { draft.newFiles.splice(+b.dataset.dropnew, 1); paintFiles(); });
-  }
-
-  $('#cSave', view).onclick = async function () {
-    const gear_id = $('#cGear', view).value;
-    const raw = $('#cAmt', view).value.trim();
-    const amount = Number(raw);
-    if (!gear_id) return toast('Pick an asset');
-    if (!raw || isNaN(amount)) return toast('Enter an amount');
-
-    this.disabled = true;
-    this.textContent = 'Saving…';
-    const files = draft.files.slice();
-    for (const f of draft.newFiles) files.push(await Store.upload(f));
-
-    const row = {
-      gear_id,
-      kind: draft.kind,
-      amount,
-      description: $('#cDesc', view).value.trim(),
-      incurred_on: $('#cInc', view).value || null,
-      payment_on: $('#cPay', view).value || null,
-      files,
-      updated_at: new Date().toISOString()
-    };
-
-    if (editing) await Store.patch('costs', existing.id, row);
-    else await Store.insert('costs', Object.assign(
-      { id: uid(), created_by: whoami(), created_at: new Date().toISOString() }, row));
-
-    toast(editing ? 'Saved' : 'Cost added');
-    go('#/costs/' + gear_id);
-  };
-
-  const actualise = $('#cActualise', view);
-  if (actualise) actualise.onclick = async () => {
-    await Store.patch('costs', existing.id, {
-      kind: 'actual',
-      incurred_on: existing.incurred_on || today(),
-      updated_at: new Date().toISOString()
-    });
-    toast('Moved to actual');
-    go('#/costs/' + existing.gear_id);
-  };
-
-  const del = $('#cDelete', view);
-  if (del) del.onclick = async () => {
-    if (!confirm('Delete this cost? It cannot be undone.')) return;
-    const gid = existing.gear_id;
-    await Store.remove('costs', existing.id);
-    toast('Deleted');
-    go('#/costs/' + gid);
-  };
-}
-
-/* ------------------------------------------------- costs: the tracker */
-const trackRange = { from: '', to: '', preset: 'month' };
-
-function presetRange(key) {
-  const n = new Date();
-  const y = n.getFullYear(), m = n.getMonth();
-  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  if (key === 'month')   return [iso(new Date(y, m, 1)), iso(new Date(y, m + 1, 0))];
-  if (key === 'last')    return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
-  if (key === 'quarter') { const q = Math.floor(m / 3) * 3; return [iso(new Date(y, q, 1)), iso(new Date(y, q + 3, 0))]; }
-  // NZ financial year runs April to March
-  if (key === 'year')    { const fy = m >= 3 ? y : y - 1; return [`${fy}-04-01`, `${fy + 1}-03-31`]; }
-  return ['', ''];
-}
-
-function renderCostSummary(view) {
-  if (trackRange.preset !== 'custom' && !trackRange.from) {
-    const r = presetRange(trackRange.preset);
-    trackRange.from = r[0]; trackRange.to = r[1];
-  }
-  const list = costsInRange(trackRange.from, trackRange.to);
-  const t = costTotals(list);
-  const variance = t.actual - t.planned;
-
-  const byAsset = {};
-  list.forEach(c => {
-    byAsset[c.gear_id] = byAsset[c.gear_id] || { planned: 0, actual: 0 };
-    const v = Number(c.amount) || 0;
-    if (c.kind === 'planned') byAsset[c.gear_id].planned += v;
-    else byAsset[c.gear_id].actual += v;
-  });
-  const assets = Object.keys(byAsset)
-    .map(id => ({ g: gearById(id), planned: byAsset[id].planned, actual: byAsset[id].actual }))
-    .filter(r => r.g)
-    .sort((a, b) => (b.actual + b.planned) - (a.actual + a.planned));
-
-  const months = {};
-  list.forEach(c => {
-    const key = costDate(c).slice(0, 7);
-    if (!key) return;
-    months[key] = months[key] || { planned: 0, actual: 0 };
-    const v = Number(c.amount) || 0;
-    if (c.kind === 'planned') months[key].planned += v; else months[key].actual += v;
-  });
-  const monthRows = Object.keys(months).sort((a, b) => b.localeCompare(a)).map(k => [k, months[k]]);
-  const peak = Math.max(1, ...monthRows.map(r => Math.max(r[1].actual, r[1].planned)));
-
-  const upcoming = DB.costs
-    .filter(c => c.kind === 'planned' && c.payment_on)
-    .sort((a, b) => a.payment_on.localeCompare(b.payment_on))
-    .slice(0, 8);
-
-  const presets = [['month', 'This month'], ['last', 'Last month'], ['quarter', 'This quarter'],
-                   ['year', 'Financial year'], ['custom', 'Custom']];
-
-  view.innerHTML = `
-    ${costsBanner()}
-    <div class="filters">
-      ${presets.map(pr => `<button class="chip" data-preset="${pr[0]}" aria-pressed="${trackRange.preset === pr[0]}">${pr[1]}</button>`).join('')}
-    </div>
-
-    ${trackRange.preset === 'custom' ? `
-      <div class="row" style="gap:10px">
-        <label class="field grow"><span>From</span><input type="date" id="rFrom" value="${esc(trackRange.from)}"></label>
-        <label class="field grow"><span>To</span><input type="date" id="rTo" value="${esc(trackRange.to)}"></label>
-      </div>` : ''}
-
-    <div class="cost-totals big">
-      <div><span class="l">Actual</span><b>${money(t.actual)}</b></div>
-      <div><span class="l">Planned</span><b class="planned">${money(t.planned)}</b></div>
-      <div><span class="l">Variance</span><b class="${variance > 0 ? 'over' : ''}">${money(variance)}</b></div>
-    </div>
-    <p class="muted tiny center">${trackRange.from ? fmtDate(trackRange.from) : 'start'} to ${trackRange.to ? fmtDate(trackRange.to) : 'today'} · ${list.length} entr${list.length === 1 ? 'y' : 'ies'}</p>
-
-    <div class="section-title">By month</div>
-    <div class="card">
-      ${monthRows.length ? monthRows.map(r => {
-        const d = new Date(r[0] + '-01T00:00:00');
-        return `
-          <div class="mrow">
-            <div class="mlabel">${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}</div>
-            <div class="mbars">
-              <div class="mbar actual" style="width:${(r[1].actual / peak * 100).toFixed(1)}%"></div>
-              <div class="mbar planned" style="width:${(r[1].planned / peak * 100).toFixed(1)}%"></div>
-            </div>
-            <div class="mamt">${moneyShort(r[1].actual)}</div>
-          </div>`;
-      }).join('') : '<p class="muted small" style="margin:0">Nothing in this period.</p>'}
-      ${monthRows.length ? '<p class="muted tiny mt" style="margin-bottom:0">Solid bar actual, outline planned.</p>' : ''}
-    </div>
-
-    <div class="section-title">By asset</div>
-    ${assets.length ? `<div class="card"><table class="data">
-      <tr><th style="width:auto">Asset</th><th style="width:26%">Actual</th><th style="width:26%">Planned</th></tr>
-      ${assets.map(r => `<tr>
-        <td><strong>${esc(r.g.code)}</strong> <span class="muted">${esc(r.g.name || '')}</span></td>
-        <td>${money(r.actual)}</td>
-        <td class="muted">${money(r.planned)}</td>
-      </tr>`).join('')}
-    </table></div>` : '<div class="card muted small">Nothing in this period.</div>'}
-
-    <div class="section-title">Payments coming up</div>
-    ${upcoming.length ? upcoming.map(c => {
-      const g = gearById(c.gear_id) || {};
-      const due = dueText(c.payment_on);
-      return `<button class="wo cost-entry planned" data-cost="${c.id}">
-        <div class="hdr"><span class="num">${esc(g.code || '')}</span><span class="grow"></span>
-          <span class="amount">${money(c.amount)}</span></div>
-        <div class="ttl">${esc(c.description || 'No description')}</div>
-        <div class="sub"><span class="${due.late ? 'overdue' : ''}">${fmtDate(c.payment_on)} · ${due.text}</span></div>
-      </button>`;
-    }).join('') : '<div class="card muted small">No planned payments with a date.</div>'}
-
-    <div class="btn-row mt">
-      <button class="btn" id="costPrint">${icon('printer')}Print</button>
-      <button class="btn" id="costCsv">Download CSV</button>
-    </div>`;
-
-  $$('[data-preset]', view).forEach(b => b.onclick = () => {
-    trackRange.preset = b.dataset.preset;
-    if (trackRange.preset !== 'custom') {
-      const r = presetRange(trackRange.preset);
-      trackRange.from = r[0]; trackRange.to = r[1];
-    }
-    renderCostSummary(view);
-  });
-  const f = $('#rFrom', view), tt = $('#rTo', view);
-  if (f) f.onchange = () => { trackRange.from = f.value; renderCostSummary(view); };
-  if (tt) tt.onchange = () => { trackRange.to = tt.value; renderCostSummary(view); };
-  $$('[data-cost]', view).forEach(b => b.onclick = () => go('#/costs/edit/' + b.dataset.cost));
-  $('#costPrint', view).onclick = () => printCosts(list, assets, t);
-  $('#costCsv', view).onclick = () => exportCostsCsv(list);
-}
-
-function printCosts(list, assets, t) {
-  const range = `${trackRange.from ? fmtDate(trackRange.from) : 'start'} to ${trackRange.to ? fmtDate(trackRange.to) : 'today'}`;
-  printDoc(`
-    ${docHead('Cost report', range)}
-    <h2>Summary</h2>
-    <table class="kv">
-      <tr><td>Actual</td><td><strong>${money(t.actual)}</strong></td></tr>
-      <tr><td>Planned</td><td>${money(t.planned)}</td></tr>
-      <tr><td>Variance</td><td>${money(t.actual - t.planned)}</td></tr>
-      <tr><td>Entries</td><td>${list.length}</td></tr>
-    </table>
-
-    <h2>By asset</h2>
-    <table>
-      <tr><th>Asset</th><th>Name</th><th>Actual</th><th>Planned</th></tr>
-      ${assets.map(r => `<tr><td><strong>${esc(r.g.code)}</strong></td><td>${esc(r.g.name || '')}</td>
-        <td>${money(r.actual)}</td><td>${money(r.planned)}</td></tr>`).join('')
-        || '<tr><td colspan="4">Nothing in this period.</td></tr>'}
-    </table>
-
-    <h2>Every entry</h2>
-    <table>
-      <tr><th style="width:22mm">Incurred</th><th style="width:17mm">Type</th><th style="width:19mm">Asset</th>
-          <th>Description</th><th style="width:22mm">Payment</th><th style="width:23mm">Amount</th></tr>
-      ${list.slice().sort((a, b) => costDate(a).localeCompare(costDate(b))).map(c => {
-        const g = gearById(c.gear_id) || {};
-        return `<tr class="avoid-break">
-          <td>${c.incurred_on ? fmtDate(c.incurred_on) : '—'}</td>
-          <td>${c.kind === 'planned' ? 'Planned' : 'Actual'}</td>
-          <td><strong>${esc(g.code || '')}</strong></td>
-          <td class="note">${esc(c.description || '')}</td>
-          <td>${c.payment_on ? fmtDate(c.payment_on) : '—'}</td>
-          <td>${money(c.amount)}</td></tr>`;
-      }).join('') || '<tr><td colspan="6" class="quiet">Nothing in this period.</td></tr>'}
-    </table>
-    ${docFoot('Cost report')}`);
-}
-
-function exportCostsCsv(list) {
-  const head = ['Type', 'Asset', 'Name', 'Amount', 'Description', 'Date incurred',
-                'Payment date', 'Attachments', 'Entered by', 'Entered'];
-  const rows = list.slice().sort((a, b) => costDate(a).localeCompare(costDate(b))).map(c => {
-    const g = gearById(c.gear_id) || {};
-    const files = Array.isArray(c.files) ? c.files : [];
-    return [c.kind === 'planned' ? 'Planned' : 'Actual', g.code || '', g.name || '',
-      Number(c.amount) || 0, c.description || '', c.incurred_on || '', c.payment_on || '',
-      files.map(f => f.name).join('; '), c.created_by || '', fmtDateTime(c.created_at)];
-  });
-  downloadCsv([head, ...rows], `rck-costs-${today()}.csv`);
-}
-
-/* ================================================================
    Screen — settings
    ================================================================ */
 function renderSetup(view) {
@@ -4850,16 +2929,8 @@ function renderSetup(view) {
       <h2>You</h2>
       <label class="field"><span>Your name</span>
         <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
-      ${(() => {
-        const m = matchCrew(S.name);
-        if (!S.name) return '';
-        return m
-          ? `<p class="muted small">Work you do on a job is logged to
-             <strong>${esc(m)}</strong>'s diary automatically.</p>`
-          : `<div class="banner">Your name doesn't match anyone on the maintenance crew, so
-             what you do on a job is logged under "<strong>${esc(S.name)}</strong>" rather than
-             a crew member's diary. Set it to match a crew name if it should be theirs.</div>`;
-      })()}
+      <p class="muted small">This name goes on everything you report and every note you
+        post, so put something the workshop will recognise.</p>
       <label class="field"><span>This device is used by</span>
         <select id="sRole">
           <option value="crew" ${S.role === 'crew' ? 'selected' : ''}>Crew — report damage, see status</option>
@@ -5081,7 +3152,32 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
   await refresh();
   render();
   startPolling();
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  }
+  keepUpToDate();
 })();
+
+/* ----------------------------------------------------------------------
+   Staying current.
+
+   A phone that keeps the app open — a home-screen app resumed rather than
+   relaunched — can sit on an old build for days without anyone knowing.
+   The worker is asked for a fresh copy whenever the app is brought back to
+   the front, and when a new one takes over the page reloads itself once,
+   so what is on screen is what was deployed.
+   ---------------------------------------------------------------------- */
+function keepUpToDate() {
+  if (!('serviceWorker' in navigator)) return;
+
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => { reg.update().catch(() => {}); };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    window.addEventListener('focus', check);
+    setInterval(check, 30 * 60 * 1000);
+  }).catch(() => {});
+}
