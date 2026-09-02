@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.9.0';
+const VERSION = '2.0.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -87,34 +87,29 @@ function roleDef(key) { return ROLES.find(r => r.key === key) || ROLES[0]; }
 function roleLabel(key) { return roleDef(key).label; }
 
 /* --------------------------------------------------------- job costing */
-/* What a job is built out of. Quantity times rate on each line, expected
-   when the office prices it and actual once it is done, so a job that went
-   over says exactly where it went. */
-const COST_KINDS = [
-  { key: 'asphalt',     label: 'Asphalt purchase',    unit: 'tonnes' },
-  { key: 'emulsion',    label: 'Emulsion purchase',   unit: 'litres' },
-  { key: 'concrete',    label: 'Concrete purchase',   unit: 'm³' },
-  { key: 'materials',   label: 'Materials purchase',  unit: 'items' },
-  { key: 'crew',        label: 'Crew',                unit: 'hours' },
-  { key: 'trucking',    label: 'Trucking',            unit: 'hours' },
-  { key: 'plant',       label: 'Plant and machinery', unit: 'hours' },
-  { key: 'transport',   label: 'Transport',           unit: 'loads' },
-  { key: 'subcontract', label: 'Subcontractors',      unit: 'items' },
-  { key: 'other',       label: 'Other',               unit: '' }
+/* A finished job's costing is a list of things and what they came to. No
+   quantities, no rates, no estimate to keep in step with — the job is done,
+   so what is written here is what it cost.
+
+   These are only suggestions for the description box; anything can be typed. */
+const COST_SUGGESTIONS = [
+  'Asphalt purchase', 'Emulsion purchase', 'Concrete purchase', 'Materials purchase',
+  'Crew', 'Trucking', 'Plant and machinery', 'Transport', 'Subcontractors',
+  'Traffic management', 'Disposal', 'Maintenance'
 ];
 
-/* Maintenance is never typed in. It is a tenth of everything else, worked
-   out wherever it is shown, so it cannot drift out of step with the lines
-   above it — on the expected side and the actual side alike. */
-const MAINTENANCE_RATE = 0.10;
-
-function costKind(key) { return COST_KINDS.find(k => k.key === key) || COST_KINDS[COST_KINDS.length - 1]; }
-function costLabel(l) { return (l.label || '').trim() || costKind(l.kind).label; }
-
 function num(v) { const n = Number(v); return isFinite(n) ? n : 0; }
-function lineExpected(l) { return num(l.qty) * num(l.rate); }
-function lineActual(l)   { return num(l.actual_qty) * num(l.actual_rate); }
-function lineHasActual(l) { return hasMoney(l.actual_qty) || hasMoney(l.actual_rate); }
+
+/** What a line cost. Costings entered under the old quantity-times-rate
+    form still read correctly, so nothing already typed in is lost. */
+function lineAmount(l) {
+  if (hasMoney(l.amount)) return Number(l.amount);
+  const actual = num(l.actual_qty) * num(l.actual_rate);
+  return actual || num(l.qty) * num(l.rate);
+}
+function lineLabel(l) {
+  return (l.label || '').trim() || (l.kind ? humanise(l.kind) : 'Cost');
+}
 
 /* ---------------------------------------------------------- documents */
 const DOC_KINDS = [
@@ -281,14 +276,8 @@ function fmtMoney(v, cents) {
 }
 function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
 
-/** What a job made, or null when we don't know both halves. Guessing a
-    margin from half the numbers is worse than showing nothing. */
-/** A job's margin — the settled one when the job is finished and invoiced,
-    otherwise what it was priced to make. */
-function jobMargin(p) {
-  const c = costing(p);
-  return c.acMargin != null ? c.acMargin : c.exMargin;
-}
+/** A margin as a percentage of what was billed, or null when either half
+    is missing. Guessing from half the numbers is worse than showing nothing. */
 function marginPct(value, margin) {
   const v = Number(value);
   if (!isFinite(v) || v === 0 || margin == null) return null;
@@ -839,70 +828,59 @@ function jobInPeriod(p, from, to) {
   return diaryDays(p.id).some(within);
 }
 
-/** The numbers a director asks for, added up honestly: value and cost are
-    summed only over the jobs that carry them, and the count of those jobs
-    comes back too, so a total can say what it is missing. */
-function periodTotals(list) {
-  const t = { jobs: list.length, days: 0, entries: 0, issues: 0,
-              value: 0, valued: 0, cost: 0, costed: 0,
-              acValue: 0, acCost: 0, settled: 0,
-              ongoing: 0, planned: 0, completed: 0 };
-  list.forEach(p => {
-    t.days += diaryDays(p.id).length;
-    t.entries += entriesFor(p.id).length;
-    t.issues += issueCount(p.id);
-    const c = costing(p);
-    if (c.exInv != null)  { t.value += c.exInv; t.valued++; }
-    if (c.exCost != null) { t.cost  += c.exCost; t.costed++; }
-    if (c.acMargin != null) { t.acValue += c.acInv; t.acCost += c.acCost; t.settled++; }
-    t[p.status] = (t[p.status] || 0) + 1;
-  });
-  t.margin = (t.valued && t.costed) ? t.value - t.cost : null;
-  t.marginPct = marginPct(t.value, t.margin);
-  t.acMargin = t.settled ? t.acValue - t.acCost : null;
-  t.acMarginPct = marginPct(t.acValue, t.acMargin);
-  return t;
-}
-
 /* --------------------------------------------------- the money on a job */
 const costLinesFor = id => DB.job_costs
   .filter(l => l.project_id === id)
   .sort((a, b) => (a.sort || 0) - (b.sort || 0) || (a.created_at || '').localeCompare(b.created_at || ''));
 
 /** Everything the P&L needs about one job, worked out in one place so the
-    screen and the printed report can never disagree. */
+    screen and the printed report can never disagree.
+
+    Revenue is the invoice plus whatever variations were claimed on top.
+    Cost is the sum of the lines typed in after the job finished; a job
+    costed before the lines existed still has its old single figure. */
 function costing(p) {
   const lines = costLinesFor(p.id);
+  const cost = lines.length
+    ? lines.reduce((n, l) => n + lineAmount(l), 0)
+    : (hasMoney(p.actual_cost) ? Number(p.actual_cost) : null);
 
-  const exLines = lines.reduce((n, l) => n + lineExpected(l), 0);
-  const acLines = lines.reduce((n, l) => n + lineActual(l), 0);
-  const anyActual = lines.some(lineHasActual);
+  const invoice = hasMoney(p.actual_invoice) ? Number(p.actual_invoice) : null;
+  const variations = hasMoney(p.variations) ? Number(p.variations) : null;
+  const revenue = (invoice == null && variations == null) ? null : num(invoice) + num(variations);
 
-  const exMaint = exLines * MAINTENANCE_RATE;
-  const acMaint = acLines * MAINTENANCE_RATE;
-
-  // A job priced before the costing existed still has its old single figure.
-  const legacy = !lines.length && hasMoney(p.actual_cost) ? Number(p.actual_cost) : null;
-
-  const exCost = lines.length ? exLines + exMaint : legacy;
-  const acCost = anyActual ? acLines + acMaint : null;
-
-  const exInv = hasMoney(p.contract_value) ? Number(p.contract_value) : null;
-  const acInv = hasMoney(p.actual_invoice) ? Number(p.actual_invoice) : null;
-
-  const margin = (inv, cost) => (inv == null || cost == null) ? null : inv - cost;
+  const pnl = (revenue == null || cost == null) ? null : revenue - cost;
 
   return {
-    lines, anyActual, legacy,
-    exLines, exMaint, exCost, acLines, acMaint, acCost, exInv, acInv,
-    exMargin: margin(exInv, exCost),
-    acMargin: margin(acInv, acCost),
-    exPct: marginPct(exInv, margin(exInv, exCost)),
-    acPct: marginPct(acInv, margin(acInv, acCost)),
-    // What the job did against what it was priced to do.
-    swing: (margin(acInv, acCost) == null || margin(exInv, exCost) == null)
-      ? null : margin(acInv, acCost) - margin(exInv, exCost)
+    lines, cost, invoice, variations, revenue, pnl,
+    pct: marginPct(revenue, pnl),
+    priced: lines.length > 0 || cost != null,
+    done: pnl != null
   };
+}
+
+/** The numbers a director asks for, added up honestly: value and cost are
+    summed only over the jobs that carry them, and the count of those jobs
+    comes back too, so a total can say what it is missing. */
+function periodTotals(list) {
+  const t = { jobs: list.length, days: 0, entries: 0, issues: 0,
+              invoice: 0, variations: 0, revenue: 0, cost: 0, priced: 0, done: 0,
+              ongoing: 0, planned: 0, completed: 0 };
+  list.forEach(p => {
+    t.days += diaryDays(p.id).length;
+    t.entries += entriesFor(p.id).length;
+    t.issues += issueCount(p.id);
+    const c = costing(p);
+    if (c.invoice != null) t.invoice += c.invoice;
+    if (c.variations != null) t.variations += c.variations;
+    if (c.revenue != null) t.revenue += c.revenue;
+    if (c.cost != null) { t.cost += c.cost; t.priced++; }
+    if (c.done) t.done++;
+    t[p.status] = (t[p.status] || 0) + 1;
+  });
+  t.pnl = t.done ? t.revenue - t.cost : null;
+  t.pct = marginPct(t.revenue, t.pnl);
+  return t;
 }
 
 /** Board order: on site first, then what starts soonest, then finished. */
@@ -1129,7 +1107,7 @@ function render() {
   else if (route.path.startsWith('/diary/')) { screen = { title: 'Job diary', render: renderDiary };    back = true; }
   else if (route.path.startsWith('/entry/')) { screen = { title: 'Diary entry', render: renderEntry };  back = true; }
   else if (route.path.startsWith('/upload/')){ screen = { title: 'Add document', render: renderUpload }; back = true; }
-  else if (route.path.startsWith('/costs/')) { screen = { title: 'Costing', render: renderCosts }; back = true; }
+  else if (route.path.startsWith('/costs/')) { screen = { title: 'Profit & loss', render: renderCosts }; back = true; }
   else if (route.path === '/overview')       { go('#/pnl'); return; }   // the old name
 
   if (!screen) { go('#/'); return; }
@@ -1378,13 +1356,13 @@ function renderHome(view) {
     const inMonth = DB.projects.filter(p => jobInPeriod(p, from, to));
     const t = inMonth.reduce((acc, p) => {
       const c = costing(p);
-      if (c.exInv != null) { acc.inv += c.exInv; acc.priced++; }
-      if (c.exMargin != null) { acc.margin += c.exMargin; acc.withMargin++; }
+      if (c.revenue != null) { acc.inv += c.revenue; acc.priced++; }
+      if (c.pnl != null) { acc.margin += c.pnl; acc.withMargin++; }
       return acc;
     }, { inv: 0, priced: 0, margin: 0, withMargin: 0 });
     money = t.priced
-      ? `${esc(fmtMoney(t.inv))} invoiced this month${t.withMargin ? ' · ' + esc(fmtMoney(t.margin)) + ' margin' : ''}`
-      : 'No job priced this month yet';
+      ? `${esc(fmtMoney(t.inv))} billed this month${t.withMargin ? ' · ' + esc(fmtMoney(t.margin)) + ' P&L' : ''}`
+      : 'Nothing costed this month yet';
   }
 
   view.innerHTML = `
@@ -1648,13 +1626,10 @@ function renderJob(view) {
       <div class="banner info">This job is finished. The diary and documents stay exactly as they are.
       ${isOffice() ? ' Reopen it below if it was closed by mistake.' : ''}</div>` : ''}
 
-    ${isOffice() ? `
-      <a class="btn wide mb" href="#/costs/${p.id}">${icon('chart')}Costing${
-        costing(p).exInv != null || costing(p).lines.length
-          ? ` — ${esc(fmtMoney(costing(p).exInv))} invoice${
-              isDirector() && costing(p).exMargin != null
-                ? ', ' + esc(fmtMoney(costing(p).exMargin)) + ' margin' : ''}`
-          : ' — not priced yet'}</a>` : ''}
+    ${isDirector() ? `
+      <a class="btn wide mb" href="#/costs/${p.id}">${icon('chart')}Profit &amp; loss${
+        costing(p).pnl != null ? ` — ${esc(fmtMoney(costing(p).pnl))}`
+        : costing(p).priced ? ' — part filled in' : ' — not filled in yet'}</a>` : ''}
 
     <div class="section-title">Reports</div>
     <div class="card">
@@ -2346,20 +2321,19 @@ function renderJobEdit(view) {
 }
 
 /* ================================================================
-   Screen — costing one job
-   The office prices it: a line per thing the job is made of, quantity
-   times rate. A director fills in what it actually came to once the job
-   is done, and the difference speaks for itself.
+   Screen — a job's profit and loss
+   Filled in once the job is finished: what each thing cost, what was
+   invoiced, and what is left. Director devices only.
    ================================================================ */
-async function addCostLine(projectId, kind) {
-  const k = costKind(kind);
+async function addCostLine(projectId) {
   const existing = costLinesFor(projectId);
   return Store.insert('job_costs', {
     id: uid(),
     project_id: projectId,
-    kind: k.key,
+    kind: 'other',
     label: '',
-    unit: k.unit,
+    unit: '',
+    amount: null,
     qty: null, rate: null, actual_qty: null, actual_rate: null,
     sort: existing.length ? Math.max.apply(null, existing.map(l => l.sort || 0)) + 1 : 0,
     created_at: new Date().toISOString(),
@@ -2370,20 +2344,20 @@ async function addCostLine(projectId, kind) {
 function renderCosts(view) {
   const p = jobById(jobIdFromPath());
   if (!p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
-  if (!isOffice()) {
+  if (!isDirector()) {
     view.innerHTML = `
       <div class="card">
-        <h2>Office and directors only</h2>
-        <p class="muted small">What a job costs is priced by the office and reviewed by a
-        director. Nothing about money is shown on a site phone.</p>
+        <h2>Director only</h2>
+        <p class="muted small">What a job made is kept between the directors. The job itself,
+        its paperwork and its diary are all open to you.</p>
         <a class="btn wide mt" href="#/job/${p.id}">Back to the job</a>
       </div>`;
     return;
   }
-  $('#title').textContent = 'Costing';
+  $('#title').textContent = 'Profit & loss';
 
   const c = costing(p);
-  const showActual = isDirector();
+  const money = v => v == null ? '—' : esc(fmtMoney(v, true));
 
   view.innerHTML = `
     <div class="card accent status-${statusTone(p.status)}">
@@ -2400,7 +2374,6 @@ function renderCosts(view) {
         ${p.site ? `<span>${esc(p.site)}</span>` : ''}
         ${p.start_date ? `<span>${esc(fmtShort(p.start_date))}${
           p.end_date && p.end_date !== p.start_date ? '–' + esc(fmtShort(p.end_date)) : ''}</span>` : ''}
-        ${p.supervisor ? `<span>${esc(p.supervisor)}</span>` : ''}
       </div>
     </div>
 
@@ -2410,36 +2383,43 @@ function renderCosts(view) {
       <a class="btn sm" href="#/job/${p.id}">${icon('doc')}Full job</a>
     </div>
 
+    ${p.status !== 'completed' ? `<div class="banner">This job is not finished yet. The costing is
+      meant to be filled in once it is, from the real numbers.</div>` : ''}
+
+    <div class="section-title">What it cost</div>
     <div class="card">
-      <h2>Invoice</h2>
-      <div class="row">
-        <label class="field grow"><span>Expected invoice (excl. GST)</span>
-          <input type="number" id="exInv" inputmode="decimal" step="0.01" min="0"
-            value="${esc(c.exInv == null ? '' : c.exInv)}" placeholder="e.g. 84000"></label>
-        ${showActual ? `
-        <label class="field grow"><span>Final invoice</span>
-          <input type="number" id="acInv" inputmode="decimal" step="0.01" min="0"
-            value="${esc(c.acInv == null ? '' : c.acInv)}" placeholder="once it is billed"></label>` : ''}
-      </div>
+      ${c.lines.length ? `<div class="costlines">${c.lines.map((l, i) => `
+        <div class="costline" data-id="${l.id}" style="--i:${i}">
+          <input type="text" class="cdesc" data-f="label" value="${esc(lineLabel(l) === 'Cost' ? '' : lineLabel(l))}"
+            placeholder="What was it?" list="costsug">
+          <input type="number" class="camt" data-f="amount" inputmode="decimal" step="0.01"
+            value="${esc(hasMoney(l.amount) ? l.amount : (lineAmount(l) || ''))}" placeholder="0.00">
+          <button class="cdel" title="Remove">${icon('trash')}</button>
+        </div>`).join('')}</div>`
+      : '<p class="muted small" style="margin:0 0 12px">Nothing added yet.</p>'}
+      <datalist id="costsug">${COST_SUGGESTIONS.map(x => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+      <button class="btn wide" id="addLine">${icon('plus')}Add a cost</button>
     </div>
 
-    <div class="section-title">What the job is made of</div>
-    <div id="lines">${c.lines.map(l => costRow(l, showActual)).join('')
-      || '<div class="card"><p class="muted small" style="margin:0">Nothing priced yet. Add the first line below.</p></div>'}</div>
-
+    <div class="section-title">The bottom line</div>
     <div class="card">
-      <label class="field"><span>Add a cost</span>
-        <select id="addKind">
-          <option value="">Choose what to add…</option>
-          ${COST_KINDS.map(k => `<option value="${k.key}">${esc(k.label)}</option>`).join('')}
-        </select></label>
-      <p class="muted tiny" style="margin-bottom:0">Maintenance is added for you — always a tenth of
-      everything above it, so it moves when the lines move.</p>
+      <label class="field"><span>Invoice</span>
+        <input type="number" id="inv" inputmode="decimal" step="0.01"
+          value="${esc(c.invoice == null ? '' : c.invoice)}" placeholder="what was billed"></label>
+      <label class="field"><span>Variations claimed</span>
+        <input type="number" id="vars" inputmode="decimal" step="0.01"
+          value="${esc(c.variations == null ? '' : c.variations)}" placeholder="extra claimed on top"></label>
+
+      <table class="data money">
+        <tr><th>Invoice</th><td>${money(c.invoice)}</td></tr>
+        <tr><th>Variations</th><td>${money(c.variations)}</td></tr>
+        <tr><th>Cost</th><td>${money(c.cost)}</td></tr>
+        <tr class="tot"><th>Profit / loss</th>
+          <td class="${c.pnl == null ? '' : c.pnl < 0 ? 'neg' : 'pos'}">${money(c.pnl)}${
+            c.pct != null ? ` · ${c.pct.toFixed(1)}%` : ''}</td></tr>
+      </table>
     </div>
 
-    ${costTotals(p, c, showActual)}
-
-    ${showActual ? `
     <div class="card">
       <label class="field"><span>How did it go?</span>
         <textarea id="pnl" placeholder="Why it landed where it did — the wet week, the extra establishment, the variation that never got signed.">${esc(p.pnl_notes || '')}</textarea>
@@ -2449,128 +2429,51 @@ function renderCosts(view) {
 
     <div class="card">
       <button class="btn primary wide" id="printPnl">${icon('printer')}Print the job P&amp;L</button>
-      <p class="muted tiny center mt" style="margin-bottom:0">The money, the variance, your note, and
-      every entry the supervisors wrote.</p>
-    </div>` : ''}`;
+      <p class="muted tiny center mt" style="margin-bottom:0">The money, your note, and every entry
+      the supervisors wrote.</p>
+    </div>`;
 
   wireCosts(view, p);
 }
 
-/** One line: what it is, how much of it, at what rate — and, for a
-    director, what it actually came to. */
-function costRow(l, showActual) {
-  const ex = lineExpected(l);
-  const ac = lineActual(l);
-  const diff = lineHasActual(l) ? ac - ex : null;
-  return `
-    <div class="costrow" data-id="${l.id}">
-      <div class="ch">
-        <input type="text" class="cname" data-f="label" value="${esc(l.label || '')}"
-          placeholder="${esc(costKind(l.kind).label)}">
-        <button class="cdel" title="Remove">${icon('trash')}</button>
-      </div>
-      <div class="cg">
-        <label><span>Qty</span><input type="number" data-f="qty" inputmode="decimal" step="any"
-          value="${esc(l.qty == null ? '' : l.qty)}"></label>
-        <label><span>Unit</span><input type="text" data-f="unit" value="${esc(l.unit || '')}" placeholder="hours"></label>
-        <label><span>Rate</span><input type="number" data-f="rate" inputmode="decimal" step="any"
-          value="${esc(l.rate == null ? '' : l.rate)}"></label>
-        <div class="ctot"><span>Expected</span><b>${esc(fmtMoney(ex))}</b></div>
-      </div>
-      ${showActual ? `
-      <div class="cg actual">
-        <label><span>Actual qty</span><input type="number" data-f="actual_qty" inputmode="decimal" step="any"
-          value="${esc(l.actual_qty == null ? '' : l.actual_qty)}"></label>
-        <label><span></span><span class="cu">${esc(l.unit || '')}</span></label>
-        <label><span>Actual rate</span><input type="number" data-f="actual_rate" inputmode="decimal" step="any"
-          value="${esc(l.actual_rate == null ? '' : l.actual_rate)}"></label>
-        <div class="ctot"><span>Actual</span><b class="${diff == null ? '' : diff > 0 ? 'neg' : 'pos'}">${
-          lineHasActual(l) ? esc(fmtMoney(ac)) : '—'}</b>${
-          diff ? `<em class="${diff > 0 ? 'neg' : 'pos'}">${diff > 0 ? '+' : ''}${esc(fmtMoney(diff))}</em>` : ''}</div>
-      </div>` : ''}
-    </div>`;
-}
-
-/** The bottom line, expected against actual. */
-function costTotals(p, c, showActual) {
-  const row = (label, ex, ac, strong) => `
-    <tr${strong ? ' class="tot"' : ''}>
-      <th>${esc(label)}</th>
-      <td>${ex == null ? '—' : esc(fmtMoney(ex, true))}</td>
-      ${showActual ? `<td>${ac == null ? '—' : esc(fmtMoney(ac, true))}</td>` : ''}
-    </tr>`;
-  return `
-    <div class="card">
-      <h2>The bottom line</h2>
-      <table class="data money">
-        <tr><th></th><td class="hd">Expected</td>${showActual ? '<td class="hd">Actual</td>' : ''}</tr>
-        ${row('Invoice', c.exInv, c.acInv)}
-        ${row('Costs', c.lines.length ? c.exLines : c.legacy, c.anyActual ? c.acLines : null)}
-        ${c.lines.length ? row('Maintenance (10%)', c.exMaint, c.anyActual ? c.acMaint : null) : ''}
-        ${row('Total cost', c.exCost, c.acCost, true)}
-        <tr class="tot">
-          <th>Margin</th>
-          <td class="${c.exMargin == null ? '' : c.exMargin < 0 ? 'neg' : 'pos'}">${
-            c.exMargin == null ? '—' : esc(fmtMoney(c.exMargin, true)) + (c.exPct != null ? ` · ${c.exPct.toFixed(1)}%` : '')}</td>
-          ${showActual ? `<td class="${c.acMargin == null ? '' : c.acMargin < 0 ? 'neg' : 'pos'}">${
-            c.acMargin == null ? '—' : esc(fmtMoney(c.acMargin, true)) + (c.acPct != null ? ` · ${c.acPct.toFixed(1)}%` : '')}</td>` : ''}
-        </tr>
-      </table>
-      ${showActual && c.swing != null ? `<p class="small mt" style="margin-bottom:0">Against the price,
-        the job came in <strong class="${c.swing < 0 ? 'neg' : 'pos'}">${
-        esc(fmtMoney(Math.abs(c.swing)))} ${c.swing < 0 ? 'behind' : 'ahead'}</strong>.</p>` : ''}
-    </div>`;
-}
-
 function wireCosts(view, p) {
-  const save = (id, patch) => Store.patch('job_costs', id, patch);
-
-  $$('.costrow', view).forEach(rowEl => {
-    const id = rowEl.dataset.id;
-    $$('input', rowEl).forEach(inp => {
+  $$('.costline', view).forEach(row => {
+    const id = row.dataset.id;
+    $$('input', row).forEach(inp => {
       inp.onchange = async () => {
         const f = inp.dataset.f;
         const v = inp.type === 'number' ? moneyField(inp.value) : inp.value.trim();
-        await save(id, { [f]: v });
-        render();                       // totals and maintenance move together
+        await Store.patch('job_costs', id, { [f]: v });
+        render();
       };
     });
-    $('.cdel', rowEl).onclick = async () => {
+    $('.cdel', row).onclick = async () => {
       const l = DB.job_costs.find(x => x.id === id);
-      if (!confirm(`Remove "${l ? costLabel(l) : 'this line'}" from the costing?`)) return;
+      if (!confirm(`Remove "${l ? lineLabel(l) : 'this line'}" from the costing?`)) return;
       await Store.remove('job_costs', id);
       render();
     };
   });
 
-  const add = $('#addKind', view);
-  if (add) add.onchange = async () => {
-    if (!add.value) return;
-    await addCostLine(p.id, add.value);
-    render();
-  };
+  $('#addLine', view).onclick = async () => { await addCostLine(p.id); render(); };
 
-  const exInv = $('#exInv', view);
-  if (exInv) exInv.onchange = async () => {
-    await Store.patch('projects', p.id, { contract_value: moneyField(exInv.value) });
-    render();
+  const money = (id, field) => {
+    const el = $('#' + id, view);
+    if (el) el.onchange = async () => {
+      await Store.patch('projects', p.id, { [field]: moneyField(el.value) });
+      render();
+    };
   };
-  const acInv = $('#acInv', view);
-  if (acInv) acInv.onchange = async () => {
-    await Store.patch('projects', p.id, { actual_invoice: moneyField(acInv.value) });
-    render();
-  };
+  money('inv', 'actual_invoice');
+  money('vars', 'variations');
 
-  const notes = $('#saveNotes', view);
-  if (notes) notes.onclick = async function () {
+  $('#saveNotes', view).onclick = async function () {
     this.disabled = true;
     await Store.patch('projects', p.id, { pnl_notes: $('#pnl', view).value.trim() });
     toast('Saved');
     render();
   };
-
-  const pr = $('#printPnl', view);
-  if (pr) pr.onclick = () => printJobPnl(p);
+  $('#printPnl', view).onclick = () => printJobPnl(p);
 }
 
 /* ================================================================
@@ -2588,34 +2491,38 @@ function monthRange() {
   const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
   return [iso(y, m, 1), iso(y, m, new Date(y, m + 1, 0).getDate())];
 }
+/* Finished jobs, this month. A costing is filled in after a job is done, so
+   those are the only ones with anything to show. */
 const pnlFilter = (() => {
   const [from, to] = monthRange();
-  return { status: 'all', client: 'all', from, to, sort: 'value', open: false };
+  return { status: 'completed', client: 'all', q: '', from, to, sort: 'pnl', open: false };
 })();
 function pnlIsDefault() {
   const [from, to] = monthRange();
-  return pnlFilter.status === 'all' && pnlFilter.client === 'all'
+  return pnlFilter.status === 'completed' && pnlFilter.client === 'all' && !pnlFilter.q
       && pnlFilter.from === from && pnlFilter.to === to;
 }
 function pnlReset() {
   const [from, to] = monthRange();
-  Object.assign(pnlFilter, { status: 'all', client: 'all', from, to });
+  Object.assign(pnlFilter, { status: 'completed', client: 'all', q: '', from, to });
 }
 
 const PNL_STATUS = [
-  { key: 'all',       label: 'Every job' },
-  { key: 'planned',   label: 'Planned' },
+  { key: 'completed', label: 'Completed' },
   { key: 'ongoing',   label: 'On site' },
-  { key: 'completed', label: 'Completed' }
+  { key: 'planned',   label: 'Planned' },
+  { key: 'all',       label: 'Every job' }
 ];
 
 function pnlJobs() {
+  const q = pnlFilter.q.trim().toLowerCase();
   return DB.projects.filter(p => {
     // An archived job is one that never really ran. It should not be sitting
-    // in a month's margin any more than it should be on the board.
+    // in a month's figures any more than it should be on the board.
     if (p.archived) return false;
     if (pnlFilter.status !== 'all' && p.status !== pnlFilter.status) return false;
     if (pnlFilter.client !== 'all' && (p.client || '').trim() !== pnlFilter.client) return false;
+    if (q && ![p.name, p.client, p.site, jobNo(p)].some(v => String(v || '').toLowerCase().includes(q))) return false;
     return jobInPeriod(p, pnlFilter.from, pnlFilter.to);
   });
 }
@@ -2630,7 +2537,8 @@ function pnlLabel() {
       : 'All time';
   const who = pnlFilter.client === 'all' ? '' : ` · ${pnlFilter.client}`;
   const what = pnlFilter.status === 'all' ? '' : ` · ${PNL_STATUS.find(x => x.key === pnlFilter.status).label.toLowerCase()}`;
-  return when + who + what;
+  const named = pnlFilter.q ? ` · "${pnlFilter.q}"` : '';
+  return when + who + what + named;
 }
 
 function renderPnl(view) {
@@ -2650,26 +2558,28 @@ function renderPnl(view) {
   const t = periodTotals(list);
   const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim()).filter(Boolean))).sort();
 
-  const mg = p => { const m = costing(p); return m.acMargin != null ? m.acMargin : m.exMargin; };
+  const val = p => { const c = costing(p); return c.revenue == null ? -Infinity : c.revenue; };
+  const mg  = p => { const c = costing(p); return c.pnl == null ? -Infinity : c.pnl; };
   const sorters = {
-    value:  (a, b) => (Number(b.contract_value) || -1) - (Number(a.contract_value) || -1),
-    margin: (a, b) => ((mg(b) == null ? -Infinity : mg(b)) - (mg(a) == null ? -Infinity : mg(a))),
+    pnl:    (a, b) => mg(b) - mg(a),
+    value:  (a, b) => val(b) - val(a),
     name:   (a, b) => String(a.name || '').localeCompare(String(b.name || '')),
-    date:   (a, b) => String(b.start_date || '').localeCompare(String(a.start_date || ''))
+    date:   (a, b) => String(b.completed_at || b.start_date || '').localeCompare(String(a.completed_at || a.start_date || ''))
   };
   const sorted = list.slice().sort(sorters[pnlFilter.sort] || sorters.value);
 
   view.innerHTML = `
     <div class="ledger">
       <div class="lh">${esc(pnlLabel())}</div>
-      <div class="lrow"><span>Invoice</span><b>${esc(fmtMoney(t.value))}</b></div>
+      <div class="lrow"><span>Invoice</span><b>${esc(fmtMoney(t.invoice))}</b></div>
+      <div class="lrow"><span>Variations</span><b>${esc(fmtMoney(t.variations))}</b></div>
       <div class="lrow"><span>Cost</span><b>${esc(fmtMoney(t.cost))}</b></div>
-      <div class="lrow tot"><span>Margin</span><b class="${
-        t.margin == null ? '' : t.margin < 0 ? 'neg' : 'pos'}">${
-        t.margin == null ? '—' : esc(fmtMoney(t.margin))}${
-        t.marginPct != null ? ` <em>${t.marginPct.toFixed(1)}%</em>` : ''}</b></div>
-      <div class="lf">${list.length} job${list.length === 1 ? '' : 's'} · ${t.valued} priced${
-        t.settled ? ` · ${t.settled} invoiced, ${esc(fmtMoney(t.acMargin))} actual` : ''}</div>
+      <div class="lrow tot"><span>Profit / loss</span><b class="${
+        t.pnl == null ? '' : t.pnl < 0 ? 'neg' : 'pos'}">${
+        t.pnl == null ? '—' : esc(fmtMoney(t.pnl))}${
+        t.pct != null ? ` <em>${t.pct.toFixed(1)}%</em>` : ''}</b></div>
+      <div class="lf">${list.length} job${list.length === 1 ? '' : 's'}${
+        t.done < list.length ? ` · ${t.done} costed` : ''}</div>
     </div>
 
     <button class="btn wide filterbtn${pnlIsDefault() ? '' : ' on'}" id="filterBtn">
@@ -2682,6 +2592,9 @@ function renderPnl(view) {
         <select id="fStatus">
           ${PNL_STATUS.map(x => `<option value="${x.key}" ${pnlFilter.status === x.key ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}
         </select></label>
+      <label class="field"><span>Search</span>
+        <input type="text" id="fQ" value="${esc(pnlFilter.q)}"
+          placeholder="Job name, number or site" autocapitalize="off"></label>
       <label class="field"><span>Client</span>
         <select id="fClient">
           <option value="all">Every client</option>
@@ -2699,36 +2612,34 @@ function renderPnl(view) {
     </div>` : ''}
 
     <div class="filters" id="sortChips">
-      ${[['value','By value'],['margin','By margin'],['date','By date'],['name','By name']]
+      ${[['pnl','By P&L'],['value','By invoice'],['date','By date'],['name','By name']]
         .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${pnlFilter.sort === k}">${l}</button>`).join('')}
     </div>
 
     ${sorted.length ? sorted.map((p, i) => {
       const c = costing(p);
-      const settled = c.acMargin != null;
-      const m = settled ? c.acMargin : c.exMargin;
-      const pct = settled ? c.acPct : c.exPct;
       return `
         <button class="job-row status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
           <div class="hdr">
             <span class="num">${jobNo(p)}</span>
             <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
-            <span class="pill plain">${settled ? 'Final' : c.lines.length ? 'Priced' : 'Not priced'}</span>
+            ${c.done ? '' : '<span class="pill plain">No costing yet</span>'}
           </div>
           <div class="ttl">${esc(p.name)}</div>
           <div class="sub">
             ${p.client ? `<span>${esc(p.client)}</span>` : ''}
             <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
-            ${p.start_date ? `<span>${esc(fmtShort(p.start_date))}</span>` : ''}
+            <span>${esc(fmtShort(p.completed_at || p.start_date))}</span>
           </div>
+          ${c.priced || c.revenue != null ? `
           <div class="sub">
-            <span><strong>${esc(fmtMoney(settled ? c.acInv : c.exInv))}</strong> invoice</span>
-            <span>${esc(fmtMoney(settled ? c.acCost : c.exCost))} cost</span>
-            ${m != null ? `<span class="${m < 0 ? 'neg' : 'pos'}" style="font-weight:640">${
-              esc(fmtMoney(m))}${pct != null ? ' · ' + pct.toFixed(1) + '%' : ''}</span>` : ''}
-          </div>
+            <span><strong>${esc(fmtMoney(c.revenue))}</strong> billed</span>
+            <span>${esc(fmtMoney(c.cost))} cost</span>
+            ${c.pnl != null ? `<span class="${c.pnl < 0 ? 'neg' : 'pos'}" style="font-weight:640">${
+              esc(fmtMoney(c.pnl))}${c.pct != null ? ' · ' + c.pct.toFixed(1) + '%' : ''}</span>` : ''}
+          </div>` : ''}
         </button>`;
-    }).join('') : `<div class="empty"><b>No jobs here</b>Nothing matches this month.
+    }).join('') : `<div class="empty"><b>No jobs here</b>Nothing finished this month matches.
       Open the filter for a wider period.</div>`}
 
     <div class="card">
@@ -2742,6 +2653,10 @@ function renderPnl(view) {
   $('#filterBtn', view).onclick = () => { pnlFilter.open = !pnlFilter.open; render(); };
   const on = (id, fn) => { const el = $('#' + id, view); if (el) el.onchange = fn; };
   on('fStatus', e => { pnlFilter.status = e.target.value; render(); });
+  const q = $('#fQ', view);
+  if (q) q.oninput = e => { pnlFilter.q = e.target.value; clearTimeout(q._t);
+    q._t = setTimeout(() => { const at = q.selectionStart; render();
+      const again = $('#fQ'); if (again) { again.focus(); again.setSelectionRange(at, at); } }, 260); };
   on('fClient', e => { pnlFilter.client = e.target.value; render(); });
   on('fFrom',   e => { pnlFilter.from = e.target.value; render(); });
   on('fTo',     e => { pnlFilter.to = e.target.value; render(); });
@@ -2760,27 +2675,24 @@ function renderPnl(view) {
     the accountant, with the same figures that are on the screen. */
 function exportPnlCsv(list) {
   const r2 = v => v == null ? '' : Math.round(v * 100) / 100;
-  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Status', 'First day', 'Last day',
+  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Status', 'First day', 'Completed',
     'Supervisor', 'Days on site', 'Issues',
-    'Expected invoice', 'Expected cost', 'Expected margin', 'Expected margin %',
-    'Final invoice', 'Actual cost', 'Actual margin', 'Actual margin %',
-    'Against the price', 'Note']];
+    'Invoice', 'Variations', 'Billed', 'Cost', 'Profit / loss', 'P&L %', 'Note']];
   list.forEach(p => {
     const c = costing(p);
     rows.push([
       jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), statusLabel(p.status),
-      p.start_date || '', p.end_date || '', p.supervisor,
+      p.start_date || '', p.completed_at ? fmtDate(p.completed_at) : '', p.supervisor,
       diaryDays(p.id).length, issueCount(p.id),
-      r2(c.exInv), r2(c.exCost), r2(c.exMargin), c.exPct == null ? '' : c.exPct.toFixed(1),
-      r2(c.acInv), r2(c.acCost), r2(c.acMargin), c.acPct == null ? '' : c.acPct.toFixed(1),
-      r2(c.swing), p.pnl_notes || ''
+      r2(c.invoice), r2(c.variations), r2(c.revenue), r2(c.cost), r2(c.pnl),
+      c.pct == null ? '' : c.pct.toFixed(1), p.pnl_notes || ''
     ]);
   });
   const t = periodTotals(list);
   rows.push([]);
   rows.push(['TOTAL', pnlLabel(), '', '', '', '', '', '', '', t.days, t.issues,
-    r2(t.value), r2(t.cost), r2(t.margin), t.marginPct == null ? '' : t.marginPct.toFixed(1),
-    r2(t.acValue), r2(t.acCost), r2(t.acMargin), t.acMarginPct == null ? '' : t.acMarginPct.toFixed(1), '', '']);
+    r2(t.invoice), r2(t.variations), r2(t.revenue), r2(t.cost), r2(t.pnl),
+    t.pct == null ? '' : t.pct.toFixed(1), '']);
   const tag = (pnlFilter.client === 'all' ? 'all-clients' : pnlFilter.client)
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   downloadCsv(`rck-pnl-${tag}-${pnlFilter.from || 'start'}-to-${pnlFilter.to || today()}.csv`, rows);
@@ -2822,8 +2734,8 @@ function renderReports(view) {
     ${isDirector() ? `
     <div class="card">
       <h2>Across every job</h2>
-      <p class="muted small">Profit and loss over a period: what each job was priced at, what it
-      came to, and the margin — added up from the costings and the crews' own entries.</p>
+      <p class="muted small">Profit and loss over a period: what was invoiced, what it cost, and
+      what is left — added up from the costings and the crews' own entries.</p>
       <a class="btn primary wide" href="#/pnl">Open profit &amp; loss</a>
     </div>` : ''}
 
@@ -2865,22 +2777,23 @@ function downloadCsv(name, rows) {
 }
 
 function exportJobsCsv() {
-  const money = isOffice();     // a site phone exports a spreadsheet without the money in it
+  const money = isDirector();   // the P&L is a director's, so nobody else's spreadsheet carries it
   const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Type of work', 'Status', 'First day',
     'Last day', 'Supervisor', 'Started', 'Completed', 'Days on site', 'Diary entries',
     'Issues', 'Documents', 'Closing note']
-    .concat(money ? ['Contract value', 'Cost', 'Margin'] : [])];
+    .concat(money ? ['Invoice', 'Variations', 'Cost', 'Profit / loss'] : [])];
   boardOrder(DB.projects.slice()).forEach(p => rows.push([
     jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), typeLabel(typeOf(p)), statusLabel(p.status),
     p.start_date || '', p.end_date || '', p.supervisor,
     p.started_at ? fmtDate(p.started_at) : '', p.completed_at ? fmtDate(p.completed_at) : '',
     diaryDays(p.id).length, entriesFor(p.id).length, issueCount(p.id), allDocsFor(p.id).length,
     p.completion_notes || ''
-  ].concat(money ? [
-    hasMoney(p.contract_value) ? Number(p.contract_value) : '',
-    hasMoney(p.actual_cost) ? Number(p.actual_cost) : '',
-    jobMargin(p) == null ? '' : jobMargin(p)
-  ] : [])));
+  ].concat(money ? (c => [
+    c.invoice == null ? '' : c.invoice,
+    c.variations == null ? '' : c.variations,
+    c.cost == null ? '' : c.cost,
+    c.pnl == null ? '' : c.pnl
+  ])(costing(p)) : [])));
   downloadCsv('rck-jobs.csv', rows);
 }
 
@@ -3197,8 +3110,8 @@ function printDirectorReport(list) {
     b.jobs++;
     b.days += diaryDays(p.id).length;
     b.issues += issueCount(p.id);
-    if (c.exInv != null)  { b.inv += c.exInv; b.priced++; }
-    if (c.exCost != null) { b.cost += c.exCost; }
+    if (c.revenue != null) { b.inv += c.revenue; b.priced++; }
+    if (c.cost != null)    { b.cost += c.cost; }
   });
   const clients = Object.keys(byClient).sort((a, b) => byClient[b].inv - byClient[a].inv);
 
@@ -3214,10 +3127,10 @@ function printDirectorReport(list) {
     ${docHead('Profit & loss', pnlLabel(), `${jobs.length} job${jobs.length === 1 ? '' : 's'}`)}
 
     <div class="figures">
-      <div><div class="n">${money(t.value)}</div><div class="l">Invoice</div></div>
+      <div><div class="n">${money(t.revenue)}</div><div class="l">Billed</div></div>
       <div><div class="n">${money(t.cost)}</div><div class="l">Cost</div></div>
-      <div><div class="n"${cls(t.margin)}>${money(t.margin)}</div>
-        <div class="l">Margin${t.marginPct != null ? ' · ' + t.marginPct.toFixed(1) + '%' : ''}</div></div>
+      <div><div class="n"${cls(t.pnl)}>${money(t.pnl)}</div>
+        <div class="l">Profit / loss${t.pct != null ? ' · ' + t.pct.toFixed(1) + '%' : ''}</div></div>
       <div><div class="n">${t.days}</div><div class="l">Days on site</div></div>
     </div>
 
@@ -3225,12 +3138,11 @@ function printDirectorReport(list) {
     <table class="kv">
       <tr><td class="lbl">Jobs</td><td class="val" colspan="3"><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
         ${t.planned || 0} planned, ${t.completed || 0} completed</td></tr>
-      <tr><td class="lbl">Priced</td><td class="val" colspan="3">${t.valued} of ${t.jobs}${
-        t.valued < t.jobs ? ' <em>— totals are a floor, not the whole picture</em>' : ''}</td></tr>
-      ${t.settled ? `<tr><td class="lbl">Finished and invoiced</td><td class="val" colspan="3">${t.settled} job(s) — invoiced
-        <strong>${money(t.acValue)}</strong> against <strong>${money(t.acCost)}</strong> of cost,
-        <strong${cls(t.acMargin)}>${money(t.acMargin)}</strong> actual margin${
-        t.acMarginPct != null ? ` · ${t.acMarginPct.toFixed(1)}%` : ''}</td></tr>` : ''}
+      <tr><td class="lbl">Costed</td><td class="val" colspan="3">${t.done} of ${t.jobs}${
+        t.done < t.jobs ? ' <em>— totals cover only the jobs with a costing on them</em>' : ''}</td></tr>
+      <tr><td class="lbl">Invoice</td><td class="val" colspan="3"><strong>${money(t.invoice)}</strong>${
+        t.variations ? ` plus <strong>${money(t.variations)}</strong> of variations` : ''}</td></tr>
+      <tr><td class="lbl">Cost</td><td class="val" colspan="3">${money(t.cost)}</td></tr>
       <tr><td class="lbl">Diary entries</td><td class="val" colspan="3">${t.entries}</td></tr>
       <tr><td class="lbl">Issues and delays</td><td class="val" colspan="3">${t.issues}</td></tr>
     </table>
@@ -3256,22 +3168,20 @@ function printDirectorReport(list) {
     <h2>Job by job</h2>
     <table>
       <tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:22mm">Status</th>
-        <th style="width:12mm">Days</th><th style="width:24mm">Invoice</th>
-        <th style="width:24mm">Cost</th><th style="width:26mm">Margin</th></tr>
+        <th style="width:12mm">Days</th><th style="width:24mm">Billed</th>
+        <th style="width:24mm">Cost</th><th style="width:26mm">P&amp;L</th></tr>
       ${jobs.map(p => {
         const c = costing(p);
-        const settled = c.acMargin != null;
-        const m = settled ? c.acMargin : c.exMargin;
-        const pct = settled ? c.acPct : c.exPct;
+        const m = c.pnl, pct = c.pct;
         const iss = issueCount(p.id);
         return `<tr class="avoid-break">
-          <td><strong>${jobNo(p)}</strong>${settled ? '<br><em>final</em>' : ''}</td>
+          <td><strong>${jobNo(p)}</strong>${c.done ? '' : '<br><em>no costing</em>'}</td>
           <td>${esc(p.name)}${p.client ? `<br><em>${esc(p.client)}</em>` : ''}${
             p.supervisor ? `<br>${esc(p.supervisor)} · ${esc(crewLabel(crewOf(p)))}` : ''}</td>
           <td>${esc(statusLabel(p.status))}</td>
           <td>${diaryDays(p.id).length}${iss ? `<br><em class="neg">${iss} iss.</em>` : ''}</td>
-          <td>${money(settled ? c.acInv : c.exInv)}</td>
-          <td>${money(settled ? c.acCost : c.exCost)}</td>
+          <td>${money(c.revenue)}</td>
+          <td>${money(c.cost)}</td>
           <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
         </tr>`;
       }).join('') || '<tr><td colspan="7">No jobs in this period.</td></tr>'}
@@ -3301,10 +3211,9 @@ function printDirectorReport(list) {
     </div>`, `Profit & loss · ${pnlLabel()}`);
 }
 
-/** The job, end to end, in money: what it was priced at, what it came to,
-    where the difference went, and every word the supervisors wrote —
-    because the answer to "why did this one go over" is nearly always in
-    the diary rather than the spreadsheet. */
+/** The job in money: what it cost, what it billed, what is left — and
+    every word the supervisors wrote, because the answer to "why did this
+    one go the way it did" is nearly always in the diary. */
 function printJobPnl(p) {
   const c = costing(p);
   const days = diaryDays(p.id).slice().sort();
@@ -3315,54 +3224,31 @@ function printJobPnl(p) {
     ${docHead('Job profit & loss', p.name, jobNo(p) + (p.client ? ' · ' + p.client : ''))}
 
     <div class="figures">
-      <div><div class="n">${money(c.acInv != null ? c.acInv : c.exInv)}</div>
-        <div class="l">${c.acInv != null ? 'Final invoice' : 'Expected invoice'}</div></div>
-      <div><div class="n">${money(c.acCost != null ? c.acCost : c.exCost)}</div>
-        <div class="l">${c.acCost != null ? 'Actual cost' : 'Expected cost'}</div></div>
-      <div><div class="n"${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
-        money(c.acMargin != null ? c.acMargin : c.exMargin)}</div>
-        <div class="l">Margin${(c.acPct != null || c.exPct != null)
-          ? ' · ' + (c.acPct != null ? c.acPct : c.exPct).toFixed(1) + '%' : ''}</div></div>
-      <div><div class="n"${cls(c.swing)}>${c.swing == null ? '—' : (c.swing > 0 ? '+' : '') + esc(fmtMoney(c.swing))}</div>
-        <div class="l">Against the price</div></div>
+      <div><div class="n">${money(c.revenue)}</div><div class="l">Billed</div></div>
+      <div><div class="n">${money(c.cost)}</div><div class="l">Cost</div></div>
+      <div><div class="n"${cls(c.pnl)}>${money(c.pnl)}</div>
+        <div class="l">Profit / loss${c.pct != null ? ' · ' + c.pct.toFixed(1) + '%' : ''}</div></div>
+      <div><div class="n">${diaryDays(p.id).length}</div><div class="l">Days on site</div></div>
     </div>
 
     <h2>The job</h2>
     ${jobFacts(p)}
 
-    <h2>What it was made of</h2>
+    <h2>What it cost</h2>
     <table>
-      <tr><th>Line</th><th style="width:26mm">Qty</th><th style="width:24mm">Rate</th>
-        <th style="width:26mm">Expected</th><th style="width:26mm">Actual</th><th style="width:24mm">Difference</th></tr>
-      ${c.lines.map(l => {
-        const ex = lineExpected(l), ac = lineActual(l);
-        const d = lineHasActual(l) ? ac - ex : null;
-        return `<tr class="avoid-break">
-          <td><strong>${esc(costLabel(l))}</strong></td>
-          <td>${l.qty == null ? '—' : esc(l.qty)}${l.unit ? ' ' + esc(l.unit) : ''}${
-            lineHasActual(l) && l.actual_qty != null ? `<br><em>${esc(l.actual_qty)} actual</em>` : ''}</td>
-          <td>${l.rate == null ? '—' : esc(fmtMoney(l.rate, true))}${
-            lineHasActual(l) && l.actual_rate != null ? `<br><em>${esc(fmtMoney(l.actual_rate, true))}</em>` : ''}</td>
-          <td>${esc(fmtMoney(ex, true))}</td>
-          <td>${lineHasActual(l) ? esc(fmtMoney(ac, true)) : '—'}</td>
-          <td${cls(d == null ? null : -d)}>${d == null ? '—' : (d > 0 ? '+' : '') + esc(fmtMoney(d, true))}</td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="6">Nothing was priced on this job.</td></tr>'}
-      ${c.lines.length ? `<tr class="avoid-break">
-        <td><strong>Maintenance</strong> <em>(10% of the above)</em></td><td></td><td></td>
-        <td>${esc(fmtMoney(c.exMaint, true))}</td>
-        <td>${c.anyActual ? esc(fmtMoney(c.acMaint, true)) : '—'}</td><td></td></tr>` : ''}
+      <tr><th>Description</th><th style="width:34mm">Amount</th></tr>
+      ${c.lines.map(l => `<tr class="avoid-break">
+        <td>${esc(lineLabel(l))}</td>
+        <td>${esc(fmtMoney(lineAmount(l), true))}</td>
+      </tr>`).join('') || '<tr><td colspan="2">No costs were recorded.</td></tr>'}
     </table>
 
     <table class="kv">
-      <tr><td class="lbl">Invoice</td><td class="val" colspan="3">${money(c.exInv, true)} expected${
-        c.acInv != null ? ` · <strong>${esc(fmtMoney(c.acInv, true))} final</strong>` : ''}</td></tr>
-      <tr><td class="lbl">Total cost</td><td class="val" colspan="3">${money(c.exCost, true)} expected${
-        c.acCost != null ? ` · <strong>${esc(fmtMoney(c.acCost, true))} actual</strong>` : ''}</td></tr>
-      <tr><td class="lbl">Margin</td><td class="val" colspan="3"><strong${cls(c.acMargin != null ? c.acMargin : c.exMargin)}>${
-        money(c.acMargin != null ? c.acMargin : c.exMargin, true)}</strong>${
-        c.acMargin != null && c.exMargin != null
-          ? ` — priced at ${esc(fmtMoney(c.exMargin, true))}` : ''}</td></tr>
+      <tr><td class="lbl">Invoice</td><td class="val" colspan="3">${money(c.invoice, true)}</td></tr>
+      <tr><td class="lbl">Variations</td><td class="val" colspan="3">${money(c.variations, true)}</td></tr>
+      <tr><td class="lbl">Cost</td><td class="val" colspan="3">${money(c.cost, true)}</td></tr>
+      <tr><td class="lbl">Profit / loss</td><td class="val" colspan="3"><strong${cls(c.pnl)}>${
+        money(c.pnl, true)}</strong>${c.pct != null ? ` · ${c.pct.toFixed(1)}%` : ''}</td></tr>
     </table>
     ${p.pnl_notes ? `<h2>How it went</h2><p class="note">${esc(p.pnl_notes)}</p>` : ''}
 

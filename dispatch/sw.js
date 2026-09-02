@@ -1,7 +1,7 @@
 /* RCK Dispatch service worker.
    The app shell is cached so it opens instantly and still works on a bad
    connection. Supabase calls are never cached — jobs and diaries must always be live. */
-const CACHE = 'rck-dispatch-v12';
+const CACHE = 'rck-dispatch-v13';
 const ASSETS = [
   './', './index.html', './app.css', './app.js', './config.js',
   './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'

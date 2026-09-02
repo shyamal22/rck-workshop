@@ -50,6 +50,7 @@ alter table projects add column if not exists contract_value numeric;
 alter table projects add column if not exists actual_cost    numeric;
 alter table projects add column if not exists crew           text not null default '';
 alter table projects add column if not exists actual_invoice numeric;
+alter table projects add column if not exists variations     numeric;
 alter table projects add column if not exists pnl_notes      text not null default '';
 
 create index if not exists projects_crew_idx on projects (crew);
@@ -84,24 +85,29 @@ create table if not exists project_docs (
 create index if not exists project_docs_project_idx on project_docs (project_id, uploaded_at);
 
 -- --------------------------------------------------------- job costing
--- One line of what a job is expected to cost, and what it actually cost.
--- Quantity times rate, both sides, so a job that went over says where.
--- Maintenance is not stored: it is always 10% of everything else, worked
--- out when it is shown, so it can never drift out of step with the lines.
+-- One line of what a finished job actually cost: a description and an
+-- amount. The costing is filled in after the job is done, so there is no
+-- estimate to keep in step with — what is here is what it came to.
 create table if not exists job_costs (
   id           uuid primary key default gen_random_uuid(),
   project_id   uuid not null references projects(id) on delete cascade,
-  kind         text not null default 'other',   -- see COST_KINDS in app.js
-  label        text not null default '',        -- what it is, when kind is 'other'
+  kind         text not null default 'other',   -- kept from the old form; nothing writes it now
+  label        text not null default '',        -- the description typed in
   unit         text not null default '',        -- tonnes, hours, loads …
-  qty          numeric,                         -- expected
+  amount       numeric,                         -- what this line actually cost
+  -- Kept so costings entered under the old quantity-times-rate form still
+  -- read correctly. Nothing writes to them any more.
+  qty          numeric,
   rate         numeric,
-  actual_qty   numeric,                         -- filled in once the job is done
+  actual_qty   numeric,
   actual_rate  numeric,
   sort         integer not null default 0,
   created_at   timestamptz not null default now(),
   created_by   text not null default ''
 );
+
+-- Added after the first release, so an existing job_costs table gets it too.
+alter table job_costs add column if not exists amount numeric;
 
 create index if not exists job_costs_project_idx on job_costs (project_id, sort);
 
