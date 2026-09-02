@@ -47,28 +47,34 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   its diary on site in the afternoon.
 - **The app opens on a landing page with two tools: Jobs, and Profit & loss.** Everyone gets
   Jobs. P&L appears on Director devices only, and nothing hints at it otherwise.
-- **Costing a job**, on the job's own **Costing** screen: a line for each thing the job is
-  made of — asphalt, emulsion, concrete, materials, crew, trucking, plant and machinery,
-  transport, subcontractors, or anything you name yourself. Each line is a quantity, a unit
-  and a rate. **Maintenance is never typed in: it is always 10% of everything above it**, so
-  it moves when the lines move.
-- The office prices the job and enters the expected invoice. A **director** fills in the
-  actuals once it is done — quantity and rate again, line by line — plus the final invoice
-  and a note on why it landed where it did. The screen shows expected against actual, the
-  difference on every line, and how far ahead or behind the price the job came in.
-- **The job P&L prints** as one document: the money, every line with its variance, your note,
-  and every entry the supervisors wrote — because the reason a job went over is usually in
-  the diary rather than the spreadsheet.
-- **⋮ → Profit & loss** opens on the month you are in: invoice, cost and margin for every job
-  in it, before a single choice has been made. **Filter** narrows it — planned, on site or
-  completed, one client, any dates — and both the printed report and the **Excel export**
-  cover exactly what is filtered. Tapping a job goes straight to its costing: the overview, a
-  button through to the timeline, and the money — not the whole dispatch page.
-- **The director's report** prints that period — the totals, every job with its margin, and
-  **every issue and delay the supervisors logged**, gathered across all the jobs into one table.
-- Value and cost live on the job itself, entered by the office or a director. They are never
-  shown on a site phone, and never exported in a supervisor's CSV. A margin is only worked out
-  when both numbers are there — half the figures is worse than none.
+- **The profit and loss on a job** is filled in after it is finished, on the job's own
+  **Profit & loss** screen. It is deliberately small: a **description and a cost**, as many
+  lines as the job needs. The description box suggests the usual ones — asphalt, emulsion,
+  concrete and materials purchases, crew, trucking, plant and machinery, transport,
+  subcontractors, traffic management, disposal, maintenance — but anything at all can be
+  typed. There is no estimate to keep in step with, no quantities and no rates: the job is
+  done, so what is written down is what it cost.
+- Underneath, the bottom line: **Invoice**, **Variations claimed**, **Cost**, and the
+  **Profit / loss** those three come to, with the margin as a percentage. Then a note on why
+  it landed where it did.
+- **The whole screen is for directors only.** An office or site device that opens a costing
+  link is told so and sent back to the job; the P&L link never appears on the job page.
+- **The job P&L prints** as one document: the money, your note, and every entry the
+  supervisors wrote — because the reason a job went over is usually in the diary rather than
+  the spreadsheet.
+- **⋮ → Profit & loss** opens on the jobs completed this month: invoice, cost and profit for
+  each, before a single choice has been made. **Filter** narrows it — **search by job name,
+  number or site**, **one client**, any dates, or widen it to jobs still on site and planned
+  — and both the printed report and the **Excel export** cover exactly what is filtered.
+  Tapping a job goes straight to its P&L.
+- **The director's report** prints that period — the totals, how they split by client, every
+  job with its margin, and **every issue and delay the supervisors logged**, gathered across
+  all the jobs into one table.
+- The money lives on the job itself. It is never shown on a site phone, never in an office
+  device's view, and never exported in a supervisor's CSV. A profit is only worked out when
+  both halves are there — half the figures is worse than none.
+- Costings entered under the older quantity-times-rate form still read correctly; the line
+  simply shows what it came to. Nothing already typed in was lost.
 - Archiving a job is a director's call. Nothing in the app is ever deleted.
 
 **The reports**
@@ -159,10 +165,9 @@ Android), then **Settings** → name, role, and the two values.
 | See **office-only** documents | | ✓ | ✓ |
 | Create and edit jobs | | ✓ | ✓ |
 | Reopen a completed job | | ✓ | ✓ |
-| Enter a job's value and cost | | ✓ | ✓ |
-| Price a job — cost lines and expected invoice | | ✓ | ✓ |
-| **See actuals, margin and the P&L** | | | ✓ |
-| **Enter the final invoice and actual costs** | | | ✓ |
+| **See a job's profit and loss** | | | ✓ |
+| **Enter the costs, invoice and variations** | | | ✓ |
+| **The Profit & loss tool across all jobs** | | | ✓ |
 | **Archive a job** | | | ✓ |
 
 A diary entry written from a director's phone reads *· Director* in the record. Supervisors
@@ -201,9 +206,10 @@ Workshop in the same repository and GitHub Pages serves it from
   that was cancelled, and it can be undone. **Delete** destroys the job with its diary, its
   documents and its costing, for everyone, with no undo; it asks you to type the job number
   first. Both are a director's call. A completed job can still be reopened by the office.
-- **The money is not a secret from the database.** Value and cost are hidden from site phones
-  by the app, not by the database — same as the office-only documents. See the note on logins
-  below before deciding what to put in those boxes.
+- **The money is not a secret from the database.** The profit and loss is hidden from site
+  and office phones by the app, not by the database — same as the office-only documents.
+  Anyone holding the key can read it directly. See the note on logins above before deciding
+  what to put in those boxes.
 - **The board is filtered by crew.** Yellow, Subbie, Civil and Green, each with its own
   colour so a chip is recognised before it is read, plus **Unassigned** whenever a job has
   no crew on it yet. Type of work is still on every job, and in the reports and the
