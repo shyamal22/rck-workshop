@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -3015,7 +3015,7 @@ function printJobReport(p) {
     <div class="figures">
       <div><div class="n">${days.length}</div><div class="l">Days on site</div></div>
       <div><div class="n">${entries.length}</div><div class="l">Diary entries</div></div>
-      <div><div class="n"${issues.length ? ' class="neg"' : ''}>${issues.length}</div><div class="l">Issues &amp; delays</div></div>
+      <div><div class="n${issues.length ? ' neg' : ''}">${issues.length}</div><div class="l">Issues &amp; delays</div></div>
       <div><div class="n">${(isOffice() ? allDocsFor(p.id) : docsFor(p.id)).length}</div><div class="l">Documents</div></div>
     </div>
 
@@ -3063,7 +3063,7 @@ function printDayReport(p, day) {
     <div class="figures">
       <div><div class="n">${esc(daySpan(list) || '—')}</div><div class="l">On site</div></div>
       <div><div class="n">${list.length}</div><div class="l">Entries</div></div>
-      <div><div class="n"${issues.length ? ' class="neg"' : ''}>${issues.length}</div><div class="l">Issues &amp; delays</div></div>
+      <div><div class="n${issues.length ? ' neg' : ''}">${issues.length}</div><div class="l">Issues &amp; delays</div></div>
       <div><div class="n">${shots}</div><div class="l">Photos</div></div>
     </div>
 
@@ -3099,7 +3099,7 @@ function printDirectorReport(list) {
   const jobs = list || pnlJobs();
   const t = periodTotals(jobs);
   const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
-  const cls = v => v == null ? '' : v < 0 ? ' class="neg"' : ' class="pos"';
+  const tone = v => v == null ? '' : v < 0 ? ' neg' : ' pos';
 
   // How the period splits by client — the cut a director asks for next.
   const byClient = {};
@@ -3128,48 +3128,65 @@ function printDirectorReport(list) {
 
     <div class="figures">
       <div><div class="n">${money(t.revenue)}</div><div class="l">Billed</div></div>
-      <div><div class="n">${money(t.cost)}</div><div class="l">Cost</div></div>
-      <div><div class="n"${cls(t.pnl)}>${money(t.pnl)}</div>
-        <div class="l">Profit / loss${t.pct != null ? ' · ' + t.pct.toFixed(1) + '%' : ''}</div></div>
-      <div><div class="n">${t.days}</div><div class="l">Days on site</div></div>
+      <div><div class="n">${money(t.cost)}</div><div class="l">What it cost</div></div>
+      <div><div class="n${tone(t.pnl)}">${money(t.pnl)}</div><div class="l">Profit / loss</div></div>
+      <div><div class="n${tone(t.pnl)}">${t.pct == null ? '—' : t.pct.toFixed(1) + '%'}</div>
+        <div class="l">Margin</div></div>
     </div>
 
-    <h2>The period</h2>
-    <table class="kv">
-      <tr><td class="lbl">Jobs</td><td class="val" colspan="3"><strong>${t.jobs}</strong> — ${t.ongoing || 0} on site,
-        ${t.planned || 0} planned, ${t.completed || 0} completed</td></tr>
-      <tr><td class="lbl">Costed</td><td class="val" colspan="3">${t.done} of ${t.jobs}${
-        t.done < t.jobs ? ' <em>— totals cover only the jobs with a costing on them</em>' : ''}</td></tr>
-      <tr><td class="lbl">Invoice</td><td class="val" colspan="3"><strong>${money(t.invoice)}</strong>${
-        t.variations ? ` plus <strong>${money(t.variations)}</strong> of variations` : ''}</td></tr>
-      <tr><td class="lbl">Cost</td><td class="val" colspan="3">${money(t.cost)}</td></tr>
-      <tr><td class="lbl">Diary entries</td><td class="val" colspan="3">${t.entries}</td></tr>
-      <tr><td class="lbl">Issues and delays</td><td class="val" colspan="3">${t.issues}</td></tr>
+    <h2>The bottom line</h2>
+    <table class="pnl">
+      <tr><td class="lead">Invoice</td><td class="num">${money(t.invoice, true)}</td></tr>
+      <tr><td class="lead">Variations claimed</td><td class="num">${money(t.variations, true)}</td></tr>
+      <tr class="sub"><td class="lead">Total billed</td><td class="num">${money(t.revenue, true)}</td></tr>
+      <tr><td class="lead">Less what it cost</td><td class="num">${
+        t.cost == null ? '—' : '(' + esc(fmtMoney(t.cost, true)) + ')'}</td></tr>
+      <tr class="result">
+        <td class="lead">${t.pnl == null ? 'Profit / loss' : t.pnl < 0 ? 'Loss for the period' : 'Profit for the period'}</td>
+        <td class="num${tone(t.pnl)}">${money(t.pnl, true)}${
+          t.pct == null ? '' : `<em>${t.pct.toFixed(1)}% margin</em>`}</td>
+      </tr>
     </table>
+    <p class="lede"><strong>${t.jobs}</strong> job${t.jobs === 1 ? '' : 's'} — ${t.ongoing || 0} on site, ${
+      t.planned || 0} planned, ${t.completed || 0} completed. <strong>${t.done}</strong> of them costed${
+      t.done < t.jobs ? ', so the figures above cover those only' : ''}. <strong>${t.days}</strong> day${
+      t.days === 1 ? '' : 's'} on site, <strong>${t.entries}</strong> diary entr${
+      t.entries === 1 ? 'y' : 'ies'}, <strong>${t.issues}</strong> issue${
+      t.issues === 1 ? '' : 's'} and delay${t.issues === 1 ? '' : 's'}.</p>
 
     ${clients.length > 1 ? `
     <h2>By client</h2>
     <table>
-      <tr><th>Client</th><th style="width:14mm">Jobs</th><th style="width:14mm">Days</th>
-        <th style="width:26mm">Invoice</th><th style="width:26mm">Cost</th><th style="width:28mm">Margin</th></tr>
+      <thead><tr><th>Client</th><th class="num" style="width:13mm">Jobs</th><th class="num" style="width:13mm">Days</th>
+        <th class="num" style="width:27mm">Billed</th><th class="num" style="width:27mm">Cost</th>
+        <th class="num" style="width:29mm">Profit / loss</th></tr></thead>
+      <tbody>
       ${clients.map(k => {
         const b = byClient[k];
         const m = b.priced ? b.inv - b.cost : null;
         const pct = marginPct(b.inv, m);
         return `<tr class="avoid-break">
           <td><strong>${esc(k)}</strong>${b.issues ? `<br><em>${b.issues} issue${b.issues > 1 ? 's' : ''}</em>` : ''}</td>
-          <td>${b.jobs}</td><td>${b.days}</td>
-          <td>${esc(fmtMoney(b.inv))}</td><td>${esc(fmtMoney(b.cost))}</td>
-          <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
+          <td class="num">${b.jobs}</td><td class="num">${b.days}</td>
+          <td class="num">${esc(fmtMoney(b.inv))}</td><td class="num">${esc(fmtMoney(b.cost))}</td>
+          <td class="num${tone(m)}">${m == null ? '—' : esc(fmtMoney(m))}${
+            pct != null ? `<em>${pct.toFixed(1)}%</em>` : ''}</td>
         </tr>`;
       }).join('')}
+      <tr class="total"><td>All clients</td>
+        <td class="num">${t.jobs}</td><td class="num">${t.days}</td>
+        <td class="num">${money(t.revenue)}</td><td class="num">${money(t.cost)}</td>
+        <td class="num${tone(t.pnl)}">${money(t.pnl)}${
+          t.pct == null ? '' : `<em>${t.pct.toFixed(1)}%</em>`}</td></tr>
+      </tbody>
     </table>` : ''}
 
     <h2>Job by job</h2>
     <table>
-      <tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:22mm">Status</th>
-        <th style="width:12mm">Days</th><th style="width:24mm">Billed</th>
-        <th style="width:24mm">Cost</th><th style="width:26mm">P&amp;L</th></tr>
+      <thead><tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:21mm">Status</th>
+        <th class="num" style="width:11mm">Days</th><th class="num" style="width:25mm">Billed</th>
+        <th class="num" style="width:25mm">Cost</th><th class="num" style="width:27mm">Profit / loss</th></tr></thead>
+      <tbody>
       ${jobs.map(p => {
         const c = costing(p);
         const m = c.pnl, pct = c.pct;
@@ -3179,12 +3196,19 @@ function printDirectorReport(list) {
           <td>${esc(p.name)}${p.client ? `<br><em>${esc(p.client)}</em>` : ''}${
             p.supervisor ? `<br>${esc(p.supervisor)} · ${esc(crewLabel(crewOf(p)))}` : ''}</td>
           <td>${esc(statusLabel(p.status))}</td>
-          <td>${diaryDays(p.id).length}${iss ? `<br><em class="neg">${iss} iss.</em>` : ''}</td>
-          <td>${money(c.revenue)}</td>
-          <td>${money(c.cost)}</td>
-          <td${cls(m)}>${m == null ? '—' : esc(fmtMoney(m))}${pct != null ? `<br><em>${pct.toFixed(1)}%</em>` : ''}</td>
+          <td class="num">${diaryDays(p.id).length}${iss ? `<em class="neg">${iss} iss.</em>` : ''}</td>
+          <td class="num">${money(c.revenue)}</td>
+          <td class="num">${money(c.cost)}</td>
+          <td class="num${tone(m)}">${m == null ? '—' : esc(fmtMoney(m))}${
+            pct != null ? `<em>${pct.toFixed(1)}%</em>` : ''}</td>
         </tr>`;
       }).join('') || '<tr><td colspan="7">No jobs in this period.</td></tr>'}
+      ${jobs.length ? `<tr class="total"><td colspan="3">${jobs.length} job${jobs.length === 1 ? '' : 's'}</td>
+        <td class="num">${t.days}</td><td class="num">${money(t.revenue)}</td>
+        <td class="num">${money(t.cost)}</td>
+        <td class="num${tone(t.pnl)}">${money(t.pnl)}${
+          t.pct == null ? '' : `<em>${t.pct.toFixed(1)}%</em>`}</td></tr>` : ''}
+      </tbody>
     </table>
 
     ${jobs.some(p => p.pnl_notes) ? `
@@ -3217,18 +3241,22 @@ function printDirectorReport(list) {
 function printJobPnl(p) {
   const c = costing(p);
   const days = diaryDays(p.id).slice().sort();
-  const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
-  const cls = v => v == null ? '' : v < 0 ? ' class="neg"' : ' class="pos"';
+  const money = (v, cents) => v == null ? '\u2014' : esc(fmtMoney(v, cents));
+  const tone = v => v == null ? '' : v < 0 ? ' neg' : ' pos';
+  // A cost is written the way an accountant writes one: in brackets, so it
+  // is never mistaken for something that came in.
+  const less = v => v == null ? '\u2014' : '(' + esc(fmtMoney(v, true)) + ')';
+  const share = v => c.cost ? ((v / c.cost) * 100).toFixed(1) + '%' : '';
 
   printDoc(`
-    ${docHead('Job profit & loss', p.name, jobNo(p) + (p.client ? ' · ' + p.client : ''))}
+    ${docHead('Job profit & loss', p.name, jobNo(p) + (p.client ? ' \u00b7 ' + p.client : ''))}
 
     <div class="figures">
       <div><div class="n">${money(c.revenue)}</div><div class="l">Billed</div></div>
-      <div><div class="n">${money(c.cost)}</div><div class="l">Cost</div></div>
-      <div><div class="n"${cls(c.pnl)}>${money(c.pnl)}</div>
-        <div class="l">Profit / loss${c.pct != null ? ' · ' + c.pct.toFixed(1) + '%' : ''}</div></div>
-      <div><div class="n">${diaryDays(p.id).length}</div><div class="l">Days on site</div></div>
+      <div><div class="n">${money(c.cost)}</div><div class="l">What it cost</div></div>
+      <div><div class="n${tone(c.pnl)}">${money(c.pnl)}</div><div class="l">Profit / loss</div></div>
+      <div><div class="n${tone(c.pnl)}">${c.pct == null ? '\u2014' : c.pct.toFixed(1) + '%'}</div>
+        <div class="l">Margin</div></div>
     </div>
 
     <h2>The job</h2>
@@ -3236,20 +3264,39 @@ function printJobPnl(p) {
 
     <h2>What it cost</h2>
     <table>
-      <tr><th>Description</th><th style="width:34mm">Amount</th></tr>
-      ${c.lines.map(l => `<tr class="avoid-break">
-        <td>${esc(lineLabel(l))}</td>
-        <td>${esc(fmtMoney(lineAmount(l), true))}</td>
-      </tr>`).join('') || '<tr><td colspan="2">No costs were recorded.</td></tr>'}
+      <thead><tr>
+        <th>Description</th>
+        <th class="num" style="width:20mm">Share</th>
+        <th class="num" style="width:32mm">Amount</th>
+      </tr></thead>
+      <tbody>
+        ${c.lines.map(l => `<tr class="avoid-break">
+          <td>${esc(lineLabel(l))}</td>
+          <td class="num">${esc(share(lineAmount(l)))}</td>
+          <td class="num">${esc(fmtMoney(lineAmount(l), true))}</td>
+        </tr>`).join('') || '<tr><td colspan="3">No costs were recorded on this job.</td></tr>'}
+        <tr class="total">
+          <td>Total cost</td>
+          <td class="num">${c.lines.length ? '100%' : ''}</td>
+          <td class="num">${money(c.cost, true)}</td>
+        </tr>
+      </tbody>
     </table>
 
-    <table class="kv">
-      <tr><td class="lbl">Invoice</td><td class="val" colspan="3">${money(c.invoice, true)}</td></tr>
-      <tr><td class="lbl">Variations</td><td class="val" colspan="3">${money(c.variations, true)}</td></tr>
-      <tr><td class="lbl">Cost</td><td class="val" colspan="3">${money(c.cost, true)}</td></tr>
-      <tr><td class="lbl">Profit / loss</td><td class="val" colspan="3"><strong${cls(c.pnl)}>${
-        money(c.pnl, true)}</strong>${c.pct != null ? ` · ${c.pct.toFixed(1)}%` : ''}</td></tr>
+    <h2>The bottom line</h2>
+    <table class="pnl">
+      <tr><td class="lead">Invoice</td><td class="num">${money(c.invoice, true)}</td></tr>
+      <tr><td class="lead">Variations claimed</td><td class="num">${money(c.variations, true)}</td></tr>
+      <tr class="sub"><td class="lead">Total billed</td><td class="num">${money(c.revenue, true)}</td></tr>
+      <tr><td class="lead">Less what it cost</td><td class="num">${less(c.cost)}</td></tr>
+      <tr class="result">
+        <td class="lead">${c.pnl == null ? 'Profit / loss' : c.pnl < 0 ? 'Loss on the job' : 'Profit on the job'}</td>
+        <td class="num${tone(c.pnl)}">${money(c.pnl, true)}${
+          c.pct == null ? '' : `<em>${c.pct.toFixed(1)}% margin</em>`}</td>
+      </tr>
     </table>
+    ${c.pnl == null ? `<p class="lede"><em>The profit cannot be worked out until both the invoice and the costs are filled in.</em></p>` : ''}
+
     ${p.pnl_notes ? `<h2>How it went</h2><p class="note">${esc(p.pnl_notes)}</p>` : ''}
 
     <h2>What happened on site</h2>
@@ -3260,7 +3307,7 @@ function printJobPnl(p) {
     <div class="sig">
       <div>Director &amp; date</div>
       <div>Reviewed &amp; date</div>
-    </div>`, `Job P&L · ${jobNo(p)}`);
+    </div>`, `Job P&L \u00b7 ${jobNo(p)}`);
 }
 
 function printJobsSummary(from, to) {
