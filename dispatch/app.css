@@ -985,6 +985,52 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .doc thead { display: table-header-group; }      /* repeat headings over a page break */
 .doc table:not(.sheet) tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
+/* Money reads down one column: right-aligned with tabular figures, so the
+   decimal points line up and a column can be added up by eye. Every money
+   cell in the document uses this, which is what makes the cost table, the
+   statement under it and the job-by-job table read as one grid. */
+.doc td.num, .doc th.num {
+  text-align: right; font-variant-numeric: tabular-nums;
+  padding-right: 0; white-space: nowrap;
+}
+.doc td.num em, .doc td.num small {
+  display: block; font-style: normal; font-size: 7.5pt; font-weight: 600;
+  color: var(--d-ink-3); margin-top: .4mm;
+}
+
+/* The row that adds up the ones above it. */
+.doc tr.total td, .doc tr.total th {
+  border-top: 1.1pt solid var(--d-ink); border-bottom: 0;
+  font-weight: 700; padding-top: 1.9mm;
+}
+
+/* --------------------------------------------------- the P&L statement */
+/* The four figures a finished job comes down to, on the same column grid
+   as the costs above them — so the cost total and the "less what it cost"
+   line carry the same number in the same place, and the answer is the
+   largest thing on the page. */
+.doc table.pnl { margin-top: 0; margin-bottom: 3mm; break-inside: avoid; }
+.doc table.pnl td { border-bottom: 0; padding: 1.4mm 2.2mm 1.4mm 0; }
+.doc table.pnl td.lead { color: var(--d-ink-2); }
+.doc table.pnl tr.sub td {
+  border-top: .7pt solid var(--d-line); font-weight: 700;
+}
+.doc table.pnl tr.sub td.lead {
+  color: var(--d-ink-3); font-weight: 640;
+  font-size: 7.5pt; text-transform: uppercase; letter-spacing: .07em;
+}
+.doc table.pnl tr.result td {
+  border-top: 1.4pt solid var(--d-ink);
+  border-bottom: .7pt solid var(--d-ink);
+  padding-top: 2.6mm; padding-bottom: 2.6mm;
+  font-size: 14pt; font-weight: 700; letter-spacing: -.015em; line-height: 1.1;
+}
+.doc table.pnl tr.result td.lead {
+  font-size: 9pt; font-weight: 700; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--d-ink); vertical-align: middle;
+}
+.doc table.pnl tr.result td.num em { font-size: 8pt; letter-spacing: .06em; text-transform: uppercase; }
+
 /* Facts two to a line rather than one, which halves the height of every
    summary in the document. */
 .doc .kv { width: 100%; }
@@ -1054,6 +1100,10 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .doc .badge.done { border-color: var(--d-ink-3); color: var(--d-ink-2); }
 .doc .avoid-break { break-inside: avoid; page-break-inside: avoid; }
 .doc .note { white-space: pre-wrap; }
+/* The document's own prose, as opposed to .note, which preserves the line
+   breaks a supervisor typed. */
+.doc .lede { margin: 1.5mm 0 3mm; color: var(--d-ink-2); font-size: 9pt; }
+.doc .lede strong { color: var(--d-ink); }
 .doc .lede { font-size: 10pt; color: var(--d-ink-2); margin-bottom: 3mm; }
 .doc .pos { color: var(--d-green); font-weight: 650; }
 .doc .neg { color: var(--d-red); font-weight: 650; }
