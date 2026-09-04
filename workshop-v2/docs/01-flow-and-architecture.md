@@ -1,6 +1,6 @@
 # RCK Workshop v2 — how it flows
 
-*Design document 1 of the rebuild. Draft 3: adds what a work order must contain, and the daily diary per person.*
+*Design document 1 of the rebuild. Draft 4: adds the servicing loop driven by the weekly upload, the second colour, and the asset file.*
 
 This is the map we build from. It says who uses the app, what data exists, where
 each piece of it lives, how it moves between a phone and the shared record, and
@@ -28,6 +28,8 @@ what works and puts a spine under it.
 | History | Client writes a `wo_updates` row after each change | Database **trigger** writes the event; a client cannot forget |
 | What a job must contain | Whatever was typed | **Required at raise** (asset, location, photo, what is wrong) and **required at close** (problem, fix, cost and purchases, or the subcontractor's invoice). The database refuses a close without them |
 | A person's day | Nothing | A **daily diary** per person, built from what they did on every job, by time or by asset |
+| Servicing | Plans by months and hours, a log filled in by hand | Intervals per asset by **hours, kilometres or months**, readings from a **weekly spreadsheet upload**, a **second colour** for service, and service jobs that are ordinary work orders with the same close-out |
+| Asset history | A list of past work orders | The **asset file**: every job with its cost, every service, every reading, lifetime cost, all in one place |
 | Code | One file, hand-rolled router and store | Modules with one job each, typed, tested where the rules live |
 | Hosting | GitHub Pages, no build | GitHub Pages, built by an Action on push |
 
@@ -37,7 +39,7 @@ Principles carried over unchanged, because they are why the crew use it:
 - **The colour is never set by hand.** Green = working, orange = usable but
   damaged, red = out of operation.
 - **Servicing is separate from breakdowns.** A service falling due does not
-  change the colour.
+  change the damage colour. It has a colour of its own, shown beside it.
 - **Everything prints** with the RCK document look.
 - **The wall screen is just the app** in a full-screen mode.
 
@@ -93,7 +95,9 @@ What each tier can see and do, in one table. A dot is "yes":
 | See other subcontractors' quotes and costs | ● | ● | ● | ● | | | |
 | Sign off (complete) | ● | ● | ● | ● | | | |
 | Cancel, change severity | ● | ● | ● | | | | |
-| Servicing plans and log | ● | ● | ● | ● | | | |
+| Servicing plans, intervals, thresholds | ● | ● | ● | | | | |
+| Upload the weekly readings | ● | ● | ● | | | | |
+| Raise a service job from the Due list | ● | ● | ● | ● | | | |
 | Manuals | ● | ● | ● | ● | ● | | |
 | Reports | ● | ● | ● | | | | |
 | My own daily diary | ● | ● | ● | ● | ● | | |
@@ -105,7 +109,7 @@ staff who raise issues are RCK crew in this app unless made Director.
 
 **Proposed and open:** the Director and the Workshop manager differ only in
 people-and-tiers admin above. If the Director should be view-only instead, that
-is one line in the policy. See §15.
+is one line in the policy. See §17.
 
 ## 3. The pieces and how they connect
 
@@ -176,6 +180,9 @@ erDiagram
   assets ||--o{ meter_readings : "has"
   assets ||--o{ service_plans : "has"
   assets ||--o{ service_log : "has"
+  service_plans ||--o{ work_orders : "service jobs"
+  work_orders ||--o| service_log : "closing writes"
+  meter_imports ||--o{ meter_readings : "brought in"
   work_orders ||--o{ wo_events : "timeline"
   work_orders ||--o{ attachments : "photos, paperwork"
   work_orders ||--o{ wo_purchases : "parts bought"
@@ -241,16 +248,30 @@ erDiagram
     uuid id PK
     uuid asset_id FK
     numeric hours
+    numeric km
     date read_on
+    text source "manual | import"
+    uuid import_id FK
     uuid read_by FK
+  }
+  meter_imports {
+    uuid id PK
+    text file_name
+    uuid uploaded_by FK
+    timestamptz uploaded_at
+    int rows_matched
+    int rows_unmatched
+    jsonb unmatched "codes the file had that the fleet does not"
   }
   work_orders {
     uuid id PK
     bigint number "WO-0001"
     uuid asset_id FK
+    text kind "repair | service"
+    uuid plan_id FK "service jobs only"
     text title
     text description
-    text severity "orange | red"
+    text severity "orange | red | none - service jobs carry none"
     text status "see lifecycle"
     text repairer "internal | external"
     text external_company
@@ -289,21 +310,32 @@ erDiagram
   service_plans {
     uuid id PK
     uuid asset_id FK
-    text name
-    int  every_months
+    text name "500 hr service, 10,000 km service, annual"
+    int  every_months "any one, two or all three"
     int  every_hours
+    int  every_km
+    int  warn_days "how close is yellow, per plan"
+    int  warn_hours
+    int  warn_km
+    bool auto_raise "raise the job itself at yellow"
+    uuid default_person FK "who usually does it"
+    uuid default_company FK "or which outside company"
     date starts_on
     numeric start_hours
+    numeric start_km
     bool active
   }
   service_log {
     uuid id PK
     uuid plan_id FK
     uuid asset_id FK
+    uuid work_order_id FK "the service job, when there was one"
     text name
     date done_on
     numeric hours
+    numeric km
     uuid done_by FK
+    text source "work_order | manual | import"
     text note
   }
   manuals {
@@ -337,9 +369,19 @@ What changed from v1 and why:
   typed name. Names can be corrected once; history stays attached.
 - **`asset_types`** is a table, not a free-text column, so the board order and
   labels are data. Adding a type is still one tap; it just inserts a row.
-- **`meter_readings`** is a log, not a pair of columns on the asset. You can see
-  when hours were read and by whom, and a mis-typed reading can be corrected
-  without losing the previous one.
+- **`meter_readings`** is a log, not a pair of columns on the asset, with hours
+  and kilometres side by side. Most rows will come from the weekly upload and
+  say so (`source = import`, pointing at the file they came from); a reading
+  typed on a phone is `manual`. A wrong reading is corrected without losing
+  the previous one.
+- **A service job is a work order** with `kind = service` and a `plan_id`. It
+  is assigned, worked, updated and closed exactly like a repair, and closing it
+  writes the `service_log` row that restarts the interval. The log is never
+  filled in by hand for a job that exists; the manual and import sources are
+  for history from before v2 and for "last serviced on" dates in the upload.
+- **Every threshold is per plan, on the plan.** How many hours, kilometres or
+  days before due counts as yellow is a column, not a constant, so a ute and a
+  miller can differ.
 - **`attachments`** is one table for every kind of file, so "what paperwork is
   on file for this machine" is one query.
 - **`wo_events.kind`** carries the v1 "what kind of update is this" vocabulary
@@ -359,9 +401,14 @@ Views, computed on read:
 - **`asset_status`** — for each asset: colour, open work order count, down
   since, days down, expected back. Built from `work_orders where status not in
   (complete, cancelled)`.
-- **`service_due`** — for each active plan: last done (date, hours), next due by
-  date, next due by hours, state (ok / due soon / overdue / no reading). The
-  tighter of date and hours wins, exactly as v1.
+- **`service_due`** — for each active plan: last done (date, hours, km), next
+  due by each measure the plan uses, how far away that is, and a state of green,
+  yellow, red or grey (no reading). The tightest measure wins. See §12.
+- **`asset_service_colour`** — the worst state across an asset's active plans.
+  The second dot on every card.
+- **`asset_file`** — one asset, everything: identity, both colours, location,
+  latest reading, open jobs, every closed job with its cost, every service, every
+  reading, lifetime cost. See §14.
 
 ---
 
@@ -454,6 +501,9 @@ Who may move it is a policy in the database, not a hidden button in the app:
 | Reopen | | ● | | ● |
 | Cancel, change severity | | | | ● |
 
+A service job walks the same states. It starts at `reported` the moment it is
+raised from the Due list, and it is closed the same way, with the same gate.
+
 A change of status always writes a `wo_events` row (by trigger), and the newest
 event of kind `working / waiting / problem / looked / note` is the job's **live
 line**, exactly as in v1.
@@ -504,6 +554,7 @@ flowchart TD
 | RCK (internal) | **What the problem was.** **What was done to fix it.** **Cost to fix**, a number, zero allowed but typed. **Every purchase**: item, amount, how it was paid (Capricorn card, company card, on account with a supplier, cash, other). Labour hours are asked for, not required |
 | An outside company | **Their invoice number** and **the amount on it**, against their assignment. Not the invoice's contents. The subcontractor can enter these themselves when they mark their part done; if they have not, the person closing must |
 | Both | All of the above. Each company's numbers on its own assignment; RCK's on the job |
+| A service job, any of the above | Everything for whoever did it, plus **the hours and/or kilometres on the machine at the service**, offered from the latest reading. That number is what restarts the interval, so it cannot be left blank |
 
 The job's total cost is RCK's cost plus every invoice amount, worked out by a
 view, never typed. The fleet cost report and the dashboard's "cost this month"
@@ -563,7 +614,7 @@ How someone finds out they have been assigned:
 Push and email need a small piece of back end (a database function that fires
 when an assignment row is inserted). It is the one place v2 has server-side
 code, and it is the owner's back end to look after. Which channels to switch on
-is a decision in §15.
+is a decision in §17.
 
 Cost and the outside: a subcontractor's invoice number and amount are recorded
 against **their assignment**, not against the job as a whole, so two companies
@@ -604,7 +655,7 @@ Who sees whose:
   a day. Crew, workshop crew and office staff alike. A crew member cannot open
   another crew member's diary.
 - **Proposed:** the Workshop manager sees workshop crew's diaries too, since
-  they run that team. Say if not. See §15.
+  they run that team. Say if not. See §17.
 
 Two ways to read a day, one switch between them:
 
@@ -641,35 +692,141 @@ excluded from the board but keep their history.
 
 ---
 
-## 12. When a service is due
+## 12. Proactive servicing: the second colour
+
+Every asset carries two colours, and they answer different questions.
+
+| | Answers | Green | Yellow / orange | Red | Grey |
+|---|---|---|---|---|---|
+| **Damage** (§11) | Can we use it today? | Working | Damaged, still usable | Out of operation | |
+| **Service** | Is it looked after? | Nothing due inside the warning window | A service is close | A service is overdue | No reading, cannot tell |
+
+On the gear board the damage colour is the card and the service colour is a
+small second dot. On the servicing screens it is the other way round. Neither
+ever changes the other: a truck can be green for damage and red for service,
+and both are true.
+
+### What a plan is
+
+A plan is one service on one asset, with an interval in any of three measures
+and a warning window in each:
+
+| Asset | Plan | Every | Yellow when within |
+|---|---|---|---|
+| Ute | 10,000 km service | 10,000 km or 6 months | 500 km or 14 days |
+| Miller | 500 hr service | 500 hours | 50 hours |
+| Miller | Annual inspection | 12 months | 30 days |
+| Roller | 250 hr grease and check | 250 hours | 25 hours |
+
+Presets fill these in for a new asset, as v1 did; the numbers are then yours
+to change on the asset's file. Each plan can also name who usually does it, a
+person or an outside company, so raising the job pre-fills the assignment.
+
+### How the colour is worked out
 
 ```mermaid
 flowchart TD
-  plan[Active plan:<br/>every N months and/or every H hours] --> last{Last done<br/>in service_log?}
-  last -- yes --> base[Base = that date and hours]
-  last -- no --> base0[Base = plan starts_on / start_hours]
-  base --> bydate[Due by date =<br/>base date + N months]
-  base0 --> bydate
-  base --> byhours{Plan has<br/>every_hours?}
-  base0 --> byhours
-  byhours -- yes --> reading{Latest meter<br/>reading exists?}
-  reading -- no --> unknown[NO READING<br/>not enough to go on]
-  reading -- yes --> hrs[Due at = base hours + H<br/>compare to latest reading]
-  byhours -- no --> pick
-  bydate --> pick[Tighter of the two wins]
-  hrs --> pick
-  pick --> state{Past due?<br/>Within 14 days or<br/>last 10% of hours?}
-  state -- past --> overdue[OVERDUE]
-  state -- within --> soon[DUE SOON]
-  state -- neither --> ok[UP TO DATE]
+  plan["Active plan: every N months / H hours / K km<br/>warn within D days / h hours / k km"] --> last{"Last service<br/>in service_log?"}
+  last -- yes --> base["Base = date, hours, km at that service"]
+  last -- no --> base0["Base = plan's start date, hours, km"]
+  base --> each
+  base0 --> each["For each measure the plan uses:<br/>due at = base + interval<br/>remaining = due at − latest reading (or today)"]
+  each --> reading{"Reading exists for<br/>every measure used?"}
+  reading -- no --> grey["GREY<br/>no reading: cannot tell"]
+  reading -- yes --> pick["Take the measure with the<br/>least remaining"]
+  pick --> state{"Remaining?"}
+  state -- "below zero" --> red["RED · overdue"]
+  state -- "inside the warning window" --> yellow["YELLOW · due soon"]
+  state -- "beyond it" --> green["GREEN · up to date"]
 ```
 
-Same rules as v1, moved into the `service_due` view so the Due tab, the
-machine page and the fleet servicing report all agree to the day.
+This is the `service_due` view, and the asset's colour is the worst of its
+plans. It is computed on read, so the moment a new reading lands the colours
+are right everywhere.
+
+A service being due does **not** raise a job by itself while the asset is
+green. Yellow and red are where jobs come from, in §13.
 
 ---
 
-## 13. Screens and how they are used
+## 13. The weekly upload, and raising service jobs
+
+The readings that drive servicing come from the spreadsheet you already
+produce once a week: hours and kilometres for every asset, and the date it was
+last serviced. Uploading it is the moment servicing moves.
+
+```mermaid
+flowchart LR
+  xls["Weekly spreadsheet<br/>code · date · hours · km · last serviced"] --> up["Upload<br/>Owner, Director, Manager"]
+  up --> match["Match rows to assets<br/>by code"]
+  match --> review["Review before it lands<br/>matched · unmatched codes · readings lower than last"]
+  review -- "confirm" --> readings[(meter_readings<br/>one row per asset, source = import)]
+  readings --> due["service_due recomputes<br/>colours change"]
+  due --> list["Due list<br/>red first, then yellow<br/>each with a Raise button"]
+  list -- "one tap, or Raise all" --> job["Service work order<br/>kind = service · pre-filled from the plan<br/>assigned to the plan's usual person or company"]
+  due -- "plans marked auto_raise" --> job
+  job --> work["Worked like any job<br/>updates · parts · outside company"]
+  work --> close["Closed through the same gate<br/>+ hours / km at service"]
+  close --> log[(service_log<br/>written by the close)]
+  log --> reset["Interval restarts<br/>asset goes green"]
+  reset -. next week .-> xls
+```
+
+**The file.** Five columns, one row per asset, any order, headings on the first
+line: `code`, `date`, `hours`, `km`, `last_serviced`. Blank cells are allowed
+where a measure does not apply. CSV or Excel. The app offers a template to
+download so the sheet is right the first time.
+
+**Matching.** Rows are matched to assets by code (`MIL-01`, `TRK-03`). A code
+the fleet does not know is listed, not silently dropped; a reading lower than
+the last one is flagged as probably a typo but can be accepted (a replaced hour
+meter is real). Nothing is written until **Confirm**.
+
+**Last serviced.** If the sheet's date for an asset is later than the last
+service on record, a `service_log` row is written with `source = import` and no
+job behind it. This is how history from before v2 gets in, and how a service
+done outside the app still restarts the clock.
+
+**Raising the job.** After confirm, the Due list shows what changed: the
+assets now red or yellow, worst first, with a **Raise** button on each and a
+**Raise all** at the top. Raising creates a service work order pre-filled from
+the plan (title, the asset, its location, the interval it is for) and assigned
+to the plan's usual person or company, so the job is on someone's My work
+before the upload screen is closed. A plan can be switched to `auto_raise`, in
+which case its job is created the moment it turns yellow with nobody tapping;
+off by default, so nothing appears that nobody asked for.
+
+**Doing the job.** From there it is an ordinary work order: assigned, updated,
+sent outside if the service is done by a dealer, and closed through the gate in
+§8 with one extra required field, the hours or kilometres on the machine at the
+service. Closing writes the service log and the asset goes green.
+
+**Duplicates.** A plan with an open service job does not offer Raise again; the
+Due list shows the job instead, with its live line.
+
+---
+
+## 14. The asset file
+
+Everything about one machine, on one screen, for its whole life. The board
+and every list are ways in; this is where they land.
+
+| Section | What is in it |
+|---|---|
+| **Header** | Code, name, type, make and model. Both colours, large. Where it is and since when. Latest hours and kilometres and when they were read |
+| **Now** | Open jobs, repair and service alike, each with its live line and who is on it. Services due or overdue, each with Raise |
+| **Servicing** | Every plan with its interval, warning window, usual person, last done and next due. Edit here |
+| **History** | Every closed job, newest first: date, what the problem was, what was done, who did it, RCK's cost, each outside invoice, total. Repairs and services in one list, filterable to either. Tap one for the full job and its print |
+| **Readings** | Hours and kilometres over time, with the source of each. A wrong one is corrected here |
+| **Cost** | Lifetime total, this year, last twelve months, split repair against service and RCK against outside |
+| **Files** | Every photo and document from every job, and any added directly (registration, CoF, warranty) |
+
+Nothing is ever removed from the file. A retired asset keeps it. Printing the
+file gives the repair history report v1 had, and more.
+
+---
+
+## 15. Screens and how they are used
 
 ### Screen map
 
@@ -691,14 +848,17 @@ flowchart TD
   maint --> board[Gear board<br/>colour per machine, filters by type]
   maint --> orders[Work orders<br/>open first, live line on each]
   maint --> report[Report damage<br/>the 30-second form]
-  board --> asset[Machine page<br/>colour, location, hours, open jobs, history]
+  board --> asset["Asset file<br/>both colours · open jobs · plans · history with cost · readings · files"]
   orders --> wo[Work order<br/>timeline, workshop panel, print]
   asset --> report
   asset --> wo
-  svc --> due[Due list<br/>worst first]
-  svc --> fleet[By machine]
-  fleet --> svcasset[Machine servicing<br/>plans, log, mark done]
-  due --> svcasset
+  svc --> due["Due list<br/>red, then yellow · Raise on each · Raise all"]
+  svc --> fleet["Fleet by service colour"]
+  svc --> upload["Upload weekly readings<br/>review · confirm"]
+  upload --> due
+  due --> wo
+  fleet --> asset
+  due --> asset
   man --> manual[Manual tile → opens file]
   home -. menu .-> screen[Wall screen<br/>full-screen, read only]
   home -. menu .-> reports[Reports<br/>fleet status, repair history, CSV]
@@ -739,8 +899,18 @@ second.
 **Read someone's day (Owner, Director).** People → the person → today, or pick
 a date. Switch between by time and by asset. Print it.
 
-**Log a service (Workshop).** Machine servicing page → the due plan → Mark done
-→ date (today), hours (last reading offered), note. The clock restarts.
+**Upload the week's readings (Owner, Director, Manager).** Servicing → Upload
+→ pick the file. The review screen shows matched rows, unknown codes, and any
+reading lower than the last. Confirm. The Due list opens on what is now red or
+yellow, with Raise on each and Raise all at the top.
+
+**Do a service (whoever it is assigned to).** It arrives in My work like any
+job. Work it, then close it through the same gate plus the hours or kilometres
+at the service. The asset goes green for service.
+
+**Look up a machine's history (anyone at RCK).** Board → the asset → History.
+Every job ever closed on it, with what was wrong, what was done, and what it
+cost. Filter to repairs or services. Print the file.
 
 **Look across everything (Owner, Director, Manager).** The dashboard opens
 first. Counts of green, orange and red; open jobs grouped by status with who is
@@ -768,7 +938,7 @@ itself, keeps the screen awake, never asks for anything.
 
 ---
 
-## 14. How the code is organised
+## 16. How the code is organised
 
 ```
 workshop-v2/
@@ -777,9 +947,10 @@ workshop-v2/
     data/         Supabase client, IndexedDB cache, outbox, realtime, sync
     domain/       pure rules with tests: lifecycle, colour, service due, live line
     features/
-      assets/     board, machine page, manage fleet
       work-orders/ list, work order, report damage, workshop panel
-      servicing/  due list, by machine, plans, mark done
+      servicing/  due list, fleet by service colour, plans,
+                  upload and review, raise service jobs
+      assets/     board, asset file, manage fleet
       manuals/
       reports/    fleet status, repair history, CSV
       screen/     wall screen
@@ -809,7 +980,7 @@ Rules of the structure:
 
 ---
 
-## 15. Decisions to make before building
+## 17. Decisions to make before building
 
 Recommendation first in each case.
 
@@ -836,6 +1007,19 @@ their profile.
 - *Alternative:* in-app only (the badge on My profile). No back end at all, but
   a subcontractor has to remember to open it.
 
+**When a service job is raised.**
+- *Recommended:* never while green. At yellow or red it is one tap from the Due
+  list, or Raise all straight after the weekly upload. A plan can be switched
+  to raise itself at yellow for the services nobody should have to think about
+  (the annual CoF, say). Off by default.
+- *Alternative:* raise every job automatically at yellow. Fewer taps, but jobs
+  appear on people's phones that nobody decided on.
+
+**The spreadsheet.**
+- *Proposed:* five columns, `code`, `date`, `hours`, `km`, `last_serviced`,
+  with a template to download. If the sheet you already produce has a different
+  shape, send one and the upload will read that shape instead.
+
 **Stack.**
 - *Recommended:* Vite + TypeScript + Preact, deployed to GitHub Pages by a GitHub
   Action on push. Types are how the module boundaries above get enforced; Preact
@@ -854,7 +1038,7 @@ served by short-lived signed links that respect the same assignment rule.
 
 ---
 
-## 16. Building it in stages
+## 18. Building it in stages
 
 Each stage is usable on its own and is put in front of the workshop before the
 next starts.
@@ -869,7 +1053,8 @@ next starts.
 | 4a Diary | My day, People and their day, by time and by asset, print | Dave's diary for yesterday matches what he actually did |
 | 5 Telling people | Push and email on assignment | The sparky's phone buzzes when assigned, with nothing sent by hand |
 | 6 Dashboard and wall | Owner and director dashboard, full-screen wall board, realtime | The wall and the dashboard update within a second of a phone |
-| 7 Servicing | Plans, log, meter readings, due view, Due and By-machine tabs | The Due list matches a hand check for three machines |
+| 7 Servicing | Plans with hours, km and months and per-plan warning windows, service colour, service jobs raised from the Due list and closed through the gate, the asset file | The Due list matches a hand check for three machines; a closed service job turns its asset green |
+| 7a Weekly upload | Spreadsheet upload, matching, review, confirm, last-serviced import, Raise all, auto-raise plans | Monday's sheet goes in and every service job for the week is on someone's phone in five minutes |
 | 8 Manuals and reports | Manuals shelf, fleet status, repair history, CSV | Reports match v1's for the same data |
 | 9 Cut-over | Migrate v1 data, redirect v1, retire old key | The crew are on v2 and nobody asks for v1 |
 
