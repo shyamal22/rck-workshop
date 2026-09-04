@@ -982,7 +982,9 @@ Rules of the structure:
 
 ## 17. Decisions to make before building
 
-Recommendation first in each case.
+Recommendation first in each case. **Building started on the recommendations**
+(stage 0, September 2026); each remains changeable, and the ones marked
+*proposed* are still waiting on an answer.
 
 **Sign-in.** Settled by the requirement: subcontractors need a login, so every
 person has one. Supabase Auth, one account per person, tier and company on
