@@ -1,6 +1,6 @@
 # RCK Workshop v2 — how it flows
 
-*Design document 1 of the rebuild. Draft 2: adds the tiers, assignment and subcontractors.*
+*Design document 1 of the rebuild. Draft 3: adds what a work order must contain, and the daily diary per person.*
 
 This is the map we build from. It says who uses the app, what data exists, where
 each piece of it lives, how it moves between a phone and the shared record, and
@@ -26,6 +26,8 @@ what works and puts a spine under it.
 | Offline | `localStorage` cache + outbox, replayed on reconnect | Same idea, on **IndexedDB** (bigger, survives photos), same outbox pattern |
 | Staying current | Poll every 20 s | **Realtime** push from Supabase, with polling only as a fallback |
 | History | Client writes a `wo_updates` row after each change | Database **trigger** writes the event; a client cannot forget |
+| What a job must contain | Whatever was typed | **Required at raise** (asset, location, photo, what is wrong) and **required at close** (problem, fix, cost and purchases, or the subcontractor's invoice). The database refuses a close without them |
+| A person's day | Nothing | A **daily diary** per person, built from what they did on every job, by time or by asset |
 | Code | One file, hand-rolled router and store | Modules with one job each, typed, tested where the rules live |
 | Hosting | GitHub Pages, no build | GitHub Pages, built by an Action on push |
 
@@ -94,6 +96,8 @@ What each tier can see and do, in one table. A dot is "yes":
 | Servicing plans and log | ● | ● | ● | ● | | | |
 | Manuals | ● | ● | ● | ● | ● | | |
 | Reports | ● | ● | ● | | | | |
+| My own daily diary | ● | ● | ● | ● | ● | | |
+| Anyone's daily diary, by person | ● | ● | | | | | |
 
 A person has exactly one tier. Subcontractors belong to a **company**; the
 assignment goes to the company, and every login at that company sees it. Office
@@ -101,7 +105,7 @@ staff who raise issues are RCK crew in this app unless made Director.
 
 **Proposed and open:** the Director and the Workshop manager differ only in
 people-and-tiers admin above. If the Director should be view-only instead, that
-is one line in the policy. See §13.
+is one line in the policy. See §15.
 
 ## 3. The pieces and how they connect
 
@@ -174,6 +178,7 @@ erDiagram
   assets ||--o{ service_log : "has"
   work_orders ||--o{ wo_events : "timeline"
   work_orders ||--o{ attachments : "photos, paperwork"
+  work_orders ||--o{ wo_purchases : "parts bought"
   service_plans ||--o{ service_log : "done under"
   service_log ||--o{ attachments : "paperwork"
 
@@ -203,6 +208,18 @@ erDiagram
     timestamptz assigned_at
     timestamptz done_at "they marked their part done"
     timestamptz released_at "taken off the job"
+    text invoice_number "required at close, external only"
+    numeric invoice_amount "required at close, external only"
+  }
+  wo_purchases {
+    uuid id PK
+    uuid work_order_id FK
+    text item "what was bought"
+    text supplier
+    numeric amount "required"
+    text paid_with "capricorn | company_card | account | cash | other - required"
+    text reference "receipt or PO"
+    uuid added_by FK
   }
   asset_types {
     text key PK
@@ -238,9 +255,12 @@ erDiagram
     text repairer "internal | external"
     text external_company
     text external_ref
-    numeric cost
+    text location_at_report "required at raise"
     date target_date
-    text work_done
+    text problem_found "required at close"
+    text work_done "required at close"
+    numeric labour_hours
+    numeric cost "required at close when RCK did work"
     uuid reported_by FK
     timestamptz reported_at
     uuid completed_by FK
@@ -306,6 +326,13 @@ What changed from v1 and why:
 - **`wo_events.visibility`** splits the timeline: `internal` notes never leave
   RCK; `shared` ones are what a subcontractor reads. The default is internal
   for RCK people and shared for subcontractors, so nothing leaks by accident.
+- **`wo_purchases`** is the list of what was bought to fix a job: item,
+  supplier, amount, and how it was paid (Capricorn, company card, on account,
+  cash). It is what makes "cost to fix" auditable rather than a number typed
+  from memory.
+- **Close-out fields live on the row that owns them.** Problem found, work done
+  and RCK's cost are on the work order; an outside company's invoice number and
+  amount are on their assignment. The trigger that guards closing reads both.
 - **`people`** exists. Every `_by` column is a foreign key to a person, not a
   typed name. Names can be corrected once; history stays attached.
 - **`asset_types`** is a table, not a free-text column, so the board order and
@@ -321,6 +348,11 @@ What changed from v1 and why:
 
 Views, computed on read:
 
+- **`person_day`** — every event a person caused, with the job and the asset it
+  belongs to: work orders raised, updates posted, status changes, parts marked
+  done, sign-offs, purchases added, services logged, hours read, locations
+  updated, photos added. Filter it to one person and one day and it is their
+  diary.
 - **`my_work`** — for the signed-in person: every open assignment to them or
   their company, with the job and asset alongside. This is the "My work" screen
   and the whole of a subcontractor's app.
@@ -428,7 +460,61 @@ line**, exactly as in v1.
 
 ---
 
-## 8. Assigning work
+## 8. What a work order must contain
+
+Two gates, both enforced by the database, both shown in the app as a checklist
+that fills in as you go. The app will not offer the button until the list is
+complete, and if a stale phone tries anyway, Postgres refuses the write and
+says which field is missing.
+
+### Raising one
+
+| Required | Why |
+|---|---|
+| The asset | A job with no machine is a note, not a job |
+| Where the asset is right now | Offered from the machine's last known location and GPS; must be confirmed or corrected |
+| What is wrong, in a sentence | The title on every card and print |
+| Usable or out of operation | Sets the colour |
+| At least one photo | The workshop and any subcontractor see what the crew saw |
+
+Optional at raise: a longer description, hour-meter reading, an expected-back
+date. The photo rule has one wrinkle with bad signal: the app will not let
+anyone tap **Raise** without a photo, and the outbox sends the job and its
+photo as one unit, so the record never holds a job without one.
+
+### Closing one
+
+```mermaid
+flowchart TD
+  tap[Sign off tapped] --> a{Problem found and<br/>what was done<br/>both written?}
+  a -- no --> stop1[Cannot close<br/>the checklist says what is missing]
+  a -- yes --> b{Any outside company<br/>still on the job?}
+  b -- yes --> c{Each has an invoice<br/>number and an amount?}
+  c -- no --> stop1
+  c -- yes --> d
+  b -- no --> d{Did RCK do work<br/>on it?}
+  d -- yes --> e{Cost entered, and every<br/>purchase has an amount<br/>and how it was paid?}
+  e -- no --> stop1
+  e -- yes --> done[COMPLETE<br/>gear goes green]
+  d -- no --> done
+```
+
+| Who did the work | Must be entered before close |
+|---|---|
+| RCK (internal) | **What the problem was.** **What was done to fix it.** **Cost to fix**, a number, zero allowed but typed. **Every purchase**: item, amount, how it was paid (Capricorn card, company card, on account with a supplier, cash, other). Labour hours are asked for, not required |
+| An outside company | **Their invoice number** and **the amount on it**, against their assignment. Not the invoice's contents. The subcontractor can enter these themselves when they mark their part done; if they have not, the person closing must |
+| Both | All of the above. Each company's numbers on its own assignment; RCK's on the job |
+
+The job's total cost is RCK's cost plus every invoice amount, worked out by a
+view, never typed. The fleet cost report and the dashboard's "cost this month"
+read the same view.
+
+Cancelling is the only way to close a job without these, and only a manager or
+above can cancel, with a reason that goes on the record.
+
+---
+
+## 9. Assigning work
 
 This is the piece v1 does not have and the reason subcontractors get a login.
 A job is raised by anyone at RCK; the workshop manager decides who is on it;
@@ -477,7 +563,7 @@ How someone finds out they have been assigned:
 Push and email need a small piece of back end (a database function that fires
 when an assignment row is inserted). It is the one place v2 has server-side
 code, and it is the owner's back end to look after. Which channels to switch on
-is a decision in §13.
+is a decision in §15.
 
 Cost and the outside: a subcontractor's invoice number and amount are recorded
 against **their assignment**, not against the job as a whole, so two companies
@@ -486,7 +572,59 @@ visible to workshop crew and up.
 
 ---
 
-## 9. Gear colour
+## 10. A person's day
+
+Every RCK person has a diary that writes itself. Nobody fills it in; it is
+built from what they did in the app: the jobs they raised, the updates they
+posted, the parts they marked done, the jobs they signed off, the purchases
+they added, the services they logged, the hours and locations they entered.
+
+```mermaid
+flowchart LR
+  subgraph "Everything Dave touched today"
+    e1["06:40 · WO-0142 · MIL-02<br/>working on it"]
+    e2["08:15 · WO-0142 · MIL-02<br/>purchase: hydraulic hose, Capricorn"]
+    e3["10:30 · WO-0139 · ROL-04<br/>waiting on parts"]
+    e4["13:05 · TRK-01<br/>500 hr service logged"]
+    e5["15:50 · WO-0142 · MIL-02<br/>signed off"]
+  end
+  filter["person_day view<br/>author = Dave, day = today"]
+  e1 & e2 & e3 & e4 & e5 --> filter
+  filter --> bytime["By time<br/>morning to evening, one line each"]
+  filter --> byasset["By asset<br/>MIL-02: three entries<br/>ROL-04: one · TRK-01: one"]
+  bytime --> print["Print: daily job diary"]
+  byasset --> print
+```
+
+Who sees whose:
+
+- **Everyone sees their own**, under My profile → My day. Yesterday and any
+  day before, with a date picker.
+- **Owner and Director see everyone's**, from a People list: tap a person, pick
+  a day. Crew, workshop crew and office staff alike. A crew member cannot open
+  another crew member's diary.
+- **Proposed:** the Workshop manager sees workshop crew's diaries too, since
+  they run that team. Say if not. See §15.
+
+Two ways to read a day, one switch between them:
+
+- **By time.** One line per event from the first to the last, each with the
+  time, the machine, the job number and what happened. This is the daily job
+  diary as it would be written by hand.
+- **By asset.** The same events grouped under each machine touched that day,
+  so "what did Dave do on the miller" is one glance.
+
+Filters: the day (default today), and within it a machine or a job. A week
+view lists the days with a count each, for the person who wants to look back.
+Prints as a one-page daily diary in the RCK document look.
+
+This costs nothing to keep: the events already exist because of §6, and
+`person_day` is a view over them. What it needs is that every write carries
+who did it, which the sign-in guarantees.
+
+---
+
+## 11. Gear colour
 
 ```mermaid
 flowchart LR
@@ -503,7 +641,7 @@ excluded from the board but keep their history.
 
 ---
 
-## 10. When a service is due
+## 12. When a service is due
 
 ```mermaid
 flowchart TD
@@ -531,7 +669,7 @@ machine page and the fleet servicing report all agree to the day.
 
 ---
 
-## 11. Screens and how they are used
+## 13. Screens and how they are used
 
 ### Screen map
 
@@ -543,8 +681,10 @@ flowchart TD
   tier -- owner, director, manager --> dash["Dashboard<br/>fleet colour counts · open jobs by status and assignee<br/>overdue · servicing due · subcontractors out · cost this month"]
   dash --> home
   tier -- crew, workshop --> home[Home: three doors]
-  home --> me["My profile<br/>My work: jobs assigned to me"]
-  me --> wo
+  home --> me["My profile"]
+  me --> mywork["My work: jobs assigned to me"]
+  me --> myday["My day: my diary, by time or by asset"]
+  mywork --> wo
   home --> maint[Maintenance]
   home --> svc[Servicing]
   home --> man[Manuals]
@@ -563,6 +703,8 @@ flowchart TD
   home -. menu .-> screen[Wall screen<br/>full-screen, read only]
   home -. menu .-> reports[Reports<br/>fleet status, repair history, CSV]
   home -. menu .-> admin[Manage: fleet, types,<br/>people and tiers, companies]
+  dash --> people["People: tap a person, pick a day"]
+  people --> theirday["Their day: diary, by time or by asset · print"]
   dash -. owner only .-> backend["Back end<br/>Supabase project, deploys, audit, settings"]
 ```
 
@@ -588,8 +730,14 @@ tap the job. What is wrong and the brief are at the top, the machine and its
 location under that, then shared notes and photos. Post an update, attach the
 invoice, tap **My part is done**.
 
-**Sign off.** One button, one required field: *what was done*. Cost is asked
-for but not required. The gear goes green on every screen within a second.
+**Sign off.** One button, and a checklist above it that fills in as the job
+goes along: problem found, what was done, cost, purchases with how they were
+paid, or the subcontractor's invoice number and amount. The button is grey
+until the list is complete. Then the gear goes green on every screen within a
+second.
+
+**Read someone's day (Owner, Director).** People → the person → today, or pick
+a date. Switch between by time and by asset. Print it.
 
 **Log a service (Workshop).** Machine servicing page → the due plan → Mark done
 → date (today), hours (last reading offered), note. The clock restarts.
@@ -620,7 +768,7 @@ itself, keeps the screen awake, never asks for anything.
 
 ---
 
-## 12. How the code is organised
+## 14. How the code is organised
 
 ```
 workshop-v2/
@@ -637,6 +785,7 @@ workshop-v2/
       screen/     wall screen
       people/     sign in, my profile, my work, companies, tiers
       dashboard/  owner, director and manager overview
+      diary/      my day, a person's day, print
       notify/     assignment push and email (server-side function)
     ui/           buttons, cards, forms, print document theme
   supabase/
@@ -660,7 +809,7 @@ Rules of the structure:
 
 ---
 
-## 13. Decisions to make before building
+## 15. Decisions to make before building
 
 Recommendation first in each case.
 
@@ -676,6 +825,10 @@ their profile.
 - *Proposed:* both have full view and every action; only the Director manages
   people and tiers. If the Director should be view-only, it is one line in the
   policy. Say which.
+
+**Who sees the daily diaries.**
+- *As asked:* everyone their own, Owner and Director everyone's.
+- *Proposed addition:* the Workshop manager sees workshop crew's. Say if not.
 
 **How people are told about an assignment.**
 - *Recommended:* push notification to the installed app, with email as the
@@ -701,7 +854,7 @@ served by short-lived signed links that respect the same assignment rule.
 
 ---
 
-## 14. Building it in stages
+## 16. Building it in stages
 
 Each stage is usable on its own and is put in front of the workshop before the
 next starts.
@@ -710,15 +863,16 @@ next starts.
 |---|---|---|
 | 0 Foundations | Repo layout, build, deploy to Pages, Supabase project, `companies`, `people`, tiers, sign-in, sync dot | You, a fitter and a test subcontractor can each sign in and see a screen that matches their tier |
 | 1 Fleet | `assets`, `asset_types`, board, machine page, manage fleet, seed the 33 machines | The board shows every machine, all green; the subcontractor login cannot see it |
-| 2 Damage → work order | Report damage, work orders list, work order page, lifecycle, events, photos, colour view | Crew raise a job offline; the board goes red when it lands |
+| 2 Damage → work order | Report damage with the required fields and photo, work orders list, work order page, lifecycle, events, colour view | Crew raise a job offline; the board goes red when it lands; a job without a photo cannot be raised |
 | 3 Assigning | Assignments, My profile and My work, the subcontractor app, shared and internal notes, part done | A sparky sees only the job they were given, posts an update, and the workshop sees it |
-| 4 Workshop | Workshop panel, updates with kinds, live line, per-assignment cost, sign-off, print | A job goes from raised to signed off with two assignees, and prints |
+| 4 Workshop | Workshop panel, updates with kinds, live line, purchases, the close-out gate, invoice on assignment, sign-off, print | A job goes from raised to signed off with two assignees and prints; a close without cost or invoice is refused by the database |
+| 4a Diary | My day, People and their day, by time and by asset, print | Dave's diary for yesterday matches what he actually did |
 | 5 Telling people | Push and email on assignment | The sparky's phone buzzes when assigned, with nothing sent by hand |
 | 6 Dashboard and wall | Owner and director dashboard, full-screen wall board, realtime | The wall and the dashboard update within a second of a phone |
 | 7 Servicing | Plans, log, meter readings, due view, Due and By-machine tabs | The Due list matches a hand check for three machines |
 | 8 Manuals and reports | Manuals shelf, fleet status, repair history, CSV | Reports match v1's for the same data |
 | 9 Cut-over | Migrate v1 data, redirect v1, retire old key | The crew are on v2 and nobody asks for v1 |
 
-Next document: **02 — the database**, with the migrations for stages 0–3
-written out and the row-level policies per tier, including the assignment rule
-that fences a subcontractor in.
+Next document: **02 — the database**, with the migrations for stages 0–4
+written out, the row-level policies per tier including the assignment rule
+that fences a subcontractor in, and the close-out trigger.
