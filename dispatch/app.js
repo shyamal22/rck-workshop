@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -3557,13 +3557,18 @@ function renderSetup(view) {
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
         <tr><th>Cost lines</th><td>${DB.job_costs.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
-        <tr><th>Version</th><td>${VERSION}${updateReady ? ' — <strong>an update is ready, close and reopen the app</strong>' : ''}</td></tr>
+        <tr><th>Version</th><td>${VERSION}${
+          updateReady ? ' — <strong>a newer one is installing, the app will pick it up on its own</strong>' : ''}</td></tr>
       </table>
       <div class="btn-row mt">
         <button class="btn sm" id="refresh">Refresh now</button>
+        <button class="btn sm" id="getLatest">Get the latest app</button>
         <button class="btn sm" id="backupAll">Download a backup</button>
         <button class="btn sm" id="clear">Clear this device</button>
       </div>
+      <p class="muted tiny mt" style="margin-bottom:0">New versions arrive on their own. <strong>Get the
+      latest app</strong> is there for when you want to make sure — it throws away the copy on this
+      phone and fetches a fresh one. Nothing you have entered is touched.</p>
     </div>`;
 
   $('#saveMe', view).onclick = () => {
@@ -3673,6 +3678,27 @@ function renderSetup(view) {
 
   $('#refresh', view).onclick = async () => { await refresh(); toast('Up to date'); render(); };
 
+  /* The lever for when a phone is stuck on an old build: throw away the
+     cached app shell, drop the worker holding it, and come back for a fresh
+     copy. Only the app's own files go — the jobs, diaries and anything
+     waiting to send all live elsewhere and are untouched. */
+  $('#getLatest', view).onclick = async function () {
+    this.disabled = true;
+    this.textContent = 'Fetching…';
+    try {
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+    } catch (e) { /* a locked-down browser: the reload below still helps */ }
+    // A cache-busted URL so nothing in front of us can serve the old one either.
+    location.replace(location.pathname + '?fresh=' + Date.now() + location.hash);
+  };
+
   $('#clear', view).onclick = () => {
     const waiting = Outbox.count();
     if (waiting) {
@@ -3753,22 +3779,46 @@ window.addEventListener('scroll', () => {
   });
 }, { passive: true });
 
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => { render(); swapIn(); });
 window.addEventListener('online', () => refresh().then(render));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+/* A phone that is only ever resumed from the app switcher — which is what
+   tapping the home screen icon does — never reloads the page. The new
+   service worker installs, takes over, and the tab carries on running the
+   old app.js for good. So when the worker changes under us, the page has to
+   be replaced: that is the only thing that actually puts a new build on
+   someone's phone without them being told to do anything. */
+let swapPending = false;
+
+/* Everything except a form half filled in. An instant update is not worth
+   somebody's diary entry. */
+function midSomething() {
+  const el = document.activeElement;
+  if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.value) return true;
+  return /^\/(entry|new|edit|upload|costs)\b/.test(route.path);
+}
+
+function swapIn() {
+  if (!swapPending || midSomething()) return;
+  swapPending = false;
+  location.reload();
+}
 
 function watchForUpdate(reg) {
   const seen = w => {
     if (!w) return;
     w.addEventListener('statechange', () => {
-      if (w.state === 'installed' && navigator.serviceWorker.controller) {
+      // skipWaiting() runs the state straight through 'installed', so a
+      // listener that only watches for that one misses it about half the time.
+      if ((w.state === 'installed' || w.state === 'activated') && navigator.serviceWorker.controller) {
         updateReady = true;
-        toast('Update ready — close and reopen the app');
         if (route.path === '/setup') render();
       }
     });
   };
   seen(reg.installing);
+  seen(reg.waiting);
   reg.addEventListener('updatefound', () => seen(reg.installing));
 }
 
@@ -3780,11 +3830,25 @@ function watchForUpdate(reg) {
   render();
   startPolling();
   if ('serviceWorker' in navigator) {
+    // True on every open but the very first, when claiming the page is not
+    // an update and must not send it round again.
+    const wasControlled = !!navigator.serviceWorker.controller;
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!wasControlled) return;
+      updateReady = true;
+      swapPending = true;
+      swapIn();
+    });
+
     navigator.serviceWorker.register('sw.js').then(reg => {
       watchForUpdate(reg);
-      // Coming back to the app is the moment to look for a new one.
+      // Coming back to the app is the moment to look for a new one — and to
+      // put one in, if it arrived while a form was open.
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) reg.update().catch(() => {});
+        if (document.hidden) return;
+        swapIn();
+        reg.update().catch(() => {});
       });
     }).catch(() => {});
   }
