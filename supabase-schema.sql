@@ -188,17 +188,27 @@ create policy service_plans_all on service_plans for all to anon, authenticated 
 create policy service_log_all   on service_log   for all to anon, authenticated using (true) with check (true);
 
 -- =====================================================================
+--  Crew — who is doing what
+--
+--  Nobody is set up. A person is a name that has done something in the
+--  app, and a job can be assigned to any of them. A note that isn't
+--  about a job is an update with no job on it, so a person's day is one
+--  list from one table.
+-- =====================================================================
+alter table work_orders add column if not exists assigned_to text not null default '';
+alter table wo_updates  alter column work_order_id drop not null;
+
+-- =====================================================================
 --  Removed features
 --
---  The maintenance crew and costs sections were taken out of the app.
---  Their tables are deliberately NOT dropped here — this file is re-run
---  routinely, and a drop would destroy the record the moment anyone did.
---  They simply sit unused and cost nothing.
+--  The costs section was taken out of the app, and an earlier crew diary
+--  was replaced by the one above. Their tables are deliberately NOT
+--  dropped here — this file is re-run routinely, and a drop would destroy
+--  the record the moment anyone did. They sit unused and cost nothing.
 --
 --  To clear them out for good, run these by hand, once, knowingly:
 --
 --    drop table if exists crew_log;
 --    drop table if exists crew;
 --    drop table if exists costs;
---    alter table work_orders drop column if exists assigned_to;
 -- =====================================================================

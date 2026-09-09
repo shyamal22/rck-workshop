@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.0.0';
+const VERSION = '3.1.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -203,57 +203,93 @@ function icon(name) {
 let manualsTableMissing = false;
 let serviceTableMissing = false;
 
-/* A comment on its own never said whether someone was fixing the job or just
-   talking about it, so a board full of notes told you nothing. Posting one now
-   means saying which it is — and that answer becomes the job's live line,
-   readable from the card without opening anything.
-
-   Tone borrows the status vocabulary rather than inventing colours: red is bad
-   news, yellow is held up, dark is happening now, grey is only words. */
-const NOTE_KINDS = [
-  { key: 'working', label: 'Working on it', tone: 'live',  hint: 'Spanners on it now' },
-  { key: 'waiting', label: 'Waiting on',    tone: 'hold',  hint: 'Parts, a quote, the repairer' },
-  { key: 'problem', label: 'Hit a problem', tone: 'stop',  hint: 'Needs a decision' },
-  { key: 'looked',  label: 'Had a look',    tone: 'plain', hint: 'Checked it over, nothing done yet' },
-  { key: 'info',    label: 'Just info',     tone: 'plain', hint: 'Nothing for anyone to do' }
-];
-const noteKind = k => NOTE_KINDS.find(n => n.key === k) || null;
-
-/** What everything else on a job's history is, for the printed sheet. */
+/** What each kind of entry on a job's history is, for the printed sheet. */
 const UPDATE_LABELS = {
   created:  'Damage reported',
+  comment:  'Comment',
+  note:     'Note',
   status:   'Job updated',
   external: 'Repairer arranged',
   complete: 'Job completed',
-  reopen:   'Job reopened'
+  reopen:   'Job reopened',
+  file:     'Attachment'
 };
-const noteOf = u => noteKind(u && u.meta && u.meta.note);
 
-/** What is actually happening on a job right now, read back off its own
-    history — so every card can say it without anyone writing a status. */
-function jobPulse(o) {
+/* ================================================================
+   People — whoever is actually using the app
+
+   There is no list to keep. A person is a name that has done something:
+   reported damage, posted on a job, signed one off. That is also who a
+   job can be assigned to. Names come from each device's Settings, so a
+   person's phone and laptop should carry the same name.
+   ================================================================ */
+const UNNAMED = 'Unnamed user';
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+/** The last thing that happened on a job, and who did it. */
+function lastUpdate(o) {
   const ups = updatesFor(o.id);
-  if (!isOpen(o)) {
-    const done = ups.filter(u => u.kind === 'complete').pop();
-    return { label: 'Fixed', tone: 'done', at: o.completed_at || (done && done.created_at),
-             who: o.completed_by || (done && done.author) || '' };
-  }
-  for (let i = ups.length - 1; i >= 0; i--) {
-    const u = ups[i];
-    const n = noteOf(u);
-    if (n) return { label: n.key === 'waiting' && u.body
-                      ? 'Waiting on ' + firstLine(u.body).replace(/^waiting on\s*/i, '')
-                      : n.label,
-                    tone: n.tone, at: u.created_at, who: String(u.author || '').trim() };
-    if (u.kind === 'complete' || u.kind === 'reopen') break;
-  }
-  if (o.repairer === 'external') {
-    return { label: 'With ' + (o.external_company || 'an external repairer'),
-             tone: 'plain', at: o.updated_at, who: '' };
-  }
-  const last = ups[ups.length - 1];
-  return { label: 'No word yet', tone: 'quiet',
-           at: last ? last.created_at : o.reported_at, who: '' };
+  return ups.length ? ups[ups.length - 1] : null;
+}
+
+/** Everyone who has left a mark, most recently active first. */
+function people() {
+  const seen = new Map();
+  const touch = (raw, at, counts) => {
+    const name = String(raw || '').trim();
+    if (!name || name === UNNAMED) return;
+    const k = name.toLowerCase();
+    const cur = seen.get(k) || { name, last: '', today: 0 };
+    if (at && at > cur.last) cur.last = at;
+    if (counts && at && localDay(at) === today()) cur.today++;
+    seen.set(k, cur);
+  };
+  // the updates are the record; the work order fields only make sure a
+  // name is present, since reporting a job already leaves an update
+  DB.wo_updates.forEach(u => touch(u.author, u.created_at, true));
+  DB.work_orders.forEach(o => {
+    touch(o.reported_by, o.reported_at, false);
+    touch(o.completed_by, o.completed_at, false);
+    touch(o.assigned_to, null, false);
+  });
+  const me = whoami();
+  if (me !== UNNAMED && !seen.has(me.toLowerCase())) seen.set(me.toLowerCase(), { name: me, last: '', today: 0 });
+  return Array.from(seen.values()).map(p => Object.assign(p, {
+    open: DB.work_orders.filter(o => isOpen(o) && sameName(o.assigned_to, p.name)).length
+  })).sort((a, b) => String(b.last).localeCompare(String(a.last)) || a.name.localeCompare(b.name));
+}
+
+/** The calendar day something happened, in this phone's time — not UTC,
+    which would file an evening's work under tomorrow. */
+function localDay(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** One person's day: everything they posted, on any job or none, in
+    time order. Photos uploaded together fold into one line. */
+function dayFor(name, date) {
+  const rows = DB.wo_updates
+    .filter(u => sameName(u.author, name) && localDay(u.created_at) === date)
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const out = [];
+  rows.forEach(u => {
+    const prev = out[out.length - 1];
+    if (u.kind === 'file' && prev && prev.kind === 'file' && prev.work_order_id === u.work_order_id) {
+      prev.files.push(u.meta || {});
+      return;
+    }
+    out.push(Object.assign({}, u, { files: u.kind === 'file' ? [u.meta || {}] : [] }));
+  });
+  return out;
+}
+
+/** The days a person has anything on, newest first. */
+function daysFor(name) {
+  const set = new Set();
+  DB.wo_updates.forEach(u => { if (sameName(u.author, name)) set.add(localDay(u.created_at)); });
+  return Array.from(set).filter(Boolean).sort().reverse();
 }
 
 /** "3 days ago", short enough to sit on a card. */
@@ -268,8 +304,6 @@ function ago(v) {
   const days = Math.round(hrs / 24);
   return days === 1 ? 'yesterday' : days + 'd ago';
 }
-
-const firstLine = t => String(t || '').split('\n')[0].trim();
 
 function money(n) {
   const v = Number(n) || 0;
@@ -716,6 +750,7 @@ function sectionOf(path) {
   if (path === '/screen') return 'kiosk';
   if (path.startsWith('/manuals')) return 'manuals';
   if (path.startsWith('/service')) return 'service';
+  if (path.startsWith('/crew')) return 'crew';
   return 'maintenance';
 }
 
@@ -748,6 +783,7 @@ const SCREENS = {
   '/gear':      { title: 'Gear',          render: renderBoard },
   '/service':        { title: 'Planned servicing', render: renderServiceBoard },
   '/service/fleet':  { title: 'Every machine',    render: renderServiceFleet },
+  '/crew':           { title: 'Crew',         render: renderCrew },
   '/manuals':        { title: 'Manuals',      render: renderManuals },
   '/manuals/new':    { title: 'Add a manual', render: renderManualForm, back: true },
   '/orders':    { title: 'Work orders',   render: renderOrders },
@@ -783,6 +819,7 @@ function render() {
   if (!screen && route.path.startsWith('/service/done/')) { screen = { title: 'Mark it done', render: renderServiceDone }; back = true; }
   else if (!screen && route.path.startsWith('/service/plan/')) { screen = { title: 'Service', render: renderServicePlan }; back = true; }
   else if (!screen && route.path.startsWith('/service/')) { screen = { title: 'Servicing', render: renderServiceGear }; back = true; }
+  else if (!screen && route.path.startsWith('/crew/')) { screen = { title: 'Crew', render: renderPerson }; back = true; }
   else if (!screen && route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
   else if (!screen && route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
   else if (!screen && route.path.startsWith('/wo/')) { screen = { title: 'Work order', render: renderWorkOrder }; back = true; }
@@ -795,7 +832,7 @@ function render() {
 
   const section = sectionOf(route.path);
   paintTabs(section, route.path);
-  $('#homeBtn').hidden = !['maintenance', 'manuals', 'service'].includes(section) || (back || screen.back);
+  $('#homeBtn').hidden = !['maintenance', 'manuals', 'service', 'crew'].includes(section) || (back || screen.back);
 
   const view = $('#view');
   view.innerHTML = '';
@@ -1078,17 +1115,13 @@ async function setLocation(g, text) {
   toast('Location updated');
 }
 
-/** The one line that says whether a job is moving. */
-function pulseLine(o, size) {
-  const p = jobPulse(o);
-  if (!p) return '';
-  const when = p.at ? ago(p.at) : '';
-  const meta = [p.who, when].filter(Boolean).join(' \u00b7 ');
-  return `<div class="pulse tone-${p.tone}${size === 'big' ? ' big' : ''}">
-    <span class="pdot"></span>
-    <span class="pl">${esc(p.label)}</span>
-    ${meta ? `<span class="pm">${esc(meta)}</span>` : ''}
-  </div>`;
+/** Who holds the job and who last touched it. */
+function whoLine(o) {
+  const last = lastUpdate(o);
+  const bits = [];
+  if (o.assigned_to) bits.push(`<span class="holder">${esc(o.assigned_to)}</span>`);
+  if (last) bits.push(`<span>${esc(UPDATE_LABELS[last.kind] || 'Update')} \u00b7 ${esc(last.author || '')} \u00b7 ${esc(ago(last.created_at))}</span>`);
+  return bits.length ? `<div class="wholine">${bits.join('')}</div>` : '';
 }
 
 function woCard(o, i) {
@@ -1102,7 +1135,7 @@ function woCard(o, i) {
         <span class="num">${esc(g.code || '')}</span>
       </div>
       <div class="ttl">${esc(o.title)}</div>
-      ${pulseLine(o)}
+      ${whoLine(o)}
       <div class="sub">
         <span class="pill"><span class="swatch"></span>${closed ? statusLabel(o.status) : STATUS_TEXT[o.severity]}</span>
         ${closed ? '' : `<span class="pill plain">${statusLabel(o.status)}</span>`}
@@ -1328,13 +1361,16 @@ function renderWorkOrder(view) {
       <div style="margin-top:11px">
         <span class="pill"><span class="swatch"></span>${closed ? 'Fixed' : STATUS_TEXT[o.severity]}</span>
       </div>
-      ${pulseLine(o, 'big')}
+
       ${o.description ? `<p class="small mt" style="white-space:pre-wrap;margin-bottom:0">${esc(o.description)}</p>` : ''}
     </div>
 
     <div class="card">
       <table class="data">
         <tr><th>Status</th><td>${statusLabel(o.status)}</td></tr>
+        <tr><th>Assigned to</th><td>${o.assigned_to
+          ? `<a href="#/crew/${encodeURIComponent(o.assigned_to)}">${esc(o.assigned_to)}</a>`
+          : '<span class="muted">nobody yet</span>'}</td></tr>
         <tr><th>Reported</th><td>${esc(o.reported_by || '—')} · ${fmtDateTime(o.reported_at)}</td></tr>
         <tr><th>Location</th><td>${esc(o.location_at_report || g.location || '—')}</td></tr>
         <tr><th>Back in service</th><td>${o.target_date
@@ -1361,31 +1397,22 @@ function renderWorkOrder(view) {
     </div>
 
     <div class="card">
-      <label class="field"><span>Say what's happening</span>
-        <textarea id="cmt" placeholder="What you found, what you're doing, what you're waiting on…"></textarea>
+      <label class="field"><span>Add a comment</span>
+        <textarea id="cmt" placeholder="What you found, what you did, what you're waiting on…"></textarea>
       </label>
-      <p class="tiny muted" style="margin:-2px 2px 8px">Pick the one that fits — it becomes this job's live line, so
-        everyone can see whether it's moving without opening it.</p>
-      <div class="note-kinds">
-        ${NOTE_KINDS.map(n => `
-          <button class="note-chip tone-${n.tone}" data-note="${n.key}">
-            <span class="nk">${esc(n.label)}</span>
-            <span class="nh">${esc(n.hint)}</span>
-          </button>`).join('')}
-      </div>
+      <button class="btn primary wide" id="postCmt">Post comment</button>
     </div>`;
 
   $('#printWo', view).onclick = () => printWorkOrder(o);
 
-  $$('[data-note]', view).forEach(b => b.onclick = async function () {
+  $('#postCmt', view).onclick = async function () {
     const body = $('#cmt', view).value.trim();
-    const n = noteKind(this.dataset.note);
-    if (!body && n.key !== 'working') return toast('Write a line first');
-    $$('[data-note]', view).forEach(x => x.disabled = true);
-    await logUpdate(o.id, 'comment', body || 'On it now.', { note: n.key });
-    toast(n.label + ' — posted');
+    if (!body) return toast('Write something first');
+    this.disabled = true;
+    await logUpdate(o.id, 'comment', body);
+    toast('Posted');
     render();
-  });
+  };
 
   if (isWorkshop()) wireWorkshopPanel(view, o);
 }
@@ -1395,11 +1422,9 @@ function tlItem(u) {
   const isFile = u.kind === 'file' && m.url;
   const isImage = isFile && /^image\//.test(m.type || '');
   const strong = ['created', 'status', 'complete', 'external', 'reopen'].includes(u.kind);
-  const n = noteOf(u);
   return `
     <div class="tl-item ${strong ? 'mark' : ''}">
       <div class="tl-when">${fmtDateTime(u.created_at)}</div>
-      ${n ? `<span class="note-tag tone-${n.tone}">${esc(n.label)}</span>` : ''}
       <div class="tl-who">${esc(u.author || 'Unknown')}${u.role === 'workshop' ? ' · Workshop' : ''}</div>
       ${u.body ? `<div class="tl-body">${esc(u.body)}</div>` : ''}
       ${isImage
@@ -1430,6 +1455,16 @@ function workshopPanel(o) {
           </select>
         </label>
       </div>
+
+      <label class="field"><span>Assigned to</span>
+        <select id="wAssign">
+          <option value="">Nobody yet</option>
+          ${people().map(p => `<option value="${esc(p.name)}" ${sameName(p.name, o.assigned_to) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+          ${o.assigned_to && !people().some(p => sameName(p.name, o.assigned_to))
+            ? `<option value="${esc(o.assigned_to)}" selected>${esc(o.assigned_to)}</option>` : ''}
+          <option value="__other">Someone else…</option>
+        </select>
+      </label>
 
       <label class="field"><span>Expected back in service</span>
         <input type="date" id="wTarget" value="${esc((o.target_date || '').slice(0, 10))}">
@@ -1481,9 +1516,31 @@ function wireWorkshopPanel(view, o) {
     repairer.onchange = () => { $('#extBox', view).hidden = repairer.value !== 'external'; };
   }
 
+  const assign = $('#wAssign', view);
+  if (assign) {
+    let previous = assign.value;
+    assign.onchange = () => {
+      if (assign.value !== '__other') { previous = assign.value; return; }
+      const typed = (prompt('Who is this job for?') || '').trim();
+      if (!typed) { assign.value = previous; return; }
+      const match = people().find(p => sameName(p.name, typed));
+      const name = match ? match.name : typed;
+      if (!match) {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        assign.insertBefore(opt, assign.querySelector('option[value="__other"]'));
+      }
+      assign.value = name;
+      previous = name;
+    };
+  }
+
   const save = $('#wSave', view);
   if (save) save.onclick = async function () {
+    const who = assign ? assign.value : (o.assigned_to || '');
+    if (who === '__other') return toast('Name the person first');
     const patch = {
+      assigned_to: who,
       status: $('#wStatus', view).value,
       severity: $('#wSeverity', view).value,
       target_date: $('#wTarget', view).value || null,
@@ -1495,6 +1552,10 @@ function wireWorkshopPanel(view, o) {
     };
 
     const notes = [];
+    if (!sameName(patch.assigned_to, o.assigned_to)) {
+      notes.push(patch.assigned_to ? `Assigned to ${patch.assigned_to}`
+        : `Unassigned${o.assigned_to ? ' (was ' + o.assigned_to + ')' : ''}`);
+    }
     if (patch.status !== o.status) notes.push(`Status: ${statusLabel(o.status)} → ${statusLabel(patch.status)}`);
     if (patch.severity !== o.severity) notes.push(`Now ${STATUS_TEXT[patch.severity].toLowerCase()}`);
     if ((patch.target_date || '') !== (o.target_date || '')) {
@@ -1823,7 +1884,7 @@ function renderReports(view) {
 
 function exportCsv() {
   const head = ['Work order', 'Gear', 'Name', 'Type', 'Fault', 'Detail', 'Usable', 'Status',
-    'Managed by', 'Reported by', 'Reported', 'Location', 'Expected back', 'Repairer', 'Company',
+    'Managed by', 'Assigned to', 'Reported by', 'Reported', 'Location', 'Expected back', 'Repairer', 'Company',
     'Their ref', 'Cost', 'Completed', 'Completed by', 'Work done', 'Days down'];
   const rows = DB.work_orders
     .slice().sort((a, b) => (a.number || 0) - (b.number || 0))
@@ -1831,7 +1892,7 @@ function exportCsv() {
       const g = gearById(o.gear_id) || {};
       return [woNo(o), g.code || '', g.name || '', catLabel(catOf(g)), o.title, o.description,
         o.severity === 'red' ? 'No — out of operation' : 'Yes — usable', statusLabel(o.status),
-        o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
+        o.assigned_to || '', o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
         o.repairer || '', o.external_company || '', o.external_ref || '', o.cost != null ? o.cost : '',
         o.completed_at ? fmtDateTime(o.completed_at) : '', o.completed_by || '', o.work_done || '',
         daysBetween(o.reported_at, o.completed_at) ?? ''];
@@ -1963,9 +2024,7 @@ function printWorkOrder(o) {
     <div class="callout">
       <div class="state"><span class="${state.cls}">${esc(state.word)}</span></div>
       <div class="sub">${esc(state.line)}</div>
-      ${(() => { const p = jobPulse(o);
-        return closed || !p ? '' : `<div class="sub"><strong>Last word:</strong> ${esc(p.label)}${
-          p.who ? ' — ' + esc(p.who) : ''}${p.at ? ' (' + esc(ago(p.at)) + ')' : ''}</div>`; })()}
+      ${o.assigned_to ? `<div class="sub"><strong>Assigned to:</strong> ${esc(o.assigned_to)}</div>` : ''}
     </div>
 
     <h2>What is wrong</h2>
@@ -2000,12 +2059,12 @@ function printWorkOrder(o) {
     <table>
       <tr><th style="width:30mm">When</th><th style="width:28mm">Who</th>
           <th style="width:26mm">What</th><th>Entry</th></tr>
-      ${comments.map(u => { const n = noteOf(u); return `<tr class="avoid-break">
+      ${comments.map(u => `<tr class="avoid-break">
         <td>${fmtDateTime(u.created_at)}</td>
         <td>${esc(u.author || '—')}${u.role === 'workshop' ? '<br><span class="quiet">Workshop</span>' : ''}</td>
-        <td>${n ? `<strong>${esc(n.label)}</strong>` : esc(UPDATE_LABELS[u.kind] || 'Note')}</td>
+        <td>${esc(UPDATE_LABELS[u.kind] || 'Note')}</td>
         <td class="note">${esc(u.body || '')}</td>
-      </tr>`; }).join('') || '<tr><td colspan="4" class="quiet">Nothing recorded.</td></tr>'}
+      </tr>`).join('') || '<tr><td colspan="4" class="quiet">Nothing recorded.</td></tr>'}
     </table>
 
     ${photoSheet(ups)}
@@ -2205,10 +2264,10 @@ function renderKiosk(view) {
                     </div>
                     <div style="min-width:0">
                       <div class="kttl">${esc(o.title)}</div>
-                      <div class="kmeta">${(() => { const p = jobPulse(o);
-                        return `<b class="kpulse tone-${p.tone}">${esc(p.label)}</b>${p.at ? ' ' + esc(ago(p.at)) : ''}`; })()}${
-                        o.repairer === 'external'
-                        ? ' · ' + esc(o.external_company || 'external') : ''}</div>
+                      <div class="kmeta">${statusLabel(o.status)}${(() => { const l = lastUpdate(o);
+                        return l ? ` · ${esc(l.author || '')} ${esc(ago(l.created_at))}` : ''; })()}${
+                        o.assigned_to ? ' · <b>' + esc(o.assigned_to) + '</b>' : ''}${
+                        o.repairer === 'external' ? ' · ' + esc(o.external_company || 'external') : ''}</div>
                     </div>
                     <div class="keta">
                       ${o.target_date
@@ -2291,6 +2350,14 @@ function renderHub(view) {
               : 'Everything up to date')
           : 'Nothing planned yet'}</span>
       </a>
+      <a class="hub-card" href="#/crew">
+        <span class="hub-icon">${icon('people')}</span>
+        <b>Crew</b>
+        <span class="hub-sub">Who is active, and what each person did in a day</span>
+        <span class="hub-stat">${(() => { const n = people().filter(p => p.today).length;
+          return n ? `${n} ${n === 1 ? 'person' : 'people'} active today` : 'Nobody active yet today'; })()}</span>
+      </a>
+
       <a class="hub-card" href="#/manuals">
         <span class="hub-icon">${icon('book')}</span>
         <b>Manuals</b>
@@ -2765,6 +2832,163 @@ function renderServicePlan(view) {
     toast('Removed');
     go('#/service/' + g.id);
   };
+}
+
+/* ================================================================
+   Crew — who is doing what
+
+   Nobody is set up here. The list is whoever has done something in the
+   app; a person's day is what they posted, on any job or none. Tapping
+   your own name lets you note things that aren't a job — driving to a
+   site, picking up parts — so the day reads whole.
+   ================================================================ */
+function renderCrew(view) {
+  const list = people();
+  const me = whoami();
+  view.innerHTML = `
+    ${list.length ? `<div class="people">
+      ${list.map((p, i) => `
+        <button class="person" data-name="${esc(p.name)}" style="--i:${Math.min(i, 14)}">
+          <span class="pv-name">${esc(p.name)}${sameName(p.name, me) ? '<i>you</i>' : ''}</span>
+          <span class="pv-sub">${p.last ? `Last active ${esc(ago(p.last))}` : 'Nothing posted yet'}${
+            p.open ? ` \u00b7 ${p.open} open job${p.open === 1 ? '' : 's'}` : ''}</span>
+          <span class="pv-num${p.today ? '' : ' zero'}">${p.today}<i>today</i></span>
+        </button>`).join('')}
+    </div>` : `<div class="empty"><b>Nobody yet</b>People appear here once they have done something in the app.</div>`}
+    <p class="muted small center mt">A person is whoever has reported, posted or signed off.
+      The name comes from each phone's Settings, so use the same one on every device.</p>`;
+  $$('[data-name]', view).forEach(b => b.onclick = () => go('#/crew/' + encodeURIComponent(b.dataset.name)));
+}
+
+const personState = { date: '' };
+
+function renderPerson(view) {
+  const name = decodeURIComponent(route.path.split('/')[2] || '');
+  if (!name) { view.innerHTML = `<div class="empty"><b>Nobody selected</b></div>`; return; }
+  if (!personState.date) personState.date = today();
+  const date = personState.date;
+  const isMe = sameName(name, whoami());
+  const rows = dayFor(name, date);
+  const days = daysFor(name);
+  const mine = DB.work_orders.filter(o => isOpen(o) && sameName(o.assigned_to, name));
+
+  $('#title').textContent = name;
+
+  view.innerHTML = `
+    <div class="daynav">
+      <button class="icon-btn" id="pPrev" aria-label="Previous day">
+        <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg></button>
+      <label class="dn-date">
+        <b>${esc(fmtDate(date))}</b>
+        <span>${date === today() ? 'today' : `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}`}</span>
+        <input type="date" id="pDate" value="${esc(date)}">
+      </label>
+      <button class="icon-btn" id="pNext" aria-label="Next day" ${date >= today() ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>
+
+    ${isMe ? `
+      <div class="card">
+        <label class="field"><span>Add a note for ${date === today() ? 'today' : fmtDate(date)}</span>
+          <textarea id="pNote" placeholder="Something that isn't a job — driving to Ngaruawahia, picking up parts…"></textarea>
+        </label>
+        <button class="btn primary wide" id="pPost">Add it</button>
+      </div>` : ''}
+
+    ${rows.length ? `<div class="card log-card">
+      ${rows.map(dayRow).join('')}
+    </div>` : `<div class="empty"><b>Nothing on ${date === today() ? 'today' : 'this day'}</b>${
+      isMe ? 'Anything you post on a job shows here on its own.' : `${esc(name)} hasn't posted anything.`}</div>`}
+
+    <div class="btn-row mt">
+      <button class="btn" id="pPrint">${icon('printer')}Print the day</button>
+    </div>
+
+    ${mine.length ? `<div class="section-title">Open jobs (${mine.length})</div>${mine.map(woCard).join('')}` : ''}
+
+    ${days.length ? `<div class="section-title">Days with something on</div>
+      <div class="chipwrap">${days.slice(0, 30).map(d =>
+        `<button class="tagname tap${d === date ? ' on' : ''}" data-day="${d}">${esc(fmtDate(d))}</button>`).join('')}</div>` : ''}`;
+
+  const step = n => {
+    const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + n);
+    personState.date = localDay(d.toISOString()); renderPerson(view);
+  };
+  $('#pPrev', view).onclick = () => step(-1);
+  $('#pNext', view).onclick = () => step(1);
+  $('#pDate', view).onchange = e => { personState.date = e.target.value || today(); renderPerson(view); };
+  $$('[data-day]', view).forEach(b => b.onclick = () => { personState.date = b.dataset.day; renderPerson(view); });
+  $('#pPrint', view).onclick = () => printDay(name, date, rows);
+  wireWoCards(view);
+  $$('[data-wo-open]', view).forEach(b => b.onclick = () => go('#/wo/' + b.dataset.woOpen));
+
+  const post = $('#pPost', view);
+  if (post) post.onclick = async function () {
+    const body = $('#pNote', view).value.trim();
+    if (!body) return toast('Write something first');
+    this.disabled = true;
+    // a note on no job still belongs on the day it is about
+    const at = date === today() ? new Date() : new Date(date + 'T12:00:00');
+    await Store.insert('wo_updates', {
+      id: uid(), work_order_id: null, created_at: at.toISOString(),
+      author: whoami(), role: S.role, kind: 'note', body, meta: {}
+    });
+    toast('Added');
+    renderPerson(view);
+  };
+}
+
+/** One line of a person's day. */
+function dayRow(u) {
+  const wo = u.work_order_id ? orderById(u.work_order_id) : null;
+  const g = wo ? gearById(wo.gear_id) : null;
+  const pics = (u.files || []).filter(f => f && /^image\//.test(f.type || ''));
+  const docs = (u.files || []).filter(f => f && f.url && !/^image\//.test(f.type || ''));
+  const label = u.kind === 'file'
+    ? (pics.length && !docs.length ? `${pics.length} photo${pics.length === 1 ? '' : 's'}`
+      : docs.length && !pics.length ? `${docs.length} file${docs.length === 1 ? '' : 's'}` : 'Photos and files')
+    : (UPDATE_LABELS[u.kind] || 'Update');
+  return `
+    <div class="log-item${wo ? ' to-job' : ''}" ${wo ? `data-wo-open="${wo.id}"` : ''}>
+      <div class="log-time">${fmtTime(u.created_at)}</div>
+      <div class="log-body">
+        <div class="log-head"><span class="log-kind">${esc(label)}</span></div>
+        ${wo ? `<div class="log-job">${esc(g ? g.code : '')} \u00b7 ${woNo(wo)} — ${esc(wo.title)}</div>` : ''}
+        ${u.body && u.kind !== 'file' ? `<div class="log-note">${esc(u.body)}</div>` : ''}
+        ${pics.length || docs.length ? `<div class="thumbs">${pics.map(f =>
+            `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}${
+          docs.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>`).join('')}
+        </div>` : ''}
+      </div>
+    </div>`;
+}
+
+function fmtTime(v) {
+  const d = new Date(v);
+  if (isNaN(d)) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function printDay(name, date, rows) {
+  printDoc(`
+    ${docHead('Daily report', name, [['Date', fmtDate(date)], ['Entries', String(rows.length)]])}
+    ${rows.length ? `<table>
+      <tr><th style="width:16mm">Time</th><th style="width:30mm">What</th>
+          <th style="width:44mm">Job</th><th>Detail</th></tr>
+      ${rows.map(u => {
+        const wo = u.work_order_id ? orderById(u.work_order_id) : null;
+        const g = wo ? gearById(wo.gear_id) : null;
+        const n = (u.files || []).length;
+        return `<tr class="avoid-break">
+          <td>${fmtTime(u.created_at)}</td>
+          <td>${u.kind === 'file' ? `${n} file${n === 1 ? '' : 's'}` : esc(UPDATE_LABELS[u.kind] || 'Update')}</td>
+          <td>${wo ? `<strong>${esc(g ? g.code : '')}</strong> ${woNo(wo)}<br>${esc(wo.title)}` : '—'}</td>
+          <td class="note">${esc(u.kind === 'file' ? '' : (u.body || ''))}</td>
+        </tr>`;
+      }).join('')}
+    </table>` : '<p class="quiet">Nothing posted this day.</p>'}
+    <div class="sig"><div>Workshop manager &amp; date</div></div>
+    ${docFoot(esc(name) + ' \u00b7 ' + fmtDate(date))}`);
 }
 
 /* ================================================================
