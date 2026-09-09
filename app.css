@@ -844,6 +844,26 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 
 .doc .avoid-break { break-inside: avoid; page-break-inside: avoid; }
 .doc .note { white-space: pre-wrap; }
+
+/* daily report: the timeline is dense, the asset blocks are boxed */
+.doc table.tight { font-size: 9.5pt; }
+.doc table.tight td { padding: 1.7mm 2.2mm; }
+.doc table.tight td.t { font-variant-numeric: tabular-nums; color: #3b4557; white-space: nowrap; }
+.doc .asset { border: .6pt solid #ddd6ca; margin-bottom: 4mm; }
+.doc .asset-head {
+  display: flex; align-items: baseline; gap: 3mm;
+  background: #1f2a44; color: #fff; padding: 2.2mm 3mm;
+}
+.doc .asset-head .code { font-size: 11.5pt; font-weight: 800; letter-spacing: -.2pt; }
+.doc .asset-head .name { font-size: 9.5pt; opacity: .85; flex: 1; }
+.doc .asset-head .n { font-size: 8.5pt; opacity: .75; }
+.doc .job { padding: 2mm 3mm 1mm; border-top: .5pt solid #ddd6ca; }
+.doc .job:first-of-type { border-top: 0; }
+.doc .job-line { font-size: 10pt; margin-bottom: 1mm; }
+.doc .job-line b { color: #b8860b; }
+.doc table.sub { margin-bottom: 1mm; }
+.doc table.sub td { border-bottom: .5pt solid #eee9df; background: none !important; }
+.doc table.sub tr:last-child td { border-bottom: 0; }
 .doc .shots { display: flex; flex-wrap: wrap; gap: 4mm; }
 .doc .shots figure { width: 82mm; margin: 0; }
 .doc .shots img { width: 100%; border: .5pt solid #ddd6ca; display: block; }

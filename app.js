@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.2.0';
+const VERSION = '3.3.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -2472,25 +2472,114 @@ function fmtTime(v) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** The daily report: the day as one timeline, then the same day asset by
+    asset, so a manager can read either "what happened when" or "what got
+    done to what" without re-sorting anything in their head. */
 function printDay(name, date, rows) {
+  const jobOf = u => u.work_order_id ? orderById(u.work_order_id) : null;
+  const what = u => {
+    if (u.kind !== 'file') return UPDATE_LABELS[u.kind] || 'Update';
+    const n = (u.files || []).length;
+    const pics = (u.files || []).filter(f => f && /^image\//.test(f.type || '')).length;
+    return pics === n ? `${n} photo${n === 1 ? '' : 's'}` : `${n} file${n === 1 ? '' : 's'}`;
+  };
+  const detail = u => {
+    if (u.kind === 'file') return (u.files || []).map(f => f && f.name).filter(Boolean).join(', ');
+    let t = String(u.body || '');
+    // the report row already says "Damage reported" and names the job, so
+    // the auto-written "Damage reported: <title> — " on the front is noise
+    if (u.kind === 'created') t = t.replace(/^damage reported:\s*[^\u2014]*\u2014\s*/i, '');
+    return t ? t[0].toUpperCase() + t.slice(1) : '';
+  };
+
+  // group by asset, keeping the order the person first touched each one
+  const byAsset = [];
+  const loose = [];
+  rows.forEach(u => {
+    const wo = jobOf(u);
+    if (!wo) { loose.push(u); return; }
+    let block = byAsset.find(x => x.gearId === wo.gear_id);
+    if (!block) { block = { gearId: wo.gear_id, gear: gearById(wo.gear_id) || {}, jobs: [] }; byAsset.push(block); }
+    let job = block.jobs.find(j => j.wo.id === wo.id);
+    if (!job) { job = { wo, rows: [] }; block.jobs.push(job); }
+    job.rows.push(u);
+  });
+
+  const first = rows[0], last = rows[rows.length - 1];
+  const span = first && last ? (first === last ? fmtTime(first.created_at)
+    : `${fmtTime(first.created_at)} \u2013 ${fmtTime(last.created_at)}`) : '\u2014';
+  const jobs = byAsset.reduce((n, x) => n + x.jobs.length, 0);
+  const photos = rows.reduce((n, u) => n + (u.files || []).filter(f => f && /^image\//.test(f.type || '')).length, 0);
+
   printDoc(`
-    ${docHead('Daily report', name, [['Date', fmtDate(date)], ['Entries', String(rows.length)]])}
-    ${rows.length ? `<table>
-      <tr><th style="width:16mm">Time</th><th style="width:30mm">What</th>
-          <th style="width:44mm">Job</th><th>Detail</th></tr>
-      ${rows.map(u => {
-        const wo = u.work_order_id ? orderById(u.work_order_id) : null;
-        const g = wo ? gearById(wo.gear_id) : null;
-        const n = (u.files || []).length;
+    ${docHead('Daily report', '', [['Date', fmtDate(date)], ['Person', name]])}
+
+    <div class="facts">
+      <div class="col">
+        <div class="lab">Person</div>
+        <div class="big">${esc(name)}</div>
+        <div class="line">${esc(fmtDate(date))}</div>
+      </div>
+      <div class="col">
+        <div class="lab">On the day</div>
+        <div class="big">${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}</div>
+        <div class="line">${span}</div>
+      </div>
+      <div class="col">
+        <div class="lab">Touched</div>
+        <div class="big">${byAsset.length} asset${byAsset.length === 1 ? '' : 's'}</div>
+        <div class="line">${jobs} job${jobs === 1 ? '' : 's'}${photos ? ` \u00b7 ${photos} photo${photos === 1 ? '' : 's'}` : ''}${
+          loose.length ? ` \u00b7 ${loose.length} note${loose.length === 1 ? '' : 's'} not on a job` : ''}</div>
+      </div>
+    </div>
+
+    <h2>The day</h2>
+    ${rows.length ? `<table class="tight">
+      <tr><th style="width:14mm">Time</th><th style="width:28mm">What</th>
+          <th style="width:40mm">Asset \u00b7 job</th><th>Detail</th></tr>
+      ${rows.map(u => { const wo = jobOf(u); const g = wo ? gearById(wo.gear_id) : null;
         return `<tr class="avoid-break">
-          <td>${fmtTime(u.created_at)}</td>
-          <td>${u.kind === 'file' ? `${n} file${n === 1 ? '' : 's'}` : esc(UPDATE_LABELS[u.kind] || 'Update')}</td>
-          <td>${wo ? `<strong>${esc(g ? g.code : '')}</strong> ${woNo(wo)}<br>${esc(wo.title)}` : '—'}</td>
-          <td class="note">${esc(u.kind === 'file' ? '' : (u.body || ''))}</td>
-        </tr>`;
-      }).join('')}
+          <td class="t">${fmtTime(u.created_at)}</td>
+          <td>${esc(what(u))}</td>
+          <td>${wo ? `<b>${esc(g ? g.code : '')}</b> <span class="quiet">${woNo(wo)}</span>` : '<span class="quiet">\u2014</span>'}</td>
+          <td class="note">${esc(detail(u))}</td>
+        </tr>`; }).join('')}
     </table>` : '<p class="quiet">Nothing posted this day.</p>'}
-    <div class="sig"><div>Workshop manager &amp; date</div></div>
+
+    ${byAsset.length || loose.length ? `<h2>Asset by asset</h2>` : ''}
+    ${byAsset.map(x => `
+      <div class="asset avoid-break">
+        <div class="asset-head">
+          <span class="code">${esc(x.gear.code || '')}</span>
+          <span class="name">${esc(x.gear.name || catLabel(catOf(x.gear)))}</span>
+          <span class="n">${x.jobs.reduce((n, j) => n + j.rows.length, 0)} entr${x.jobs.reduce((n, j) => n + j.rows.length, 0) === 1 ? 'y' : 'ies'}</span>
+        </div>
+        ${x.jobs.map(j => `
+          <div class="job">
+            <div class="job-line"><b>${woNo(j.wo)}</b> ${esc(j.wo.title)}
+              <span class="quiet">\u00b7 ${isOpen(j.wo) ? esc(statusLabel(j.wo.status)) : 'Fixed'}</span></div>
+            <table class="tight sub">
+              ${j.rows.map(u => `<tr>
+                <td class="t" style="width:14mm">${fmtTime(u.created_at)}</td>
+                <td style="width:28mm">${esc(what(u))}</td>
+                <td class="note">${esc(detail(u))}</td>
+              </tr>`).join('')}
+            </table>
+          </div>`).join('')}
+      </div>`).join('')}
+    ${loose.length ? `
+      <div class="asset avoid-break">
+        <div class="asset-head"><span class="code">Not on a job</span>
+          <span class="n">${loose.length} note${loose.length === 1 ? '' : 's'}</span></div>
+        <table class="tight sub">
+          ${loose.map(u => `<tr>
+            <td class="t" style="width:14mm">${fmtTime(u.created_at)}</td>
+            <td class="note">${esc(u.body || '')}</td>
+          </tr>`).join('')}
+        </table>
+      </div>` : ''}
+
+    <div class="sig"><div>${esc(name)}</div><div>Workshop manager &amp; date</div></div>
     ${docFoot(esc(name) + ' \u00b7 ' + fmtDate(date))}`);
 }
 
