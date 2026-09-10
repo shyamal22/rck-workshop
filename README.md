@@ -119,7 +119,11 @@ then comments and history, attachments and photos, and sign-off lines.
 - **Fleet status** — every machine, colour, location, due date, plus all open jobs.
 - **Repair history** — whole fleet or one machine, any date range: every repair,
   what was done, who did it, days out of action, cost, and the paperwork on file.
-- **CSV export** of all work orders for Excel.
+- **Excel export of every asset** — one row each: code, type, name, make/model,
+  status, open work orders, days down, location and when it was last updated,
+  notes, retired, added. A real `.xlsx` with a frozen header and a filter row,
+  written by the app itself so it works with no signal.
+- **CSV export** of all work orders.
 
 Every change is written to the work order's history, with who did it and when, so
 the record of a machine's repairs is complete without anyone having to keep it.
