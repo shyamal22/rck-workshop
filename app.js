@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.4.0';
+const VERSION = '3.5.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -365,12 +365,40 @@ function loadCache() {
     }
   } catch (e) {}
 }
+/* A phone gets about 5 MB of localStorage in total. One photo as a data URL
+   is a tenth of that, so a handful of them in the cache filled every phone
+   on the crew with "storage full". Nothing image-shaped is written here any
+   more: files live in Storage, or in the stash below until they get there. */
+function cacheSafe(db) {
+  if (S.localMode) return db;                    // practice mode is this device by design
+  const scrub = o => {
+    if (o && typeof o.url === 'string' && /^(data|blob):/.test(o.url)) {
+      const c = Object.assign({}, o); delete c.url; return c;
+    }
+    return o;
+  };
+  return Object.assign({}, db, {
+    wo_updates: db.wo_updates.map(u => u.meta && u.meta.url ? Object.assign({}, u, { meta: scrub(u.meta) }) : u),
+    manuals: db.manuals.map(m => m.file && m.file.url ? Object.assign({}, m, { file: scrub(m.file) }) : m)
+  });
+}
+
+let cacheWarned = false;
 function saveCache() {
-  try {
-    localStorage.setItem(cacheKey(), JSON.stringify(DB));
-  } catch (e) {
-    // Storage full — most likely photos in local mode.
-    toast('Device storage is full. Connect to Supabase or clear old photos.');
+  const safe = cacheSafe(DB);
+  const attempts = [
+    safe,
+    // still too big: keep the recent history, the rest is a pull away
+    Object.assign({}, safe, { wo_updates: safe.wo_updates.slice(-1500) }),
+    Object.assign({}, safe, { wo_updates: [] })
+  ];
+  for (const db of attempts) {
+    try { localStorage.setItem(cacheKey(), JSON.stringify(db)); return; } catch (e) { /* try smaller */ }
+  }
+  if (!cacheWarned) {
+    cacheWarned = true;
+    toast(S.localMode ? 'This phone is out of room for practice data. Switch to the shared database.'
+                      : 'This phone could not keep an offline copy. Everything is still saved online.');
   }
 }
 
@@ -379,6 +407,69 @@ function upsert(table, row) {
   const i = list.findIndex(r => r.id === row.id);
   if (i >= 0) list[i] = Object.assign({}, list[i], row);
   else list.push(row);
+}
+
+/* ------------------------------------------------------------------
+   The stash. A photo taken with no signal used to travel as a data URL
+   inside its row — into the cache, into the outbox, and then into the
+   database for every phone to pull. Now the bytes wait in IndexedDB,
+   which has room, and only the finished Storage URL ever gets written.
+   ------------------------------------------------------------------ */
+const Stash = {
+  db: null,
+  mem: new Map(),
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    return new Promise(res => {
+      try {
+        const req = indexedDB.open('rckw-files', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('files');
+        req.onsuccess = () => { this.db = req.result; res(this.db); };
+        req.onerror = () => res(null);
+      } catch (e) { res(null); }
+    });
+  },
+  async put(id, blob) {
+    const db = await this.open();
+    if (!db) { this.mem.set(id, blob); return; }
+    await new Promise(res => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(blob, id); tx.oncomplete = tx.onerror = res; });
+  },
+  async get(id) {
+    const db = await this.open();
+    if (!db) return this.mem.get(id) || null;
+    return new Promise(res => { const r = db.transaction('files').objectStore('files').get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); });
+  },
+  async del(id) {
+    const db = await this.open();
+    if (!db) { this.mem.delete(id); return; }
+    await new Promise(res => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').delete(id); tx.oncomplete = tx.onerror = res; });
+  }
+};
+
+/** A row as the database should see it: never a data or blob URL. */
+function cleanRow(row) {
+  const out = Object.assign({}, row);
+  ['meta', 'file'].forEach(k => {
+    const o = out[k];
+    if (o && typeof o.url === 'string' && /^(data|blob):/.test(o.url)) {
+      out[k] = Object.assign({}, o); delete out[k].url;
+    }
+  });
+  return out;
+}
+
+/** The bytes to Storage; throws if they don't get there. */
+async function uploadToStorage(file, name, type) {
+  const fname = (name || file.name || 'file').replace(/[^\w.\-]+/g, '_');
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${fname}`;
+  const base = S.supabaseUrl.replace(/\/+$/, '');
+  const res = await fetch(`${base}/storage/v1/object/workshop-files/${encodeURIComponent(path)}`, {
+    method: 'POST',
+    headers: restHeaders({ 'Content-Type': type || file.type || 'application/octet-stream', 'x-upsert': 'true' }),
+    body: file
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return `${base}/storage/v1/object/public/workshop-files/${encodeURIComponent(path)}`;
 }
 
 /* ================================================================
@@ -440,13 +531,16 @@ const Store = {
       const out = await rest(table, {
         method: 'POST',
         headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
-        body: JSON.stringify(row)
+        body: JSON.stringify(cleanRow(row))
       });
       const saved = Array.isArray(out) ? out[0] : out;
-      if (saved) { upsert(table, saved); saveCache(); }
+      // keep this phone's view of the file (its blob URL) over the database's
+      if (saved) { upsert(table, Object.assign({}, saved, row.meta ? { meta: row.meta } : {}, row.file ? { file: row.file } : {})); saveCache(); }
+      queuePendingUpload(table, row);
       return saved || row;
     } catch (err) {
-      Outbox.add({ kind: 'insert', table, row });
+      Outbox.add({ kind: 'insert', table, row: cleanRow(row) });
+      queuePendingUpload(table, row);
       return row;
     }
   },
@@ -482,27 +576,32 @@ const Store = {
     }
   },
 
-  /** Returns { name, url, type, size } — a public URL, or a data URL offline. */
+  /** Returns { name, type, size, url }. With no signal the bytes go to the
+      stash and the row says so; the URL arrives when the outbox catches up. */
   async upload(file) {
-    const dataUrl = await fileToDataUrl(file);
     const meta = { name: file.name || 'file', type: file.type || '', size: file.size || 0 };
-    if (!connected()) return Object.assign(meta, { url: dataUrl, local: true });
+    if (!connected()) return Object.assign(meta, { url: await fileToDataUrl(file), local: true });
     try {
-      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${(file.name || 'file').replace(/[^\w.\-]+/g, '_')}`;
-      const base = S.supabaseUrl.replace(/\/+$/, '');
-      const res = await fetch(`${base}/storage/v1/object/workshop-files/${encodeURIComponent(path)}`, {
-        method: 'POST',
-        headers: restHeaders({ 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'true' }),
-        body: file
-      });
-      if (!res.ok) throw new Error(await res.text());
-      return Object.assign(meta, { url: `${base}/storage/v1/object/public/workshop-files/${encodeURIComponent(path)}` });
+      return Object.assign(meta, { url: await uploadToStorage(file) });
     } catch (err) {
-      // Keep the file rather than lose it; it uploads on the next sync.
-      return Object.assign(meta, { url: dataUrl, local: true, pending: true });
+      const pendingId = uid();
+      await Stash.put(pendingId, file);
+      // the blob URL lets this phone show the photo now; it is never persisted
+      return Object.assign(meta, { pending: true, pendingId, url: URL.createObjectURL(file) });
     }
   }
 };
+
+/** Once a row carrying a stashed file is on its way, the file follows it. */
+function queuePendingUpload(table, row) {
+  ['meta', 'file'].forEach(field => {
+    const o = row[field];
+    if (o && o.pending && o.pendingId) {
+      Outbox.add({ kind: 'upload', table, id: row.id, field, pendingId: o.pendingId,
+                   name: o.name || 'file', type: o.type || '' });
+    }
+  });
+}
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -526,10 +625,41 @@ const Outbox = {
     paintSync();
   },
   count() { return Outbox.all().length; },
+  /** Rows queued by an older build carry their photo as a data URL. Move
+      the bytes to the stash so they upload properly instead of being
+      written into the database for every phone to pull. */
+  async migrate() {
+    const list = Outbox.all();
+    const out = [];
+    let changed = false;
+    for (const op of list) {
+      out.push(op);
+      if (op.kind !== 'insert' || !op.row) continue;
+      for (const field of ['meta', 'file']) {
+        const o = op.row[field];
+        if (!o || typeof o.url !== 'string' || !/^data:/.test(o.url)) continue;
+        try {
+          const blob = await (await fetch(o.url)).blob();
+          const pendingId = uid();
+          await Stash.put(pendingId, blob);
+          op.row[field] = Object.assign({}, o, { pending: true, pendingId }); delete op.row[field].url;
+          out.push({ opId: uid(), kind: 'upload', table: op.table, id: op.row.id, field, pendingId,
+                     name: o.name || 'file', type: o.type || blob.type || '' });
+        } catch (e) { delete op.row[field].url; }
+        changed = true;
+      }
+    }
+    if (changed) Outbox.save(out);
+  },
+  flushing: false,
   async flush() {
-    if (!connected()) return;
+    if (!connected() || Outbox.flushing) return;   // two flushes at once would send a file twice
     let list = Outbox.all();
     if (!list.length) return;
+    Outbox.flushing = true;
+    try { await Outbox.run(list); } finally { Outbox.flushing = false; }
+  },
+  async run(list) {
     const left = [];
     for (const op of list) {
       try {
@@ -538,6 +668,19 @@ const Outbox = {
             method: 'DELETE',
             headers: restHeaders({ Prefer: 'return=minimal' })
           });
+        } else if (op.kind === 'upload') {
+          const file = await Stash.get(op.pendingId);
+          if (!file) continue;              // nothing to send: the stash was cleared; the row stays as "pending"
+          const url = await uploadToStorage(file, op.name, op.type);
+          const fresh = { name: op.name, type: op.type, size: file.size || 0, url };
+          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+            method: 'PATCH',
+            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+            body: JSON.stringify({ [op.field]: fresh })
+          });
+          const local = (DB[op.table] || []).find(r => r.id === op.id);
+          if (local) { local[op.field] = fresh; saveCache(); }
+          await Stash.del(op.pendingId);
         } else if (op.kind === 'insert') {
           await rest(op.table, {
             method: 'POST',
@@ -2917,6 +3060,9 @@ function renderSetup(view) {
       <h2>Status</h2>
       <table class="data">
         <tr><th>Connection</th><td>${S.localMode ? 'This device only' : connected() ? 'Shared database' : 'Not set up'}</td></tr>
+        ${connected() && stuckFiles().length ? `<tr><th>Stuck photos</th><td>${stuckFiles().length} still in the database
+          the old way. ${isWorkshop() ? 'This device is moving them to storage in the background.'
+                                       : 'A workshop device moves them to storage on its own.'}</td></tr>` : ''}
         <tr><th>Gear</th><td>${DB.gear.length}</td></tr>
         <tr><th>Work orders</th><td>${DB.work_orders.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
@@ -3039,6 +3185,48 @@ async function refresh() {
     syncState = 'bad';
   }
   paintSync();
+  if (syncState === 'ok' && isWorkshop()) repairStuckFiles();   // in the background; see below
+}
+
+/* ------------------------------------------------------------------
+   Photos that reached the database as data URLs — an older build sent
+   them that way when a phone had no signal — sit in every phone's pull
+   and fill every phone's cache. A workshop device moves each one into
+   Storage and points the row at it, a few at a time, until none are
+   left. Any device can do it; the workshop ones are the ones on wifi.
+   ------------------------------------------------------------------ */
+function stuckFiles() {
+  const out = [];
+  DB.wo_updates.forEach(r => { if (r.meta && /^data:/.test(r.meta.url || '')) out.push({ table: 'wo_updates', row: r, field: 'meta' }); });
+  DB.manuals.forEach(r => { if (r.file && /^data:/.test(r.file.url || '')) out.push({ table: 'manuals', row: r, field: 'file' }); });
+  return out;
+}
+
+let repairing = false;
+async function repairStuckFiles(limit) {
+  if (repairing || !connected()) return 0;
+  const batch = stuckFiles().slice(0, limit || 4);
+  if (!batch.length) return 0;
+  repairing = true;
+  let done = 0;
+  try {
+    for (const { table, row, field } of batch) {
+      const o = row[field];
+      const blob = await (await fetch(o.url)).blob();
+      const url = await uploadToStorage(blob, o.name || 'file', o.type || blob.type);
+      const fresh = { name: o.name || 'file', type: o.type || blob.type || '', size: blob.size, url };
+      await rest(`${table}?id=eq.${encodeURIComponent(row.id)}`, {
+        method: 'PATCH',
+        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify({ [field]: fresh })
+      });
+      row[field] = fresh;
+      done++;
+    }
+    saveCache();
+  } catch (e) { /* next refresh has another go */ }
+  repairing = false;
+  return done;
 }
 
 let pollTimer = null;
@@ -3087,6 +3275,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
   render();
   startPolling();
   keepUpToDate();
+  Outbox.migrate().then(() => refresh());
 })();
 
 /* ----------------------------------------------------------------------

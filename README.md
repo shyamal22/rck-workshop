@@ -230,6 +230,14 @@ push to `main` updates it automatically.
 
 ## Things worth knowing
 
+- **Photos taken with no signal** wait on the phone (in a proper file store, not
+  the small cache) and go to Storage on their own when it comes back. Nothing
+  image-shaped is ever written into the database or the offline cache — one photo
+  stored the wrong way is a tenth of a phone's whole allowance, which is how every
+  phone on the crew once came to say "storage full". If an older build left any in
+  the database, a workshop device quietly moves them to Storage; Settings shows the
+  count until it reaches zero.
+
 - **No logins.** Everyone shares one key, so anyone holding that key can read and
   write. That's deliberate — no passwords for the crew to lose. Because this repo
   and the published site are public, `config.js` is left **blank on purpose**: the
