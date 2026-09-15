@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.5.0';
+const VERSION = '3.6.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -273,10 +273,9 @@ function dayFor(name, date) {
   const out = [];
   rows.forEach(u => {
     const prev = out[out.length - 1];
-    if (u.kind === 'file' && prev && prev.kind === 'file' && prev.work_order_id === u.work_order_id) {
-      prev.files.push(u.meta || {});
-      return;
-    }
+    const folds = u.kind === 'file' && prev && prev.work_order_id === u.work_order_id
+      && (prev.kind === 'file' || (prev.kind === 'note' && !u.work_order_id));
+    if (folds) { prev.files.push(u.meta || {}); return; }
     out.push(Object.assign({}, u, { files: u.kind === 'file' ? [u.meta || {}] : [] }));
   });
   return out;
@@ -2656,7 +2655,12 @@ function renderPerson(view) {
         <label class="field"><span>Add a note for ${date === today() ? 'today' : fmtDate(date)}</span>
           <textarea id="pNote" placeholder="Something that isn't a job — driving to Ngaruawahia, picking up parts…"></textarea>
         </label>
-        <button class="btn primary wide" id="pPost">Add it</button>
+        <input type="file" id="pPhotos" accept="image/*" multiple hidden>
+        <div class="btn-row">
+          <button class="btn" id="pPick">${icon('camera')}Add photos</button>
+          <span class="small muted" id="pPicked"></span>
+        </div>
+        <button class="btn primary wide mt" id="pPost">Add it</button>
       </div>` : ''}
 
     ${rows.length ? `<div class="card log-card">
@@ -2687,17 +2691,40 @@ function renderPerson(view) {
   $$('[data-wo-open]', view).forEach(b => b.onclick = () => go('#/wo/' + b.dataset.woOpen));
 
   const post = $('#pPost', view);
+  const pick = $('#pPick', view);
+  if (pick) {
+    const input = $('#pPhotos', view);
+    pick.onclick = () => input.click();
+    input.onchange = () => {
+      const n = (input.files || []).length;
+      $('#pPicked', view).textContent = n ? `${n} photo${n === 1 ? '' : 's'} chosen` : '';
+    };
+  }
   if (post) post.onclick = async function () {
     const body = $('#pNote', view).value.trim();
-    if (!body) return toast('Write something first');
+    const photos = Array.from(($('#pPhotos', view) || {}).files || []);
+    if (!body && !photos.length) return toast('Write something or add a photo first');
     this.disabled = true;
+    if (photos.length) this.textContent = 'Uploading\u2026';
     // a note on no job still belongs on the day it is about
     const at = date === today() ? new Date() : new Date(date + 'T12:00:00');
     await Store.insert('wo_updates', {
       id: uid(), work_order_id: null, created_at: at.toISOString(),
       author: whoami(), role: S.role, kind: 'note', body, meta: {}
     });
-    toast('Added');
+    // photos ride as file rows right behind the note, the same way they do
+    // on a job — so offline handling and the stash apply here unchanged.
+    // The day view folds them back onto the note.
+    let i = 0;
+    for (const raw of photos) {
+      const f = await compressImage(raw);
+      const up = await Store.upload(f);
+      await Store.insert('wo_updates', {
+        id: uid(), work_order_id: null, created_at: new Date(at.getTime() + (++i)).toISOString(),
+        author: whoami(), role: S.role, kind: 'file', body: '', meta: up
+      });
+    }
+    toast(photos.length ? `Added with ${photos.length} photo${photos.length === 1 ? '' : 's'}` : 'Added');
     renderPerson(view);
   };
 }
@@ -2750,7 +2777,10 @@ function printDay(name, date, rows) {
     // the report row already says "Damage reported" and names the job, so
     // the auto-written "Damage reported: <title> — " on the front is noise
     if (u.kind === 'created') t = t.replace(/^damage reported:\s*[^\u2014]*\u2014\s*/i, '');
-    return t ? t[0].toUpperCase() + t.slice(1) : '';
+    t = t ? t[0].toUpperCase() + t.slice(1) : '';
+    const n = (u.files || []).length;
+    if (n && u.kind !== 'file') t += (t ? ' \u00b7 ' : '') + `${n} photo${n === 1 ? '' : 's'}`;
+    return t;
   };
 
   // group by asset, keeping the order the person first touched each one

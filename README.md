@@ -44,7 +44,8 @@ so use the same one on every device you carry.
   back a day at a time, or jump to any date. **Print the day** gives the manager a
   one-page daily report.
 - On **your own** page there is a box for things that aren't a job — driving to a
-  site, picking up parts — so the day reads whole. A note like that is stored as an
+  site, picking up parts — so the day reads whole. Photos can go with it, and they
+  sit on the note in the day rather than as lines of their own. A note like that is stored as an
   update with no job on it, which is why it shows in your day but never in any job's
   history.
 - A photo added to a job counts once in the day, not once per photo.
