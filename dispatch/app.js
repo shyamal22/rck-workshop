@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.2.0';
+const VERSION = '2.3.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -229,6 +229,21 @@ function nowTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+/** The local calendar day an instant falls on. A document uploaded at eight
+    on a Tuesday evening is Tuesday's work, which slicing the UTC string
+    would call Wednesday. */
+function dayOf(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** A day, shifted. Built from the parts so a daylight-saving change can't
+    land us on the same day twice. */
+function dayShift(day, by) {
+  const [y, m, d] = String(day).split('-').map(Number);
+  const x = new Date(y, (m || 1) - 1, (d || 1) + by);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
 /** A local date + "HH:MM" back into a real instant, without UTC surprises. */
 function stamp(dateStr, timeStr) {
   const [y, m, d] = (dateStr || today()).split('-').map(Number);
@@ -371,6 +386,11 @@ const ICONS = {
   pin:      '<path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3.5v3M16 3.5v3"/>',
   person:   '<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>',
+  people:   '<circle cx="9" cy="8.4" r="3.2"/><path d="M2.8 19.5c0-3.3 2.8-5.5 6.2-5.5s6.2 2.2 6.2 5.5"/>' +
+            '<path d="M16.4 5.6a3.2 3.2 0 0 1 0 5.7M18 14.3c2 .7 3.3 2.4 3.3 4.6"/>',
+  chevUp:   '<path d="M5.5 14.5 12 8l6.5 6.5"/>',
+  chevL:    '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
+  chevR:    '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
   clip:     '<path d="M17.5 8.5l-7.8 7.8a3 3 0 1 1-4.2-4.2l8.5-8.5a4.5 4.5 0 0 1 6.4 6.4l-8.5 8.5"/>',
   camera:   '<path d="M4 8h3l1.6-2.2h6.8L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8z"/><circle cx="12" cy="13.2" r="3.4"/>',
   printer:  '<path d="M7 9V3.5h10V9"/><rect x="3.5" y="9" width="17" height="7.5" rx="2"/><path d="M7 14h10v6.5H7z"/>',
@@ -1072,6 +1092,7 @@ const SCREENS = {
   '/jobs':    { title: 'Jobs',          render: renderBoard },
   '/pnl':     { title: 'Profit & loss', render: renderPnl,    back: true },
   '/today':   { title: 'Today on site', render: renderToday },
+  '/crew':    { title: 'Crew & supervisors', render: renderCrew },
   '/log':     { title: 'Log',           render: renderLogPicker, back: true },
   '/new':     { title: 'New job',       render: renderJobEdit, back: true },
 
@@ -1086,7 +1107,7 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = path === '/jobs' || path === '/today' || path.startsWith('/diary/');
+  const keepsPlace = path === '/jobs' || path === '/today' || path === '/crew' || path.startsWith('/diary/');
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
@@ -1365,6 +1386,12 @@ function renderHome(view) {
       : 'Nothing costed this month yet';
   }
 
+  const feed = crewFeed(today());
+  const heads = crewPeople(feed).length;
+  const crewToday = feed.length
+    ? `${heads} ${heads === 1 ? 'person has' : 'people have'} logged ${feed.length} thing${feed.length === 1 ? '' : 's'} today`
+    : 'Nothing logged today yet';
+
   view.innerHTML = `
     <div class="tiles">
       <a class="tile" href="#/jobs">
@@ -1372,6 +1399,13 @@ function renderHome(view) {
         <b>Jobs</b>
         <span class="td">Site paperwork and the daily job diary</span>
         <span class="ts">${jobs.length} job${jobs.length === 1 ? '' : 's'} · ${onSite} on site · ${planned} planned</span>
+      </a>
+
+      <a class="tile" href="#/crew">
+        <span class="ti">${icon('people')}</span>
+        <b>Crew &amp; supervisors</b>
+        <span class="td">Who did what, day by day, across every job</span>
+        <span class="ts">${crewToday}</span>
       </a>
 
       ${isDirector() ? `
@@ -1557,6 +1591,265 @@ function renderToday(view) {
         </button>`).join('')}` : ''}`;
 
   $$('.job-row', view).forEach(b => b.onclick = () => go('#/job/' + b.dataset.id));
+}
+
+/* ================================================================
+   Screen — crew & supervisors
+   The job diary answers "what happened on this job". This answers
+   "what did Tane do today", which is the question you actually ask
+   when four crews are out at once — one day, every person, every job
+   they touched, in the order it happened.
+   ================================================================ */
+/* date null means "today", whatever today turns out to be — so an app left
+   open overnight rolls over on its own instead of being stuck on yesterday. */
+const crewView = { date: null, who: 'all', saying: false };
+const crewDate = () => crewView.date || today();
+
+/** A person's name, folded so "Tane W" and "tane w" are the same person. */
+function personKey(name) { return (name || '').trim().toLowerCase() || '\u2014'; }
+
+/** Everything people put into the jobs on one day: diary entries and the
+    documents they added. Money never appears here — that is the director's
+    own screen, and this one is for everybody. */
+function crewFeed(day) {
+  const items = [];
+
+  DB.diary_entries.forEach(e => {
+    if ((e.entry_date || '') !== day) return;
+    const job = jobById(e.project_id);
+    if (job) items.push({ type: 'entry', at: e.at || '', who: e.author || '', role: e.role || '', job, e });
+  });
+
+  DB.project_docs.forEach(d => {
+    if (dayOf(d.uploaded_at) !== day) return;
+    // A site phone never lists the office-only ones, here either.
+    if (!isOffice() && (d.audience || 'all') === 'office') return;
+    const job = jobById(d.project_id);
+    if (job) items.push({ type: 'doc', at: d.uploaded_at || '', who: d.uploaded_by || '', role: '', job, d });
+  });
+
+  return items.sort((a, b) => (a.at || '').localeCompare(b.at || ''));
+}
+
+/** The same day's work, gathered under the person who did it. Busiest first,
+    because that is who you are looking for. */
+function crewPeople(items) {
+  const by = {};
+  items.forEach(it => {
+    const k = personKey(it.who);
+    const p = by[k] || (by[k] = { key: k, name: (it.who || '').trim() || 'Unnamed', role: '', items: [], jobs: new Set(), issues: 0, photos: 0 });
+    if (!p.role && it.role) p.role = it.role;
+    p.items.push(it);
+    p.jobs.add(it.job.id);
+    if (it.type === 'entry') {
+      if (it.e.kind === 'issue' || it.e.kind === 'delay') p.issues++;
+      p.photos += (Array.isArray(it.e.files) ? it.e.files : []).filter(f => /^image\//.test(f.type || '')).length;
+    }
+  });
+  return Object.values(by).sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name));
+}
+
+/** One thing somebody did, as a row on their day. */
+function crewItem(it, i) {
+  const job = it.job;
+  const tag = `<a class="cw-job" href="#/diary/${job.id}">${jobNo(job)} · ${esc(job.name)}</a>`;
+
+  if (it.type === 'doc') {
+    const d = it.d;
+    return `
+      <div class="tl-e status-slate" style="--i:${i}">
+        <div class="tl-when">${esc(fmtTime(it.at))}</div>
+        <div class="tl-rail"><i></i></div>
+        <div class="tl-card">
+          <div class="tl-kind">Added a document</div>
+          <div class="tl-note">${esc(d.title || d.file_name || 'Document')}</div>
+          ${d.file_url ? `<a class="attach" href="${esc(d.file_url)}" target="_blank" rel="noopener">${icon('clip')}${esc(d.file_name || 'Open')}</a>` : ''}
+          ${tag}
+        </div>
+      </div>`;
+  }
+
+  const e = it.e;
+  const files = Array.isArray(e.files) ? e.files : [];
+  const photos = files.filter(f => /^image\//.test(f.type || ''));
+  const flag = e.kind === 'issue' || e.kind === 'delay';
+  return `
+    <div class="tl-e status-${entryTone(e)}${flag ? ' flag' : ''}${entryMarked(e) ? ' mark' : ''}"
+         data-go="#/entry/${job.id}?edit=${e.id}" style="--i:${i}">
+      <div class="tl-when">${esc(fmtTime(e.at))}</div>
+      <div class="tl-rail"><i></i></div>
+      <div class="tl-card">
+        <div class="tl-kind">${esc(entryLabel(e))}</div>
+        ${e.body ? `<div class="tl-note">${esc(e.body)}</div>` : ''}
+        ${photos.length ? `<div class="thumbs">${photos.map(f =>
+          `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}</div>` : ''}
+        ${tag}
+      </div>
+    </div>`;
+}
+
+function renderCrew(view) {
+  const day = crewDate();
+  const isToday = day === today();
+  const all = crewFeed(day);
+  const people = crewPeople(all);
+  const shown = crewView.who === 'all' ? people : people.filter(p => p.key === crewView.who);
+
+  // Somewhere to put a comment. Running jobs first, and among those the ones
+  // this person is the supervisor of — which is nearly always the one meant.
+  const mine = (S.name || '').trim().toLowerCase();
+  const postable = boardOrder(activeJobs())
+    .filter(p => p.status !== 'completed' || isOffice())
+    .sort((a, b) => {
+      const rank = j => ((j.supervisor || '').trim().toLowerCase() === mine ? 0 : 1)
+        + (j.status === 'ongoing' ? 0 : 2);
+      return rank(a) - rank(b);
+    });
+
+  const totals = {
+    entries: all.filter(it => it.type === 'entry').length,
+    docs: all.filter(it => it.type === 'doc').length,
+    jobs: new Set(all.map(it => it.job.id)).size,
+    issues: all.filter(it => it.type === 'entry' && (it.e.kind === 'issue' || it.e.kind === 'delay')).length
+  };
+
+  view.innerHTML = `
+    <div class="daynav">
+      <button class="dn-arrow" id="dPrev" title="The day before">${icon('chevL')}</button>
+      <div class="dn-mid">
+        <b>${esc(fmtDayDate(day))}</b>
+        <span>${isToday ? 'Today' : `<button class="linky" id="dToday">Back to today</button>`}</span>
+      </div>
+      <button class="dn-arrow" id="dNext" title="The day after" ${isToday ? 'disabled' : ''}>${icon('chevR')}</button>
+    </div>
+    <label class="dn-pick"><span>Any other day</span>
+      <input type="date" id="dPick" value="${esc(day)}" max="${esc(today())}"></label>
+
+    ${postable.length ? (crewView.saying ? `
+    <div class="card cw-say">
+      <div class="row spread" style="align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">Say something</h2>
+        <button class="cw-shut" id="cShut" title="Close">${icon('chevUp')}</button>
+      </div>
+      <label class="field"><span>Which job</span>
+        <select id="cJob">
+          ${postable.map(p => `<option value="${p.id}">${jobNo(p)} · ${esc(p.name)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>Comment</span>
+        <textarea id="cBody" placeholder="What happened, what was decided, anything worth remembering."></textarea></label>
+      <input type="file" id="cPhotos" accept="image/*" multiple hidden>
+      <button class="btn wide" id="cAddPhoto" type="button">${icon('camera')}Add photos</button>
+      <div class="thumbs" id="cThumbs"></div>
+      <button class="btn primary wide mt" id="cPost">${icon('plus')}Add to the diary</button>
+      <p class="muted tiny center mt" style="margin-bottom:0">Goes into that job's diary as a comment from
+      <strong>${esc(whoami())}</strong>${isToday ? '' : ', dated ' + esc(fmtShort(day))}.</p>
+    </div>`
+    : `<button class="btn primary wide logbtn" id="cOpen">${icon('plus')}Say something</button>`) : ''}
+
+    ${all.length ? `
+      <div class="card">
+        <div class="stat">
+          <div><span class="n">${people.length}</span><span class="l">${people.length === 1 ? 'Person' : 'People'}</span></div>
+          <div><span class="n">${totals.entries}</span><span class="l">Entries</span></div>
+          <div><span class="n">${totals.jobs}</span><span class="l">Jobs touched</span></div>
+          <div><span class="n" style="color:${totals.issues ? 'var(--red)' : 'inherit'}">${totals.issues}</span><span class="l">Issues</span></div>
+        </div>
+      </div>
+
+      ${people.length > 1 ? `
+      <div class="filters">
+        <button class="chip" data-who="all" aria-pressed="${crewView.who === 'all'}">Everyone</button>
+        ${people.map(p => `<button class="chip" data-who="${esc(p.key)}"
+          aria-pressed="${crewView.who === p.key}">${esc(p.name)} <span class="cw-n">${p.items.length}</span></button>`).join('')}
+      </div>` : ''}
+
+      ${shown.map(p => `
+        <div class="dayhead"><h3>${esc(p.name)}</h3>
+          <span class="sub">${p.items.length} thing${p.items.length === 1 ? '' : 's'} ·
+            ${p.jobs.size} job${p.jobs.size === 1 ? '' : 's'}${p.photos ? ` · ${p.photos} photo${p.photos === 1 ? '' : 's'}` : ''}</span>
+        </div>
+        <div class="card">
+          ${p.role ? `<div class="cw-role">${esc(roleLabel(p.role))}${p.issues ? ` · <span class="cw-iss">${p.issues} issue${p.issues === 1 ? '' : 's'}</span>` : ''}</div>` : ''}
+          <div class="tl">${p.items.map(crewItem).join('')}</div>
+        </div>`).join('') || `<div class="empty"><b>Nobody by that name today</b>Pick someone else above.</div>`}`
+    : `<div class="empty">
+        <b>Nothing logged ${isToday ? 'yet today' : 'on this day'}</b>
+        When the crews write in a job diary or add a document, it shows up here under their name.
+      </div>`}`;
+
+  const goDay = d => { crewView.date = d; crewView.who = 'all'; render(); };
+  $('#dPrev', view).onclick = () => goDay(dayShift(day, -1));
+  const next = $('#dNext', view);
+  if (next && !next.disabled) next.onclick = () => goDay(dayShift(day, 1));
+  const back = $('#dToday', view);
+  if (back) back.onclick = () => { crewView.date = null; crewView.who = 'all'; render(); };
+  $('#dPick', view).onchange = function () { if (this.value) goDay(this.value); };
+
+  const openSay = $('#cOpen', view);
+  if (openSay) openSay.onclick = () => { crewView.saying = true; render(); };
+  const shutSay = $('#cShut', view);
+  if (shutSay) shutSay.onclick = () => { crewView.saying = false; render(); };
+
+  $$('[data-who]', view).forEach(b => b.onclick = () => { crewView.who = b.dataset.who; render(); });
+  $$('[data-go]', view).forEach(el => el.onclick = ev => {
+    if (ev.target.closest('a')) return;      // a job link or a photo is not an edit
+    go(el.dataset.go);
+  });
+
+  wireCrewSay(view);
+}
+
+/** The comment box on the crew screen: straight into a job's diary, photos
+    and all, without going to find the job first. */
+function wireCrewSay(view) {
+  const post = $('#cPost', view);
+  if (!post) return;
+  const input = $('#cPhotos', view);
+  const files = [];
+
+  $('#cAddPhoto', view).onclick = () => input.click();
+  input.onchange = async () => {
+    for (const f of Array.from(input.files || [])) files.push(await compressImage(f));
+    input.value = '';
+    paint();
+  };
+  function paint() {
+    const box = $('#cThumbs', view);
+    box.innerHTML = '';
+    files.forEach((f, i) => {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.title = 'Tap to remove';
+      img.onclick = () => { files.splice(i, 1); paint(); };
+      box.appendChild(img);
+    });
+  }
+
+  post.onclick = async function () {
+    const body = $('#cBody', view).value.trim();
+    if (!body && !files.length) return toast('Write something, or add a photo');
+    const id = $('#cJob', view).value;
+    const day = crewDate();
+
+    this.disabled = true;
+    this.textContent = 'Saving…';
+    try {
+      await addEntry(id, {
+        kind: files.length && !body ? 'photos' : 'note',
+        label: files.length && !body ? 'Photos' : 'Note',
+        body,
+        entry_date: day,
+        at: stamp(day, nowTime())
+      }, files);
+      toast(connected() ? 'Added to the diary' : 'Saved on this phone');
+      crewView.saying = false;
+      render();
+    } catch (err) {
+      this.disabled = false;
+      this.textContent = 'Add to the diary';
+      toast('Could not save: ' + err.message);
+    }
+  };
 }
 
 /* ================================================================
@@ -3754,7 +4047,7 @@ function startPolling() {
     const before = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length, DB.job_costs.length]);
     await refresh();
     const after = JSON.stringify([DB.projects.length, DB.project_docs.length, DB.diary_entries.length, DB.job_costs.length]);
-    if (before !== after && ['/', '/jobs', '/today'].includes(route.path)) render();
+    if (before !== after && ['/', '/jobs', '/today', '/crew'].includes(route.path)) render();
   }, 20000);
 }
 

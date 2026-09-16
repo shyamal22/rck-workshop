@@ -42,11 +42,31 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 - Every entry takes photos. They're shrunk on the phone so they go through on site.
 - When the job's finished: **Project completed**, with a closing note.
 
+**Crew & supervisors — who did what**
+- A tab of its own, next to Jobs and Today, and everybody has it. The job diary answers
+  *what happened on this job*; this answers **what did Tane do today**, which is the question
+  you actually ask when four crews are out at once.
+- **One day, every person, every job they touched, in the order it happened.** Each person
+  gets their own block — their name, how many things they logged, how many jobs, how many
+  photos — and under it their day, running from first entry to last. Issues and delays are
+  marked red the same as they are in the diary, and every line says which job it belongs to
+  and links straight through to that diary.
+- **Arrows move a day at a time**, there's a date box for anything further back, and a chip
+  per person to pin the view to one of them. Left alone it stays on today — including past
+  midnight, so a phone left open overnight rolls over on its own.
+- **Say something** posts a comment straight into any job's diary, **with photos**, without
+  going to find the job first. The job list puts the ones you supervise at the top. Photos
+  with no words become a *Photos* entry; words with no photos a *Note*. It lands in that
+  job's diary exactly as if it had been written there, under your name.
+- Documents show up too — who added what, to which job. A site phone never sees the
+  office-only ones here, same as everywhere else. Money never appears on this screen.
+
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
-- **The app opens on a landing page with two tools: Jobs, and Profit & loss.** Everyone gets
-  Jobs. P&L appears on Director devices only, and nothing hints at it otherwise.
+- **The app opens on a landing page with three tools: Jobs, Crew & supervisors, and Profit
+  & loss.** Everyone gets the first two. P&L appears on Director devices only, and nothing
+  hints at it otherwise.
 - **The profit and loss on a job** is filled in after it is finished, on the job's own
   **Profit & loss** screen. It is deliberately small: a **description and a cost**, as many
   lines as the job needs. The description box suggests the usual ones — asphalt, emulsion,
@@ -159,6 +179,8 @@ Android), then **Settings** → name, role, and the two values.
 | See the jobs and their documents | ✓ | ✓ | ✓ |
 | Download documents | ✓ | ✓ | ✓ |
 | Keep the job diary, add photos | ✓ | ✓ | ✓ |
+| See **Crew & supervisors** — everyone's day | ✓ | ✓ | ✓ |
+| Comment into a diary from the crew screen | ✓ | ✓ | ✓ |
 | Start a job, mark it completed | ✓ | ✓ | ✓ |
 | Print reports | ✓ | ✓ | ✓ |
 | Add documents | ✓ | ✓ | ✓ |

@@ -735,6 +735,73 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 #tabbar a.tab-primary:active .fab { transform: scale(.88); box-shadow: 0 1px 4px rgba(15, 20, 24, .3); }
 #tabbar a.tab-primary.on .fab { transform: scale(1.06); }
 
+/* ------------------------------------------------- crew & supervisors */
+/* One day at a time, with the day itself as the control. Arrows for the
+   day either side, the date underneath for anything further back. */
+.daynav {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 8px 10px; margin-bottom: 8px;
+}
+.daynav .dn-mid { flex: 1; text-align: center; min-width: 0; }
+.daynav .dn-mid b { display: block; font-size: 15px; letter-spacing: -.015em; }
+.daynav .dn-mid span { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+.dn-arrow {
+  width: 38px; height: 38px; flex: none; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--panel-2); color: var(--ink);
+  cursor: pointer; transition: transform var(--t-fast) var(--ease), opacity var(--t) var(--ease);
+}
+.dn-arrow:active { transform: scale(.9); }
+.dn-arrow[disabled] { opacity: .3; pointer-events: none; }
+.dn-arrow svg { width: 18px; height: 18px; stroke-width: 2.2; }
+/* Further back than the arrows are worth. Quiet, because it is the way out
+   of the common case rather than the common case. */
+.dn-pick {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 0 2px;
+}
+.dn-pick > span {
+  font-size: 11px; font-weight: 640; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.dn-pick input {
+  flex: 1; min-height: 34px; padding: 5px 10px; font-size: 13px; color: var(--ink-2);
+  background: transparent; border: 1.5px solid var(--line); border-radius: var(--r-sm);
+}
+.dn-pick input:focus { border-color: var(--ink); background: var(--panel); }
+
+.cw-shut {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--panel-2); color: var(--ink-2); cursor: pointer;
+}
+.cw-shut:active { transform: scale(.9); }
+.cw-shut svg { width: 16px; height: 16px; stroke-width: 2.2; }
+.linky {
+  border: 0; background: none; padding: 0; font: inherit; font-size: 11.5px;
+  color: var(--ink-2); text-decoration: underline; cursor: pointer;
+}
+
+/* Which job a line belongs to. On the crew screen every row needs it —
+   the whole point is that one person's day crosses several jobs. */
+.cw-job {
+  display: inline-block; margin-top: 7px;
+  font-size: 11.5px; font-weight: 640; color: var(--ink-2);
+  background: var(--panel-2); border-radius: var(--r-pill);
+  padding: 3px 9px; text-decoration: none;
+}
+.cw-job:active { background: var(--line); }
+.cw-role {
+  font-size: 11.5px; font-weight: 620; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 9px;
+}
+.cw-iss { color: var(--red); }
+.cw-n {
+  display: inline-block; min-width: 17px; padding: 0 4px; border-radius: var(--r-pill);
+  background: var(--panel-2); color: var(--ink-2);
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+.chip[aria-pressed="true"] .cw-n { background: rgba(255, 255, 255, .2); color: #fff; }
+.cw-say h2 { margin-bottom: 10px; }
+
 /* ------------------------------------------------------------- toast */
 #toast {
   position: fixed; left: 50%; bottom: calc(84px + var(--safe-b)); z-index: 90;
