@@ -61,6 +61,13 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   it lands in that diary exactly as if it had been written there.
 - **Photos either way.** Photos with no words become a *Photos* entry; words with no photos a
   *Note*. The job list puts the ones you supervise at the top.
+- **Their photo, set once.** In Settings, **Your photo** goes against your name rather than
+  your phone, so a face set on Tane's phone is the one the office sees on the crew tiles and
+  at the top of Tane's printed day. It is cropped square and kept small so it syncs on site.
+  No photo and you get initials — nothing breaks, it just looks plainer.
+- **Print a person's day.** On anybody's page, **Print [name]'s day** gives one sheet: their
+  face and role at the top, the day's shape as a timeline, which jobs they were on, then
+  every entry in order with its photographs beside it and the job it belongs to on the end.
 - Documents show up too — who added what, to which job. A site phone never sees the
   office-only ones here, same as everywhere else. Money never appears on this screen.
 
@@ -107,6 +114,15 @@ every issue and delay, the documents on file, then the diary as **Day 1, Day 2, 
 each day a table that carries its own heading if it runs on to the next page, so there are no
 orphaned headings and no half-empty pages. All the photographs sit together at the back, six
 to a page, each captioned with the day and entry it came from.
+
+**A single day — one job's or one person's — is set out differently**, because one day is
+read by somebody who was not there. It opens with the day's figures, then **the day as a
+timeline**: a bar with every event marked where the clock puts it, green where they got on,
+red where something went wrong, so the shape of the day lands before a word of it is read.
+Then the entries in order, each with **its own photographs beside it** rather than gathered
+at the back — on one day there are few enough that an appendix would only repeat the note
+two lines above. A person's day also carries their face at the top and names the job on
+every line, since their day crosses several.
 
 Everything on the page is laid out to be read across as well as down. A three-night job with
 eighteen photographs prints as five pages rather than eight.
@@ -186,6 +202,7 @@ Android), then **Settings** → name, role, and the two values.
 | See **Crew & supervisors** — everyone's day | ✓ | ✓ | ✓ |
 | Comment into a diary from the crew screen | ✓ | ✓ | ✓ |
 | Keep a diary of their own, with no job on it | ✓ | ✓ | ✓ |
+| Set their own photo, print anyone's day | ✓ | ✓ | ✓ |
 | Start a job, mark it completed | ✓ | ✓ | ✓ |
 | Print reports | ✓ | ✓ | ✓ |
 | Add documents | ✓ | ✓ | ✓ |

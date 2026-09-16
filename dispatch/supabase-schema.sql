@@ -84,6 +84,27 @@ create table if not exists project_docs (
 
 create index if not exists project_docs_project_idx on project_docs (project_id, uploaded_at);
 
+-- ------------------------------------------------------------- people
+-- A person is only ever a name typed into Settings — there are no accounts
+-- in this app and there is no wish for any. This table hangs the few things
+-- that belong to a person rather than to a device off that name, so a photo
+-- set on Tane's phone is the one the office sees when it prints Tane's day.
+--
+-- name_key is the name folded to lower case, which is how the rest of the
+-- app decides two entries were written by the same person.
+create table if not exists crew_people (
+  id           uuid primary key default gen_random_uuid(),
+  name_key     text not null unique,
+  name         text not null default '',
+  photo_url    text not null default '',
+  photo_name   text not null default '',
+  role         text not null default '',
+  updated_at   timestamptz not null default now(),
+  updated_by   text not null default ''
+);
+
+create index if not exists crew_people_key_idx on crew_people (name_key);
+
 -- --------------------------------------------------------- job costing
 -- One line of what a finished job actually cost: a description and an
 -- amount. The costing is filled in after the job is done, so there is no
@@ -172,16 +193,19 @@ alter table projects      enable row level security;
 alter table project_docs  enable row level security;
 alter table diary_entries enable row level security;
 alter table job_costs     enable row level security;
+alter table crew_people   enable row level security;
 
 drop policy if exists projects_all      on projects;
 drop policy if exists project_docs_all  on project_docs;
 drop policy if exists diary_entries_all on diary_entries;
 drop policy if exists job_costs_all     on job_costs;
+drop policy if exists crew_people_all   on crew_people;
 
 create policy projects_all      on projects      for all to anon, authenticated using (true) with check (true);
 create policy project_docs_all  on project_docs  for all to anon, authenticated using (true) with check (true);
 create policy diary_entries_all on diary_entries for all to anon, authenticated using (true) with check (true);
 create policy job_costs_all     on job_costs     for all to anon, authenticated using (true) with check (true);
+create policy crew_people_all   on crew_people   for all to anon, authenticated using (true) with check (true);
 
 -- =====================================================================
 --  File storage — job paperwork and site photos
