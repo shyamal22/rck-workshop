@@ -809,6 +809,12 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   font-size: 14px; font-weight: 700; letter-spacing: .02em;
 }
 .fi.big { width: 46px; height: 46px; font-size: 16.5px; }
+.fi.huge { width: 62px; height: 62px; font-size: 21px; }
+/* A real face where there is one. Same circle, same place, so the layout
+   never moves when somebody adds theirs. */
+.fi.img { background: var(--panel-2); overflow: hidden; }
+.fi.img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.myface { display: flex; align-items: center; gap: 14px; }
 .personhead { display: flex; align-items: center; gap: 13px; }
 
 /* Which job a line belongs to. On the crew screen every row needs it —
@@ -1167,9 +1173,69 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .doc .dtable .dk { width: 32mm; font-weight: 640; }
 .doc .dtable .dnote { white-space: pre-wrap; }
 .doc .dtable .dby { width: 22mm; color: var(--d-ink-3); font-size: 7.5pt; }
+/* On one person's day the last column is which job it was, not who wrote it
+   — they all are. */
+.doc .dtable .djob {
+  width: 24mm; color: var(--d-ink-2); font-size: 7.5pt; font-weight: 700;
+  white-space: nowrap;
+}
+.doc .dtable .djob em { font-weight: 500; font-style: italic; color: var(--d-ink-3); }
 .doc .dtable .ph { font-size: 7pt; color: var(--d-ink-3); font-style: italic; }
 .doc .dtable tr.flag .dt, .doc .dtable tr.flag .dk { color: var(--d-red); }
 .doc .dtable tr.flag td { background: #fdf6f4; }
+
+/* ------------------------------------------------ the day as a timeline */
+/* A daily diary is read by somebody who was not there. The shape of the day
+   — when it started, where the gaps were, when it stopped — should land
+   before a single line is read, so the day gets a bar with the events marked
+   on it in the order and spacing they happened. */
+.doc .tstrip { margin: 0 0 5mm; break-inside: avoid; page-break-inside: avoid; }
+.doc .tstrip .bar {
+  position: relative; height: 3.2mm; border-radius: 1.6mm;
+  background: var(--d-tint); border: .5pt solid var(--d-line);
+}
+.doc .tstrip .bar i {
+  position: absolute; top: -1mm; width: 1.1mm; height: 5.2mm; margin-left: -.55mm;
+  border-radius: .5mm; background: var(--d-ink-2);
+}
+.doc .tstrip .bar i.on   { background: var(--d-green); }
+.doc .tstrip .bar i.off  { background: var(--d-ink); }
+.doc .tstrip .bar i.bad  { background: var(--d-red); width: 1.6mm; margin-left: -.8mm; }
+.doc .tstrip .ends {
+  display: flex; justify-content: space-between; margin-top: 1.4mm;
+  font-size: 7.5pt; color: var(--d-ink-3); font-variant-numeric: tabular-nums;
+}
+.doc .tstrip .ends b { color: var(--d-ink-2); font-weight: 700; }
+
+/* Photographs sitting with the entry they belong to, rather than gathered at
+   the back. On one day there are few enough that a caption would only repeat
+   the note two lines above it. */
+.doc .dshots { margin-top: 1.6mm; font-size: 0; }
+.doc .dshots img {
+  width: 31mm; height: 23mm; object-fit: cover; display: inline-block;
+  margin: 0 1.6mm 1.6mm 0; border: .5pt solid var(--d-line); border-radius: .8mm;
+  background: var(--d-tint);
+}
+
+/* Who the day belongs to, at the top of their own printed diary. */
+.doc .whose {
+  display: flex; align-items: center; gap: 4mm;
+  border: .6pt solid var(--d-line); border-radius: 1.4mm;
+  background: var(--d-tint); padding: 3.5mm 4mm; margin-bottom: 4mm;
+  break-inside: avoid;
+}
+.doc .whose .face {
+  width: 20mm; height: 20mm; flex: none; border-radius: 50%; overflow: hidden;
+  background: var(--d-ink); color: #fff;
+  display: grid; place-items: center; font-size: 15pt; font-weight: 700;
+}
+.doc .whose .face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.doc .whose .nm { font-size: 15pt; font-weight: 700; letter-spacing: -.015em; line-height: 1.1; }
+.doc .whose .rl {
+  font-size: 7.5pt; font-weight: 700; color: var(--d-ink-3);
+  text-transform: uppercase; letter-spacing: .08em; margin-top: .8mm;
+}
+.doc .whose .sm { font-size: 9pt; color: var(--d-ink-2); margin-top: 1.4mm; }
 
 /* ------------------------------------------------------- photographs */
 /* A table, not a grid: browsers fragment grids across pages badly, which

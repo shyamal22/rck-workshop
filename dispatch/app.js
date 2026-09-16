@@ -9,12 +9,17 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.4.1';
+const VERSION = '2.5.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
    there yet, Settings says so. */
 let updateReady = false;
+
+/* An older database has no crew_people table. The app runs without it — you
+   just get initials instead of faces — but adding a photo would queue for
+   ever, so Settings says so. */
+let peopleTableMissing = false;
 
 /* --------------------------------------------------------- job states */
 /* Three, and only three. A job is either coming up, happening, or done. */
@@ -459,7 +464,7 @@ function whoami() { return S.name || 'Unnamed user'; }
    Local cache — the app opens instantly and stays readable on site
    with no signal, which is most of the time
    ================================================================ */
-const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], localSeq: 0 };
+const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], crew_people: [], localSeq: 0 };
 
 function cacheKey() { return 'rckd.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -471,6 +476,7 @@ function loadCache() {
       DB.project_docs = raw.project_docs || [];
       DB.diary_entries = raw.diary_entries || [];
       DB.job_costs = raw.job_costs || [];
+      DB.crew_people = raw.crew_people || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
@@ -554,16 +560,24 @@ function reconcile(table, fromServer) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [projects, docs, entries, costs] = await Promise.all([
+    const [projects, docs, entries, costs, people] = await Promise.all([
       rest('projects?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
       rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() }),
-      rest('job_costs?select=*&order=sort.asc&limit=20000', { headers: restHeaders() })
+      rest('job_costs?select=*&order=sort.asc&limit=20000', { headers: restHeaders() }),
+      // A table the app can run without: an older database has no crew_people
+      // yet, and a missing photo is not a reason to fail the whole refresh.
+      rest('crew_people?select=*&limit=2000', { headers: restHeaders() }).catch(() => null)
     ]);
     DB.projects = reconcile('projects', projects || []);
     DB.project_docs = reconcile('project_docs', docs || []);
     DB.diary_entries = reconcile('diary_entries', entries || []);
     DB.job_costs = reconcile('job_costs', costs || []);
+    // The other four came back, so the connection is fine: a null here means
+    // the table itself is not there yet. Worth saying, rather than letting
+    // somebody queue a photo that can never send.
+    peopleTableMissing = !people;
+    if (people) DB.crew_people = reconcile('crew_people', people);
     saveCache();
   },
 
@@ -1049,6 +1063,30 @@ function saveAs(href, name) {
 /* ================================================================
    Photos — shrunk on the phone so they upload on a bad connection
    ================================================================ */
+/** A face, cropped square and small. A portrait does not need 1400px, and a
+    row that syncs on a bad connection is worth more than the extra pixels. */
+async function squareImage(file, size) {
+  if (!/^image\//.test(file.type)) return file;
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = URL.createObjectURL(file);
+    });
+    const side = Math.min(img.width, img.height);
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    c.getContext('2d').drawImage(img,
+      (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.82));
+    if (!blob) return file;
+    return new File([blob], 'face.jpg', { type: 'image/jpeg' });
+  } catch (e) {
+    return file;
+  }
+}
+
 async function compressImage(file) {
   if (!/^image\//.test(file.type)) return file;
   try {
@@ -1618,6 +1656,47 @@ const crewDate = () => crewView.date || today();
 /** A person's name, folded so "Tane W" and "tane w" are the same person. */
 function personKey(name) { return (name || '').trim().toLowerCase() || 'unnamed'; }
 
+/* ------------------------------------------------------- people's photos */
+/* There are no accounts in this app and no wish for any — a person is a name
+   typed into Settings. crew_people hangs the few things that belong to the
+   person rather than the device off that name, so a photo set on Tane's phone
+   is the one the office sees when it prints Tane's day.
+
+   Rename yourself and the photo stays with the old name; set it again under
+   the new one. That is the same bargain the rest of the app makes. */
+function personRow(name) {
+  const k = personKey(name);
+  return DB.crew_people.find(x => personKey(x.name_key || x.name) === k) || null;
+}
+function personPhoto(name) {
+  const r = personRow(name);
+  return (r && r.photo_url) || '';
+}
+
+/** A face if there is one, initials if there is not. Used on the tiles, the
+    person's page and the top of their printed day. */
+function faceMark(name, cls) {
+  const url = personPhoto(name);
+  return url
+    ? `<span class="fi ${cls || ''} img"><img src="${esc(url)}" alt=""></span>`
+    : `<span class="fi ${cls || ''}">${esc(initials(name))}</span>`;
+}
+
+/** Set, replace or clear the photo kept against a name. */
+async function savePersonPhoto(name, up) {
+  const row = personRow(name);
+  const patch = {
+    name: (name || '').trim(),
+    photo_url: up ? up.url : '',
+    photo_name: up ? up.name : '',
+    role: S.role,
+    updated_at: new Date().toISOString(),
+    updated_by: whoami()
+  };
+  if (row) return Store.patch('crew_people', row.id, patch);
+  return Store.insert('crew_people', Object.assign({ id: uid(), name_key: personKey(name) }, patch));
+}
+
 /** The name as that person actually writes it, found anywhere they have
     signed something — the route only carries the folded key, and showing
     somebody "tane w logged nothing" is not good enough. */
@@ -1773,7 +1852,7 @@ function renderCrew(view) {
       <div class="faces">
         ${people.map((p, i) => `
           <button class="face" data-who="${esc(encodeURIComponent(p.key))}" style="--i:${i}">
-            <span class="fi">${esc(initials(p.name))}</span>
+            ${faceMark(p.name)}
             <b>${esc(p.name)}</b>
             ${p.role ? `<span class="fr">${esc(roleLabel(p.role))}</span>` : ''}
             <span class="fc">${p.items.length} thing${p.items.length === 1 ? '' : 's'}</span>
@@ -1820,7 +1899,7 @@ function renderPersonDay(view, people, day, isToday, who) {
     ${crewDayNav(day, isToday)}
 
     <div class="card personhead">
-      <span class="fi big">${esc(initials(p.name))}</span>
+      ${faceMark(p.name, 'big')}
       <div class="grow">
         <h2 style="margin:0">${esc(p.name)}</h2>
         <div class="small muted">${p.role ? esc(roleLabel(p.role)) : 'On the tools'}${isMe ? ' · you' : ''}</div>
@@ -1840,6 +1919,7 @@ function renderPersonDay(view, people, day, isToday, who) {
 
     <div class="card">
       <div class="tl">${p.items.map(crewItem).join('')}</div>
+      <button class="btn wide mt" id="printPerson">${icon('printer')}Print ${esc(p.name)}'s day</button>
     </div>
 
     <a class="btn wide" href="#/crew">Back to the crew</a>`;
@@ -1849,6 +1929,7 @@ function renderPersonDay(view, people, day, isToday, who) {
     if (ev.target.closest('a')) return;      // a job link or a photo is not an edit
     go(el.dataset.go);
   });
+  $('#printPerson', view).onclick = () => printPersonDay(p, day);
   wireCrewSay(view, day);
 }
 
@@ -3313,7 +3394,42 @@ function jobFacts(p) {
     on to the next page takes its heading with it — which is what stops the
     orphaned headings and the half-empty pages that come of trying to keep a
     whole day together. */
-function daySection(p, day, n, total) {
+/** The shape of a day before a word of it is read: when it started, where
+    the gaps fell, when it stopped. Marks sit where the clock puts them. */
+function printTimeline(list) {
+  if (list.length < 2) return '';
+  const t0 = new Date(list[0].at).getTime();
+  const t1 = new Date(list[list.length - 1].at).getTime();
+  if (!(t1 > t0)) return '';
+  const span = daySpan(list);
+  return `
+    <div class="tstrip">
+      <div class="bar">
+        ${list.map(e => {
+          const at = ((new Date(e.at).getTime() - t0) / (t1 - t0)) * 100;
+          const cls = (e.kind === 'issue' || e.kind === 'delay') ? 'bad'
+            : e.kind === 'onsite' ? 'on' : e.kind === 'offsite' ? 'off' : '';
+          return `<i class="${cls}" style="left:${at.toFixed(2)}%"></i>`;
+        }).join('')}
+      </div>
+      <div class="ends">
+        <span><b>${esc(fmtTime(list[0].at))}</b> ${esc(entryLabel(list[0]))}</span>
+        ${span ? `<span>${esc(span)} on site</span>` : ''}
+        <span>${esc(entryLabel(list[list.length - 1]))} <b>${esc(fmtTime(list[list.length - 1].at))}</b></span>
+      </div>
+    </div>`;
+}
+
+/** The photographs on one entry, sitting with it. On a single day there are
+    few enough that a caption would only repeat the note two lines above. */
+function inlineShots(e) {
+  const shots = (e.files || []).filter(f => /^image\//.test(f.type || ''));
+  if (!shots.length) return '';
+  return `<div class="dshots">${shots.map(f =>
+    `<img src="${esc(f.url)}" alt="">`).join('')}</div>`;
+}
+
+function daySection(p, day, n, total, withShots) {
   const list = entriesFor(p.id, day);
   if (!list.length) return '';
   const first = list[0], last = list[list.length - 1];
@@ -3337,7 +3453,9 @@ function daySection(p, day, n, total) {
           return `<tr${flag ? ' class="flag"' : ''}>
             <td class="dt">${esc(fmtTime(e.at))}</td>
             <td class="dk">${esc(entryLabel(e))}</td>
-            <td class="dnote">${esc(e.body || '')}${n2 ? `<span class="ph"> · ${n2} photo${n2 > 1 ? 's' : ''}</span>` : ''}</td>
+            <td class="dnote">${esc(e.body || '')}${
+              withShots ? inlineShots(e)
+                : n2 ? `<span class="ph"> · ${n2} photo${n2 > 1 ? 's' : ''}</span>` : ''}</td>
             <td class="dby">${esc(e.author || '')}</td>
           </tr>`;
         }).join('')}
@@ -3451,6 +3569,7 @@ function printDayReport(p, day) {
   const list = entriesFor(p.id, day);
   const issues = list.filter(e => e.kind === 'issue' || e.kind === 'delay');
   const shots = list.reduce((n, e) => n + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
+  const who = Array.from(new Set(list.map(e => (e.author || '').trim()).filter(Boolean)));
 
   printDoc(`
     ${docHead('Daily job diary', p.name, `${jobNo(p)}${p.client ? ' · ' + p.client : ''} · ${fmtDayDate(day)}`)}
@@ -3462,17 +3581,105 @@ function printDayReport(p, day) {
       <div><div class="n">${shots}</div><div class="l">Photos</div></div>
     </div>
 
-    <h2>The job</h2>
-    ${jobFacts(p)}
+    ${printTimeline(list)}
 
-    ${daySection(p, day) || '<p>No entries on this day.</p>'}
+    <table class="kv two">
+      <tr>
+        <td class="lbl">Site</td><td class="val">${esc(p.site || '—')}</td>
+        <td class="lbl">Crew</td><td class="val">${esc(crewLabel(crewOf(p)))} · ${esc(typeLabel(typeOf(p)))}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Supervisor</td><td class="val">${esc(p.supervisor || '—')}</td>
+        <td class="lbl">On the day</td><td class="val">${who.length ? esc(who.join(', ')) : '—'}</td>
+      </tr>
+    </table>
 
-    ${photoAppendix(p, [day])}
+    <h2>The day</h2>
+    ${daySection(p, day, 0, 0, true) || '<p>No entries on this day.</p>'}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
       <div>Office sign-off &amp; date</div>
     </div>`, `Daily job diary · ${jobNo(p)} · ${fmtShort(day)}`);
+}
+
+/** One person's day, across every job they touched — the crew screen on
+    paper. Their face at the top, so a printed pile is sorted by eye. */
+function printPersonDay(person, day) {
+  const items = person.items;
+  const entries = items.filter(it => it.type === 'entry').map(it => it.e);
+  const issues = entries.filter(e => e.kind === 'issue' || e.kind === 'delay');
+  const shots = entries.reduce((n, e) => n + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
+  const jobs = [];
+  items.forEach(it => { if (it.job && !jobs.some(j => j.id === it.job.id)) jobs.push(it.job); });
+  const photo = personPhoto(person.name);
+
+  const row = it => {
+    if (it.type === 'doc') {
+      return `<tr>
+        <td class="dt">${esc(fmtTime(it.at))}</td>
+        <td class="dk">Document</td>
+        <td class="dnote">${esc(it.d.title || it.d.file_name || 'Document')}</td>
+        <td class="djob">${it.job ? jobNo(it.job) : '—'}</td>
+      </tr>`;
+    }
+    const e = it.e;
+    const flag = e.kind === 'issue' || e.kind === 'delay';
+    return `<tr${flag ? ' class="flag"' : ''}>
+      <td class="dt">${esc(fmtTime(e.at))}</td>
+      <td class="dk">${esc(entryLabel(e))}</td>
+      <td class="dnote">${esc(e.body || '')}${inlineShots(e)}</td>
+      <td class="djob">${it.job ? jobNo(it.job) : '<em>own diary</em>'}</td>
+    </tr>`;
+  };
+
+  printDoc(`
+    ${docHead('Daily diary', person.name, fmtDayDate(day))}
+
+    <div class="whose">
+      <span class="face">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials(person.name))}</span>
+      <div>
+        <div class="nm">${esc(person.name)}</div>
+        <div class="rl">${person.role ? esc(roleLabel(person.role)) : 'On the tools'}</div>
+        <div class="sm">${esc(fmtDayDate(day))} — ${items.length} thing${items.length === 1 ? '' : 's'} logged${
+          jobs.length ? ` across ${jobs.length} job${jobs.length === 1 ? '' : 's'}` : ''}${
+          person.own ? `, ${person.own} in their own diary` : ''}.</div>
+      </div>
+    </div>
+
+    <div class="figures">
+      <div><div class="n">${esc(daySpan(entries) || '—')}</div><div class="l">First to last</div></div>
+      <div><div class="n">${items.length}</div><div class="l">Logged</div></div>
+      <div><div class="n${issues.length ? ' neg' : ''}">${issues.length}</div><div class="l">Issues &amp; delays</div></div>
+      <div><div class="n">${shots}</div><div class="l">Photos</div></div>
+    </div>
+
+    ${printTimeline(entries)}
+
+    ${jobs.length ? `
+    <h2>The jobs</h2>
+    <table>
+      <thead><tr><th style="width:20mm">Job</th><th>Name and client</th>
+        <th class="num" style="width:20mm">Entries</th></tr></thead>
+      <tbody>
+        ${jobs.map(j => `<tr>
+          <td><strong>${jobNo(j)}</strong></td>
+          <td>${esc(j.name)}${j.client ? `<br><em>${esc(j.client)}</em>` : ''}</td>
+          <td class="num">${items.filter(it => it.job && it.job.id === j.id).length}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+
+    <h2>The day</h2>
+    <table class="dtable">
+      <thead><tr class="cols"><th>Time</th><th>Entry</th><th>Notes</th><th>Job</th></tr></thead>
+      <tbody>${items.map(row).join('')}</tbody>
+    </table>
+
+    <div class="sig">
+      <div>${esc(person.name)} &amp; date</div>
+      <div>Office sign-off &amp; date</div>
+    </div>`, `Daily diary · ${person.name} · ${fmtShort(day)}`);
 }
 
 function printDocRegister(p) {
@@ -3882,6 +4089,29 @@ function renderSetup(view) {
     </div>
 
     <div class="card">
+      <h2>Your photo</h2>
+      <p class="muted small">Set it once and it stays — on the crew screen, and at the top of
+      your printed day so everyone can see whose it is. It goes against your name, so the
+      office sees it too.</p>
+      ${peopleTableMissing ? `<div class="banner">The database has not got the
+        <code>crew_people</code> table yet, so a photo could not be saved for everyone.
+        Run the current <code>supabase-schema.sql</code> in Supabase → SQL Editor first —
+        it is safe to re-run and touches nothing you have entered.</div>` : ''}
+      <div class="myface">
+        ${faceMark(S.name, 'huge')}
+        <div class="grow">
+          <div class="small"><strong>${esc(S.name || 'Nobody yet')}</strong></div>
+          <div class="tiny muted">${personPhoto(S.name) ? 'A photo is set.' : 'No photo yet — initials are used.'}</div>
+        </div>
+      </div>
+      <input type="file" id="myPhotoFile" accept="image/*" hidden>
+      <div class="btn-row mt">
+        <button class="btn sm" id="myPhotoPick">${icon('camera')}${personPhoto(S.name) ? 'Change it' : 'Add a photo'}</button>
+        ${personPhoto(S.name) ? '<button class="btn sm" id="myPhotoClear">Remove it</button>' : ''}
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Shared data</h2>
       <p class="muted small">These come from Supabase → Settings → API. Everyone who enters the same
       two values sees the same jobs and diaries.</p>
@@ -3951,6 +4181,7 @@ function renderSetup(view) {
         <tr><th>Documents</th><td>${DB.project_docs.length}</td></tr>
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
         <tr><th>Cost lines</th><td>${DB.job_costs.length}</td></tr>
+        <tr><th>People with a photo</th><td>${DB.crew_people.filter(x => x.photo_url).length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
         <tr><th>Version</th><td>${VERSION}${
           updateReady ? ' — <strong>a newer one is installing, the app will pick it up on its own</strong>' : ''}</td></tr>
@@ -3965,6 +4196,40 @@ function renderSetup(view) {
       latest app</strong> is there for when you want to make sure — it throws away the copy on this
       phone and fetches a fresh one. Nothing you have entered is touched.</p>
     </div>`;
+
+  /* A face is small — 420px square is plenty for a tile and a printed
+     letterhead, and keeps the row light enough to sync on site. */
+  const pickPhoto = $('#myPhotoPick', view);
+  if (pickPhoto) {
+    const file = $('#myPhotoFile', view);
+    pickPhoto.onclick = () => {
+      if (!S.name) return toast('Put your name in first, then add the photo');
+      if (peopleTableMissing) return toast('Run the latest supabase-schema.sql first');
+      file.click();
+    };
+    file.onchange = async () => {
+      const f = (file.files || [])[0];
+      file.value = '';
+      if (!f) return;
+      pickPhoto.disabled = true;
+      pickPhoto.textContent = 'Saving…';
+      try {
+        const up = await Store.upload(await squareImage(f, 420));
+        await savePersonPhoto(S.name, up);
+        toast('Photo saved');
+      } catch (err) {
+        toast('Could not save: ' + err.message);
+      }
+      render();
+    };
+  }
+  const clearPhoto = $('#myPhotoClear', view);
+  if (clearPhoto) clearPhoto.onclick = async () => {
+    if (!confirm('Remove your photo? Your initials are used instead.')) return;
+    await savePersonPhoto(S.name, null);
+    toast('Photo removed');
+    render();
+  };
 
   $('#saveMe', view).onclick = () => {
     const role = $('#sRole', view).value;
@@ -4049,7 +4314,7 @@ function renderSetup(view) {
       waitingToSend: Outbox.all(),
       problem: Outbox.problem(),
       projects: DB.projects, project_docs: DB.project_docs,
-      diary_entries: DB.diary_entries, job_costs: DB.job_costs
+      diary_entries: DB.diary_entries, job_costs: DB.job_costs, crew_people: DB.crew_people
     };
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -4108,7 +4373,7 @@ function renderSetup(view) {
     localStorage.removeItem(cacheKey());
     localStorage.removeItem('rckd.outbox');
     localStorage.removeItem('rckd.outbox.problem');
-    DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = [];
+    DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = []; DB.crew_people = [];
     refresh().then(render);
   };
 }
