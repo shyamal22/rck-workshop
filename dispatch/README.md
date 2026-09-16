@@ -122,13 +122,21 @@ orphaned headings and no half-empty pages. All the photographs sit together at t
 to a page, each captioned with the day and entry it came from.
 
 **A single day — one job's or one person's — is set out differently**, because one day is
-read by somebody who was not there. It opens with the day's figures, then **the day as a
-timeline**: a bar with every event marked where the clock puts it, green where they got on,
-red where something went wrong, so the shape of the day lands before a word of it is read.
-Then the entries in order, each with **its own photographs beside it** rather than gathered
-at the back — on one day there are few enough that an appendix would only repeat the note
-two lines above. A person's day also carries their face at the top and names the job on
-every line, since their day crosses several.
+read by somebody who was not there. One title block says whose day it is, once: a face or a
+job mark, the name at full size, and one line under it with the client, site, crew and
+supervisor. The date sits on the right of the letterhead, said once. Then the day's figures,
+then **the day as a timeline** — a bar with every event marked where the clock puts it,
+green where they got on, red where something went wrong — so the shape of the day lands
+before a word of it is read. Then **the log**: the clock down the left, and beside it each
+entry's type as a small label over its note, so the note gets the whole width and a long
+one reads as prose. The job is named on a line only when the day crossed more than one, and
+the author only when more than one person wrote.
+
+**The photographs come after, two across and two down, four to a page and never more**, in
+square frames that crop a mixed bag of portrait and landscape phone shots least badly, each
+with the time and entry it came from. The frame does the sizing rather than the picture —
+iOS Safari drops the height off a bare image when it prints, and a portrait shot once came
+out 67mm tall in the middle of a diary. Sign-off is the last thing on the last page.
 
 Everything on the page is laid out to be read across as well as down. A three-night job with
 eighteen photographs prints as five pages rather than eight.

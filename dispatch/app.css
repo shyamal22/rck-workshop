@@ -1083,6 +1083,10 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
   color: var(--d-accent); font-weight: 700;
 }
 .doc .doc-head .when { font-size: 7.5pt; color: var(--d-ink-3); margin-top: .6mm; line-height: 1.3; }
+/* A day's document: the date is the second-biggest thing on the page, on
+   the right, where the eye goes after the name. */
+.doc .doc-head .day { font-size: 11pt; font-weight: 700; letter-spacing: -.01em; margin-top: 1mm; color: var(--d-ink); }
+.doc .doc-head.bare .rule { margin-top: 3mm; }
 .doc h1 { font-size: 15pt; font-weight: 700; letter-spacing: -.015em; margin: 2.5mm 0 0; line-height: 1.12; }
 .doc .doc-head .sub { font-size: 9.5pt; color: var(--d-ink-2); margin-top: .8mm; }
 .doc .doc-head .rule { height: 1.2mm; background: var(--d-accent); margin-top: 2.6mm; border-radius: .6mm; }
@@ -1208,7 +1212,7 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
    — when it started, where the gaps were, when it stopped — should land
    before a single line is read, so the day gets a bar with the events marked
    on it in the order and spacing they happened. */
-.doc .tstrip { margin: 0 0 5mm; break-inside: avoid; page-break-inside: avoid; }
+.doc .tstrip { margin: 0 0 3.5mm; break-inside: avoid; page-break-inside: avoid; }
 .doc .tstrip .bar {
   position: relative; height: 3.2mm; border-radius: 1.6mm;
   background: var(--d-tint); border: .5pt solid var(--d-line);
@@ -1226,55 +1230,100 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 }
 .doc .tstrip .ends b { color: var(--d-ink-2); font-weight: 700; }
 
-/* Photographs sitting with the entry they belong to, rather than gathered at
-   the back. On one day there are few enough that a caption would only repeat
-   the note two lines above it. */
-.doc .dshots { margin-top: 1.6mm; font-size: 0; }
-.doc .dshots img {
-  width: 31mm; height: 23mm; object-fit: cover; display: inline-block;
-  margin: 0 1.6mm 1.6mm 0; border: .5pt solid var(--d-line); border-radius: .8mm;
-  background: var(--d-tint);
-}
 
-/* Who the day belongs to, at the top of their own printed diary. */
-.doc .whose {
-  display: flex; align-items: center; gap: 4mm;
-  border: .6pt solid var(--d-line); border-radius: 1.4mm;
-  background: var(--d-tint); padding: 3.5mm 4mm; margin-bottom: 4mm;
-  break-inside: avoid;
+
+/* ------------------------------------------------- a day's title block */
+/* One title, said once. The letterhead names the company and the document;
+   this names whose day it is — a face or a job mark, the name at full size,
+   and one line under it with everything else a reader wants first. */
+.doc .dayhd {
+  display: flex; align-items: center; gap: 5mm;
+  margin: 3.5mm 0 3.5mm; break-inside: avoid;
 }
-.doc .whose .face {
-  width: 20mm; height: 20mm; flex: none; border-radius: 50%; overflow: hidden;
+.doc .dayhd .dm {
+  width: 19mm; height: 19mm; flex: none; border-radius: 50%; overflow: hidden;
   background: var(--d-ink); color: #fff;
-  display: grid; place-items: center; font-size: 15pt; font-weight: 700;
+  display: grid; place-items: center; font-size: 13.5pt; font-weight: 700; letter-spacing: .02em;
 }
-.doc .whose .face img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.doc .whose .nm { font-size: 15pt; font-weight: 700; letter-spacing: -.015em; line-height: 1.1; }
-.doc .whose .rl {
-  font-size: 7.5pt; font-weight: 700; color: var(--d-ink-3);
-  text-transform: uppercase; letter-spacing: .08em; margin-top: .8mm;
+.doc .dayhd .dm img { width: 100%; height: 100%; object-fit: cover; display: block; image-orientation: from-image; }
+.doc .dayhd .dm.job {
+  border-radius: 2.2mm; background: var(--d-tint); color: var(--d-ink);
+  border: .6pt solid var(--d-line); font-size: 8pt; letter-spacing: .06em; line-height: 1.2;
+  text-align: center;
 }
-.doc .whose .sm { font-size: 9pt; color: var(--d-ink-2); margin-top: 1.4mm; }
+.doc .dayhd .dm.job small { display: block; font-size: 6.5pt; color: var(--d-ink-3); letter-spacing: .1em; }
+.doc .dayhd h1 { margin: 0; font-size: 20pt; line-height: 1.04; letter-spacing: -.02em; }
+.doc .dayhd .desc { font-size: 9pt; color: var(--d-ink-2); margin-top: 1.6mm; line-height: 1.4; }
+.doc .dayhd .desc b { color: var(--d-ink); font-weight: 700; }
+.doc .dayhd .desc .sep { color: var(--d-line); padding: 0 1.2mm; }
+
+/* ------------------------------------------------------------ the log */
+/* Two columns: the clock, and everything else. The entry's type is a small
+   label over its note, so the note gets the whole width and a long one
+   reads as prose rather than a column. */
+.doc table.dlog { width: 100%; border-collapse: collapse; margin-bottom: 3mm; font-size: 9.5pt; }
+.doc table.dlog thead { display: table-header-group; }
+.doc table.dlog th {
+  border-bottom: .8pt solid var(--d-ink-3); padding: 0 0 1.2mm;
+  font-size: 7pt; color: var(--d-ink-3); text-transform: uppercase; letter-spacing: .09em; font-weight: 700;
+}
+.doc table.dlog td {
+  border-bottom: .5pt solid var(--d-line); padding: 1.7mm 2.2mm 1.8mm 0; vertical-align: top;
+}
+.doc table.dlog tr { break-inside: avoid; page-break-inside: avoid; }
+.doc table.dlog .lt {
+  width: 13mm; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+  padding-top: 2.1mm;
+}
+.doc table.dlog .lk {
+  display: flex; align-items: baseline; gap: 2mm; margin-bottom: .9mm;
+  font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--d-ink-2);
+}
+.doc table.dlog .lk .j { font-weight: 600; letter-spacing: .04em; color: var(--d-ink-3); text-transform: none; }
+.doc table.dlog .lk .j em { font-style: italic; }
+.doc table.dlog .lk .pc { font-weight: 600; letter-spacing: .02em; color: var(--d-ink-3); text-transform: none; }
+.doc table.dlog .ln { white-space: pre-wrap; line-height: 1.42; }
+.doc table.dlog .lby { width: 20mm; font-size: 7.5pt; color: var(--d-ink-3); padding-top: 2.3mm; text-align: right; padding-right: 0; }
+.doc table.dlog tr.flag td { background: #fdf6f4; }
+.doc table.dlog tr.flag .lt, .doc table.dlog tr.flag .lk { color: var(--d-red); }
 
 /* ------------------------------------------------------- photographs */
 /* A table, not a grid: browsers fragment grids across pages badly, which
    is what put photographs half on one page and half on the next. Two
    across, three down — six to a page, every page the same. */
 .doc .page-break { break-before: page; page-break-before: always; height: 0; }
-.doc table.photos { width: 100%; border-collapse: separate; border-spacing: 4mm 0; margin: 0 -4mm; }
+
+/* Two across, two down: four to a page, every page the same, big enough to
+   actually see what was photographed. A table rather than a grid because
+   browsers fragment grids across pages badly.
+
+   The picture sits inside a box of fixed size and fills it. iOS Safari's
+   print layout drops the height off a bare <img> — a portrait phone shot
+   came out 67mm tall in one diary — but it never drops the height off the
+   box, so the box does the sizing and the image just fills it. */
+.doc table.photos { width: 100%; border-collapse: separate; border-spacing: 5mm 0; margin: 0 -5mm; }
 .doc table.photos tr { break-inside: avoid; page-break-inside: avoid; }
-.doc table.photos td {
-  width: 50%; border: 0; padding: 0 0 4mm; vertical-align: top;
+.doc table.photos td { width: 50%; border: 0; padding: 0 0 5mm; vertical-align: top; }
+.doc .photo { margin: 0; }
+.doc .photo .ph {
+  position: relative; width: 100%; height: 84mm; overflow: hidden;
+  border: .5pt solid var(--d-line); border-radius: 1mm; background: var(--d-tint);
 }
-.doc .photo img {
-  width: 100%; height: 55mm; object-fit: cover; display: block;
-  border: .5pt solid var(--d-line); border-radius: .8mm; background: var(--d-tint);
+.doc .photo .ph img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block; image-orientation: from-image;
 }
-.doc .photo .cap { font-size: 7pt; color: var(--d-ink-2); margin-top: 1mm; line-height: 1.28; }
-.doc .photo .cap b { color: var(--d-ink); font-weight: 700; }
+.doc .photo .cap {
+  display: flex; align-items: baseline; gap: 2mm; margin-top: 1.6mm;
+  font-size: 8pt; color: var(--d-ink-2); line-height: 1.3;
+}
+.doc .photo .cap b { color: var(--d-ink); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.doc .photo .cap .k { font-weight: 700; color: var(--d-ink-2); white-space: nowrap; }
+.doc .photo .cap .j { margin-left: auto; color: var(--d-ink-3); font-size: 7pt; white-space: nowrap; }
+.doc .photo .cap.flag .k { color: var(--d-red); }
 
 /* ----------------------------------------------------------- oddments */
-.doc .sig { margin-top: 12mm; display: flex; gap: 14mm; break-inside: avoid; }
+.doc .sig { margin-top: 8mm; display: flex; gap: 14mm; break-inside: avoid; }
 .doc .sig div { flex: 1; border-top: .7pt solid var(--d-ink-3); padding-top: 2mm; font-size: 8.5pt; color: var(--d-ink-3); }
 .doc .badge {
   display: inline-block; padding: 1mm 3mm; border-radius: 1mm;
@@ -1296,7 +1345,7 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .doc .figures { display: flex; gap: 4mm; margin-bottom: 4mm; break-inside: avoid; }
 .doc .figures > div {
   flex: 1; background: var(--d-tint); border: .6pt solid var(--d-line);
-  border-radius: 1.4mm; padding: 3mm 3.4mm;
+  border-radius: 1.4mm; padding: 2.4mm 3.2mm;
 }
 .doc .figures .n { font-size: 15pt; font-weight: 700; line-height: 1.05; letter-spacing: -.02em; }
 .doc .figures .l { font-size: 7.5pt; color: var(--d-ink-3); text-transform: uppercase; letter-spacing: .08em; margin-top: 1mm; }
