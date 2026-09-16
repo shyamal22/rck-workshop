@@ -834,6 +834,18 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .facerow .btn { flex: none; }
+/* Taken off the list: still here, so they can be put back, but plainly out. */
+.facerow.off { opacity: .62; }
+.facerow.off .fi { filter: grayscale(1); }
+.facerow em.you {
+  font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em; margin-left: 6px;
+}
+/* The add / edit form for one person. The input classes carry no style of
+   their own — they are how the save handler finds the fields. */
+.pform { animation: riseIn var(--t) var(--ease) both; }
+.pform .pName, .pform .pPhone, .pform .pEmail, .pform .pRole { width: 100%; }
+.pform .pSave, .pform .pCancel { flex: 1; }
 .personhead { display: flex; align-items: center; gap: 13px; }
 
 /* Which job a line belongs to. On the crew screen every row needs it —
