@@ -606,7 +606,7 @@ async function adoptMe() {
     which is a screen of its own. Matched by user id once that is written,
     and by the email or phone they signed in with until then. */
 function me() {
-  if (!connected()) return null;
+  if (!connected() || !authWanted()) return null;
   const s = Auth.read();
   if (!s || !s.user) return null;
   const uid = s.user.id;
@@ -617,8 +617,30 @@ function me() {
     || DB.crew_people.find(r => !r.user_id && ph && normPhone(r.phone) === ph)
     || null;
 }
-/* Signed in, and on the list, and not taken off it. */
-function admitted() { return !connected() || (Auth.signedIn() && !!me()); }
+/* Whether the database has the access rules at all. Until a director runs
+   the current schema it has the old open policies, and this app must carry
+   on exactly as before — the rollout goes to every phone at once, and the
+   crew must not be locked out for the days between the app updating and the
+   SQL being run. is_active() only exists once the new schema has run, so
+   asking for it is the question. Remembered per device; re-asked on every
+   pull, so the switch happens on its own. */
+function authWanted() { return !!S.authMode; }
+async function probeAuthMode() {
+  if (!connected()) return;
+  try {
+    const base = S.supabaseUrl.replace(/\/+$/, '');
+    const res = await fetch(`${base}/rest/v1/rpc/is_active`, {
+      method: 'POST', headers: restHeaders({ 'Content-Type': 'application/json' }), body: '{}'
+    });
+    // 404 = no such function = old schema. Anything else means it is there.
+    const wanted = res.status !== 404;
+    if (wanted !== !!S.authMode) Settings.write({ authMode: wanted });
+  } catch (e) { /* no signal: keep whatever we knew */ }
+}
+
+/* Signed in, and on the list, and not taken off it — where the database
+   asks for that at all. */
+function admitted() { return !connected() || !authWanted() || (Auth.signedIn() && !!me()); }
 
 /** Can this device plan jobs and see the office-only documents? */
 const isOffice   = () => roleDef(S.role).officeAccess;
@@ -682,7 +704,7 @@ function restHeaders(extra) {
     the database decides what they may do from that. */
 async function authHeaders(extra) {
   const h = restHeaders(extra);
-  const tok = await Auth.token();
+  const tok = authWanted() ? await Auth.token() : null;
   if (tok) h.Authorization = 'Bearer ' + tok;
   return h;
 }
@@ -690,7 +712,7 @@ let sessionLost = false;
 async function rest(path, opts) {
   const base = S.supabaseUrl.replace(/\/+$/, '');
   opts = opts || {};
-  const tok = await Auth.token();
+  const tok = authWanted() ? await Auth.token() : null;
   if (tok) opts.headers = Object.assign({}, opts.headers, { Authorization: 'Bearer ' + tok });
   let res = await fetch(`${base}/rest/v1/${path}`, opts);
   // A stale token gets one refresh and one more go. A second refusal means
@@ -749,6 +771,7 @@ function reconcile(table, fromServer) {
 const Store = {
   async pull() {
     if (!connected()) return;
+    await probeAuthMode();
     const [projects, docs, entries, costs, people] = await Promise.all([
       rest('projects?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
@@ -1579,6 +1602,17 @@ function renderJoin(view) {
     Settings.write({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, localMode: false });
     Auth.clear();
     loadCache();
+    await probeAuthMode();
+    if (!authWanted()) {
+      // The old way in, until the database asks for sign-in: a name and a role on the phone.
+      const name = (prompt('Your name, as it will appear on the diary:') || '').trim();
+      if (!name) { this.disabled = false; this.textContent = 'Connect'; return toast('Enter your name'); }
+      Settings.write({ name });
+      await refresh();
+      toast('Connected — you\'re all set');
+      go('#/');
+      return;
+    }
     go('#/signin');
   };
 }
@@ -2326,6 +2360,19 @@ function renderPeople(view) {
     return;
   }
   $('#title').textContent = 'People';
+
+  if (connected() && !authWanted()) {
+    view.innerHTML = `
+      <div class="card">
+        <h2>Sign-in is not switched on yet</h2>
+        <p class="muted small">The database still lets any phone with the key in. To decide who has
+        access, run the current <code>supabase-schema.sql</code> — the README has the steps, and
+        the file refuses to run until you have put your own details in, so it cannot lock you out.
+        Photos can still be set from anybody's page on the crew screen.</p>
+        <a class="btn wide mt" href="#/crew">Back to the crew</a>
+      </div>`;
+    return;
+  }
 
   const rows = DB.crew_people.slice()
     .sort((a, b) => (a.active === false) - (b.active === false) || (a.name || '').localeCompare(b.name || ''));
@@ -4658,7 +4705,7 @@ function renderSetup(view) {
   view.innerHTML = `
     <div class="card">
       <h2>You</h2>
-      ${connected() && Auth.signedIn() ? `
+      ${connected() && authWanted() && Auth.signedIn() ? `
       <table class="data">
         <tr><th>Signed in as</th><td>${esc(Auth.who() || '—')}</td></tr>
         <tr><th>On the list as</th><td>${me() ? esc(me().name) : '<em>not on the list</em>'}</td></tr>
@@ -5061,7 +5108,7 @@ function watchForUpdate(reg) {
 (async function boot() {
   loadCache();
   // Arrived by a link in an email: the session is in the hash.
-  if (connected() && Auth.fromHash()) {
+  if (connected() && authWanted() && Auth.fromHash()) {
     try { await Auth.fillUser(); } catch (e) {}
   }
   paintSync();
