@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.3.0';
+const VERSION = '2.4.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -972,13 +972,15 @@ async function completeJob(p, notes) {
   return jobById(p.id);
 }
 
-/** Add a diary entry, with its photos already uploaded. */
+/** Add a diary entry, with its photos already uploaded. A null projectId is
+    somebody's own diary: a day has plenty in it that belongs to the person
+    rather than to any one job. */
 async function addEntry(projectId, data, files) {
   const uploads = [];
   for (const f of files || []) uploads.push(await Store.upload(f));
   const row = {
     id: uid(),
-    project_id: projectId,
+    project_id: projectId || null,
     entry_date: data.entry_date || today(),
     at: data.at || new Date().toISOString(),
     kind: data.kind || 'note',
@@ -992,7 +994,7 @@ async function addEntry(projectId, data, files) {
   const saved = await Store.insert('diary_entries', row);
 
   // The first entry on a planned job means the crew is on site.
-  const p = jobById(projectId);
+  const p = projectId ? jobById(projectId) : null;
   if (p && p.status === 'planned') await startJob(p);
   return saved;
 }
@@ -1107,7 +1109,8 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = path === '/jobs' || path === '/today' || path === '/crew' || path.startsWith('/diary/');
+  const keepsPlace = path === '/jobs' || path === '/today' || path === '/crew'
+    || path.startsWith('/crew/') || path.startsWith('/diary/');
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
@@ -1125,6 +1128,7 @@ function render() {
   if (route.path.startsWith('/job/'))        { screen = { title: 'Job',       render: renderJob };      back = true; }
   else if (route.path.startsWith('/edit/'))  { screen = { title: 'Edit job',  render: renderJobEdit };  back = true; }
   else if (route.path.startsWith('/docs/'))  { screen = { title: 'Documents', render: renderDocs };     back = true; }
+  else if (route.path.startsWith('/crew/'))  { screen = { title: 'Crew', render: renderCrew }; back = true; }
   else if (route.path.startsWith('/diary/')) { screen = { title: 'Job diary', render: renderDiary };    back = true; }
   else if (route.path.startsWith('/entry/')) { screen = { title: 'Diary entry', render: renderEntry };  back = true; }
   else if (route.path.startsWith('/upload/')){ screen = { title: 'Add document', render: renderUpload }; back = true; }
@@ -1597,27 +1601,59 @@ function renderToday(view) {
    Screen — crew & supervisors
    The job diary answers "what happened on this job". This answers
    "what did Tane do today", which is the question you actually ask
-   when four crews are out at once — one day, every person, every job
-   they touched, in the order it happened.
+   when four crews are out at once.
+
+   The way in is the people, not the work: who was active today, as
+   tiles. Open one and you get that person's day — everything they put
+   into any job, and anything they wrote in their own diary that was
+   not about a job at all.
    ================================================================ */
 /* date null means "today", whatever today turns out to be — so an app left
    open overnight rolls over on its own instead of being stuck on yesterday. */
-const crewView = { date: null, who: 'all', saying: false };
+const crewView = { date: null, saying: false };
 const crewDate = () => crewView.date || today();
 
 /** A person's name, folded so "Tane W" and "tane w" are the same person. */
-function personKey(name) { return (name || '').trim().toLowerCase() || '\u2014'; }
+function personKey(name) { return (name || '').trim().toLowerCase() || 'unnamed'; }
 
-/** Everything people put into the jobs on one day: diary entries and the
-    documents they added. Money never appears here — that is the director's
-    own screen, and this one is for everybody. */
+/** The name as that person actually writes it, found anywhere they have
+    signed something — the route only carries the folded key, and showing
+    somebody "tane w logged nothing" is not good enough. */
+function personName(key) {
+  const k = personKey(key);
+  let best = '';
+  const look = v => { const n = (v || '').trim(); if (n && !best && personKey(n) === k) best = n; };
+  DB.diary_entries.forEach(e => look(e.author));
+  if (!best) DB.project_docs.forEach(d => look(d.uploaded_by));
+  if (!best) DB.projects.forEach(j => look(j.supervisor));
+  return best || key;
+}
+
+/** The person a crew route points at, or '' for the tiles. */
+function crewWho() {
+  const seg = route.path.split('/')[2] || '';
+  try { return decodeURIComponent(seg); } catch (e) { return seg; }
+}
+
+/** Initials for the tile. Two letters at most — a face at a glance. */
+function initials(name) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+/** Everything people put in on one day: diary entries, whether or not they
+    belong to a job, and the documents they added. Money never appears here —
+    that is the director's own screen, and this one is for everybody. */
 function crewFeed(day) {
   const items = [];
 
   DB.diary_entries.forEach(e => {
     if ((e.entry_date || '') !== day) return;
-    const job = jobById(e.project_id);
-    if (job) items.push({ type: 'entry', at: e.at || '', who: e.author || '', role: e.role || '', job, e });
+    // project_id is allowed to be empty: that is somebody's own diary.
+    const job = e.project_id ? jobById(e.project_id) : null;
+    if (e.project_id && !job) return;          // an entry whose job has gone
+    items.push({ type: 'entry', at: e.at || '', who: e.author || '', role: e.role || '', job, e });
   });
 
   DB.project_docs.forEach(d => {
@@ -1637,10 +1673,11 @@ function crewPeople(items) {
   const by = {};
   items.forEach(it => {
     const k = personKey(it.who);
-    const p = by[k] || (by[k] = { key: k, name: (it.who || '').trim() || 'Unnamed', role: '', items: [], jobs: new Set(), issues: 0, photos: 0 });
+    const p = by[k] || (by[k] = { key: k, name: (it.who || '').trim() || 'Unnamed',
+                                  role: '', items: [], jobs: new Set(), issues: 0, photos: 0, own: 0 });
     if (!p.role && it.role) p.role = it.role;
     p.items.push(it);
-    p.jobs.add(it.job.id);
+    if (it.job) p.jobs.add(it.job.id); else p.own++;
     if (it.type === 'entry') {
       if (it.e.kind === 'issue' || it.e.kind === 'delay') p.issues++;
       p.photos += (Array.isArray(it.e.files) ? it.e.files : []).filter(f => /^image\//.test(f.type || '')).length;
@@ -1652,7 +1689,9 @@ function crewPeople(items) {
 /** One thing somebody did, as a row on their day. */
 function crewItem(it, i) {
   const job = it.job;
-  const tag = `<a class="cw-job" href="#/diary/${job.id}">${jobNo(job)} · ${esc(job.name)}</a>`;
+  const tag = job
+    ? `<a class="cw-job" href="#/diary/${job.id}">${jobNo(job)} · ${esc(job.name)}</a>`
+    : `<span class="cw-job own">Own diary</span>`;
 
   if (it.type === 'doc') {
     const d = it.d;
@@ -1675,7 +1714,7 @@ function crewItem(it, i) {
   const flag = e.kind === 'issue' || e.kind === 'delay';
   return `
     <div class="tl-e status-${entryTone(e)}${flag ? ' flag' : ''}${entryMarked(e) ? ' mark' : ''}"
-         data-go="#/entry/${job.id}?edit=${e.id}" style="--i:${i}">
+         data-go="#/entry/${job ? job.id : 'none'}?edit=${e.id}" style="--i:${i}">
       <div class="tl-when">${esc(fmtTime(e.at))}</div>
       <div class="tl-rail"><i></i></div>
       <div class="tl-card">
@@ -1688,32 +1727,9 @@ function crewItem(it, i) {
     </div>`;
 }
 
-function renderCrew(view) {
-  const day = crewDate();
-  const isToday = day === today();
-  const all = crewFeed(day);
-  const people = crewPeople(all);
-  const shown = crewView.who === 'all' ? people : people.filter(p => p.key === crewView.who);
-
-  // Somewhere to put a comment. Running jobs first, and among those the ones
-  // this person is the supervisor of — which is nearly always the one meant.
-  const mine = (S.name || '').trim().toLowerCase();
-  const postable = boardOrder(activeJobs())
-    .filter(p => p.status !== 'completed' || isOffice())
-    .sort((a, b) => {
-      const rank = j => ((j.supervisor || '').trim().toLowerCase() === mine ? 0 : 1)
-        + (j.status === 'ongoing' ? 0 : 2);
-      return rank(a) - rank(b);
-    });
-
-  const totals = {
-    entries: all.filter(it => it.type === 'entry').length,
-    docs: all.filter(it => it.type === 'doc').length,
-    jobs: new Set(all.map(it => it.job.id)).size,
-    issues: all.filter(it => it.type === 'entry' && (it.e.kind === 'issue' || it.e.kind === 'delay')).length
-  };
-
-  view.innerHTML = `
+/** The day, and the ways out of it. Shared by the tiles and one person. */
+function crewDayNav(day, isToday) {
+  return `
     <div class="daynav">
       <button class="dn-arrow" id="dPrev" title="The day before">${icon('chevL')}</button>
       <div class="dn-mid">
@@ -1723,17 +1739,147 @@ function renderCrew(view) {
       <button class="dn-arrow" id="dNext" title="The day after" ${isToday ? 'disabled' : ''}>${icon('chevR')}</button>
     </div>
     <label class="dn-pick"><span>Any other day</span>
-      <input type="date" id="dPick" value="${esc(day)}" max="${esc(today())}"></label>
+      <input type="date" id="dPick" value="${esc(day)}" max="${esc(today())}"></label>`;
+}
 
-    ${postable.length ? (crewView.saying ? `
+function wireCrewDay(view, day) {
+  const goDay = d => { crewView.date = d; render(); };
+  $('#dPrev', view).onclick = () => goDay(dayShift(day, -1));
+  const next = $('#dNext', view);
+  if (next && !next.disabled) next.onclick = () => goDay(dayShift(day, 1));
+  const back = $('#dToday', view);
+  if (back) back.onclick = () => { crewView.date = null; render(); };
+  $('#dPick', view).onchange = function () { if (this.value) goDay(this.value); };
+}
+
+function renderCrew(view) {
+  const day = crewDate();
+  const isToday = day === today();
+  const people = crewPeople(crewFeed(day));
+  const who = crewWho();
+
+  if (who) return renderPersonDay(view, people, day, isToday, who);
+
+  $('#title').textContent = 'Crew & supervisors';
+
+  view.innerHTML = `
+    ${crewDayNav(day, isToday)}
+    ${crewSayBox(day, isToday)}
+
+    ${people.length ? `
+      <div class="section-title">Out ${isToday ? 'today' : 'that day'}</div>
+      <div class="faces">
+        ${people.map((p, i) => `
+          <button class="face" data-who="${esc(encodeURIComponent(p.key))}" style="--i:${i}">
+            <span class="fi">${esc(initials(p.name))}</span>
+            <b>${esc(p.name)}</b>
+            ${p.role ? `<span class="fr">${esc(roleLabel(p.role))}</span>` : ''}
+            <span class="fc">${p.items.length} thing${p.items.length === 1 ? '' : 's'}</span>
+            <span class="fm">${[
+              p.jobs.size ? `${p.jobs.size} job${p.jobs.size === 1 ? '' : 's'}` : '',
+              p.own ? `${p.own} own` : '',
+              p.photos ? `${p.photos} photo${p.photos === 1 ? '' : 's'}` : ''
+            ].filter(Boolean).join(' · ') || '&nbsp;'}</span>
+            ${p.issues ? `<span class="fx">${p.issues} issue${p.issues === 1 ? '' : 's'}</span>` : ''}
+          </button>`).join('')}
+      </div>`
+    : `<div class="empty">
+        <b>Nobody out ${isToday ? 'yet today' : 'on this day'}</b>
+        When somebody writes in a job diary, adds a document, or puts a note in their own
+        diary, they show up here.
+      </div>`}`;
+
+  wireCrewDay(view, day);
+  $$('.face', view).forEach(b => b.onclick = () => go('#/crew/' + b.dataset.who));
+  wireCrewSay(view, day);
+}
+
+/** One person, one day: everything they did, in the order they did it. */
+function renderPersonDay(view, people, day, isToday, who) {
+  const p = people.find(x => x.key === personKey(who));
+  const name = p ? p.name : personName(who);
+  $('#title').textContent = name || 'Crew';
+
+  if (!p) {
+    view.innerHTML = `
+      ${crewDayNav(day, isToday)}
+      <div class="empty">
+        <b>${esc(name)} logged nothing ${isToday ? 'today' : 'that day'}</b>
+        Move the day above, or go back to everyone.
+      </div>
+      <a class="btn wide" href="#/crew">Back to the crew</a>`;
+    wireCrewDay(view, day);
+    return;
+  }
+
+  const isMe = p.key === personKey(whoami());
+
+  view.innerHTML = `
+    ${crewDayNav(day, isToday)}
+
+    <div class="card personhead">
+      <span class="fi big">${esc(initials(p.name))}</span>
+      <div class="grow">
+        <h2 style="margin:0">${esc(p.name)}</h2>
+        <div class="small muted">${p.role ? esc(roleLabel(p.role)) : 'On the tools'}${isMe ? ' · you' : ''}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stat">
+        <div><span class="n">${p.items.length}</span><span class="l">Logged</span></div>
+        <div><span class="n">${p.jobs.size}</span><span class="l">Job${p.jobs.size === 1 ? '' : 's'}</span></div>
+        <div><span class="n">${p.photos}</span><span class="l">Photos</span></div>
+        <div><span class="n" style="color:${p.issues ? 'var(--red)' : 'inherit'}">${p.issues}</span><span class="l">Issues</span></div>
+      </div>
+    </div>
+
+    ${isMe ? crewSayBox(day, isToday) : ''}
+
+    <div class="card">
+      <div class="tl">${p.items.map(crewItem).join('')}</div>
+    </div>
+
+    <a class="btn wide" href="#/crew">Back to the crew</a>`;
+
+  wireCrewDay(view, day);
+  $$('[data-go]', view).forEach(el => el.onclick = ev => {
+    if (ev.target.closest('a')) return;      // a job link or a photo is not an edit
+    go(el.dataset.go);
+  });
+  wireCrewSay(view, day);
+}
+
+/* ---------------------------------------------------------------------
+   Saying something
+   Straight into a diary, photos and all, without going to find a job
+   first — and without needing a job at all. A day has plenty in it that
+   belongs to the person rather than to any one job.
+   --------------------------------------------------------------------- */
+function crewSayBox(day, isToday) {
+  if (!crewView.saying) {
+    return `<button class="btn primary wide logbtn" id="cOpen">${icon('plus')}Say something</button>`;
+  }
+  // Running jobs first, and among those the ones this person supervises.
+  const mine = (S.name || '').trim().toLowerCase();
+  const jobs = boardOrder(activeJobs())
+    .filter(j => j.status !== 'completed' || isOffice())
+    .sort((a, b) => {
+      const rank = j => ((j.supervisor || '').trim().toLowerCase() === mine ? 0 : 1)
+        + (j.status === 'ongoing' ? 0 : 2);
+      return rank(a) - rank(b);
+    });
+
+  return `
     <div class="card cw-say">
       <div class="row spread" style="align-items:center;margin-bottom:10px">
         <h2 style="margin:0">Say something</h2>
         <button class="cw-shut" id="cShut" title="Close">${icon('chevUp')}</button>
       </div>
-      <label class="field"><span>Which job</span>
+      <label class="field"><span>About a job?</span>
         <select id="cJob">
-          ${postable.map(p => `<option value="${p.id}">${jobNo(p)} · ${esc(p.name)}</option>`).join('')}
+          <option value="">Just my diary — no job</option>
+          ${jobs.map(j => `<option value="${j.id}">${jobNo(j)} · ${esc(j.name)}</option>`).join('')}
         </select></label>
       <label class="field"><span>Comment</span>
         <textarea id="cBody" placeholder="What happened, what was decided, anything worth remembering."></textarea></label>
@@ -1741,67 +1887,17 @@ function renderCrew(view) {
       <button class="btn wide" id="cAddPhoto" type="button">${icon('camera')}Add photos</button>
       <div class="thumbs" id="cThumbs"></div>
       <button class="btn primary wide mt" id="cPost">${icon('plus')}Add to the diary</button>
-      <p class="muted tiny center mt" style="margin-bottom:0">Goes into that job's diary as a comment from
+      <p class="muted tiny center mt" style="margin-bottom:0">Goes in under
       <strong>${esc(whoami())}</strong>${isToday ? '' : ', dated ' + esc(fmtShort(day))}.</p>
-    </div>`
-    : `<button class="btn primary wide logbtn" id="cOpen">${icon('plus')}Say something</button>`) : ''}
+    </div>`;
+}
 
-    ${all.length ? `
-      <div class="card">
-        <div class="stat">
-          <div><span class="n">${people.length}</span><span class="l">${people.length === 1 ? 'Person' : 'People'}</span></div>
-          <div><span class="n">${totals.entries}</span><span class="l">Entries</span></div>
-          <div><span class="n">${totals.jobs}</span><span class="l">Jobs touched</span></div>
-          <div><span class="n" style="color:${totals.issues ? 'var(--red)' : 'inherit'}">${totals.issues}</span><span class="l">Issues</span></div>
-        </div>
-      </div>
-
-      ${people.length > 1 ? `
-      <div class="filters">
-        <button class="chip" data-who="all" aria-pressed="${crewView.who === 'all'}">Everyone</button>
-        ${people.map(p => `<button class="chip" data-who="${esc(p.key)}"
-          aria-pressed="${crewView.who === p.key}">${esc(p.name)} <span class="cw-n">${p.items.length}</span></button>`).join('')}
-      </div>` : ''}
-
-      ${shown.map(p => `
-        <div class="dayhead"><h3>${esc(p.name)}</h3>
-          <span class="sub">${p.items.length} thing${p.items.length === 1 ? '' : 's'} ·
-            ${p.jobs.size} job${p.jobs.size === 1 ? '' : 's'}${p.photos ? ` · ${p.photos} photo${p.photos === 1 ? '' : 's'}` : ''}</span>
-        </div>
-        <div class="card">
-          ${p.role ? `<div class="cw-role">${esc(roleLabel(p.role))}${p.issues ? ` · <span class="cw-iss">${p.issues} issue${p.issues === 1 ? '' : 's'}</span>` : ''}</div>` : ''}
-          <div class="tl">${p.items.map(crewItem).join('')}</div>
-        </div>`).join('') || `<div class="empty"><b>Nobody by that name today</b>Pick someone else above.</div>`}`
-    : `<div class="empty">
-        <b>Nothing logged ${isToday ? 'yet today' : 'on this day'}</b>
-        When the crews write in a job diary or add a document, it shows up here under their name.
-      </div>`}`;
-
-  const goDay = d => { crewView.date = d; crewView.who = 'all'; render(); };
-  $('#dPrev', view).onclick = () => goDay(dayShift(day, -1));
-  const next = $('#dNext', view);
-  if (next && !next.disabled) next.onclick = () => goDay(dayShift(day, 1));
-  const back = $('#dToday', view);
-  if (back) back.onclick = () => { crewView.date = null; crewView.who = 'all'; render(); };
-  $('#dPick', view).onchange = function () { if (this.value) goDay(this.value); };
-
+function wireCrewSay(view, day) {
   const openSay = $('#cOpen', view);
   if (openSay) openSay.onclick = () => { crewView.saying = true; render(); };
   const shutSay = $('#cShut', view);
   if (shutSay) shutSay.onclick = () => { crewView.saying = false; render(); };
 
-  $$('[data-who]', view).forEach(b => b.onclick = () => { crewView.who = b.dataset.who; render(); });
-  $$('[data-go]', view).forEach(el => el.onclick = ev => {
-    if (ev.target.closest('a')) return;      // a job link or a photo is not an edit
-    go(el.dataset.go);
-  });
-
-  wireCrewSay(view);
-}
-
-/** The comment box on the crew screen: straight into a job's diary, photos
-    and all, without going to find the job first. */
-function wireCrewSay(view) {
   const post = $('#cPost', view);
   if (!post) return;
   const input = $('#cPhotos', view);
@@ -1828,8 +1924,7 @@ function wireCrewSay(view) {
   post.onclick = async function () {
     const body = $('#cBody', view).value.trim();
     if (!body && !files.length) return toast('Write something, or add a photo');
-    const id = $('#cJob', view).value;
-    const day = crewDate();
+    const id = $('#cJob', view).value || null;
 
     this.disabled = true;
     this.textContent = 'Saving…';
@@ -2315,13 +2410,17 @@ function renderDiary(view) {
    Screen — add or edit one diary entry
    ================================================================ */
 function renderEntry(view) {
-  const p = jobById(jobIdFromPath());
-  if (!p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
+  // '/entry/none' is somebody's own diary — an entry that belongs to the
+  // person rather than to a job. Everything else about the form is the same.
+  const own = jobIdFromPath() === 'none';
+  const p = own ? null : jobById(jobIdFromPath());
+  if (!own && !p) { view.innerHTML = `<div class="empty"><b>Job not found</b></div>`; return; }
+  const backTo = p ? '#/diary/' + p.id : '#/crew';
 
   const editing = route.query.edit ? entryById(route.query.edit) : null;
-  $('#title').textContent = editing ? 'Edit entry' : 'Diary entry';
+  $('#title').textContent = editing ? 'Edit entry' : own ? 'My diary' : 'Diary entry';
 
-  if (p.status === 'completed' && !isOffice()) {
+  if (p && p.status === 'completed' && !isOffice()) {
     view.innerHTML = `<div class="card"><h2>This job is completed</h2>
       <p class="muted small">The diary is closed. Ask the office if something needs adding.</p>
       <a class="btn wide mt" href="#/diary/${p.id}">Back to the diary</a></div>`;
@@ -2335,7 +2434,7 @@ function renderEntry(view) {
 
   view.innerHTML = `
     <div class="card">
-      <div class="tiny muted">${jobNo(p)} · ${esc(p.name)}</div>
+      <div class="tiny muted">${p ? jobNo(p) + ' · ' + esc(p.name) : 'Your own diary — not about a job'}</div>
       <label class="field mt"><span>What happened?</span>
         <select id="kind">
           ${types.map(t => `<option value="${esc(t.key)}" ${t.key === wanted ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
@@ -2366,7 +2465,7 @@ function renderEntry(view) {
 
     <button class="btn primary wide" id="save">${editing ? 'Save changes' : 'Add to diary'}</button>
     ${editing ? `<button class="btn danger wide mt" id="del">Delete this entry</button>` : ''}
-    <p class="muted small center mt">${p.status === 'planned'
+    <p class="muted small center mt">${p && p.status === 'planned'
       ? 'The first entry marks the job as started.'
       : 'Entries save on the phone straight away, with or without signal.'}</p>`;
 
@@ -2429,10 +2528,10 @@ function renderEntry(view) {
         });
         toast('Entry updated');
       } else {
-        await addEntry(p.id, { kind, label, body, entry_date: date, at: stamp(date, time) }, files);
+        await addEntry(p ? p.id : null, { kind, label, body, entry_date: date, at: stamp(date, time) }, files);
         toast(connected() ? 'Added to the diary' : 'Saved on this phone');
       }
-      go('#/diary/' + p.id);
+      go(backTo);
     } catch (err) {
       this.disabled = false;
       this.textContent = editing ? 'Save changes' : 'Add to diary';
@@ -2445,7 +2544,7 @@ function renderEntry(view) {
     if (!confirm('Delete this diary entry? It is gone for everyone.')) return;
     await Store.remove('diary_entries', editing.id);
     toast('Deleted');
-    go('#/diary/' + p.id);
+    go(backTo);
   };
 }
 
@@ -3095,8 +3194,9 @@ function exportDiaryCsv() {
   DB.diary_entries.slice()
     .sort((a, b) => (a.at || '').localeCompare(b.at || ''))
     .forEach(e => {
-      const p = jobById(e.project_id) || {};
-      rows.push([jobNo(p), p.name || '', e.entry_date || '', fmtTime(e.at),
+      const p = e.project_id ? jobById(e.project_id) : null;
+      rows.push([p ? jobNo(p) : '', p ? p.name : 'Own diary — no job',
+        e.entry_date || '', fmtTime(e.at),
         entryLabel(e), e.body || '', (e.files || []).length, e.author || '']);
     });
   downloadCsv('rck-job-diary.csv', rows);

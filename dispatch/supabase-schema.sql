@@ -117,7 +117,9 @@ create index if not exists job_costs_project_idx on job_costs (project_id, sort)
 -- files as [{name,url,type,size}].
 create table if not exists diary_entries (
   id           uuid primary key default gen_random_uuid(),
-  project_id   uuid not null references projects(id) on delete cascade,
+  -- Null means the entry is not about a job: somebody's own diary for the
+  -- day. Everything else about it is the same.
+  project_id   uuid references projects(id) on delete cascade,
   entry_date   date not null default current_date,
   at           timestamptz not null default now(),  -- when it happened
   kind         text not null default 'note',        -- see ENTRY_TYPES in app.js
@@ -128,6 +130,13 @@ create table if not exists diary_entries (
   role         text not null default '',
   created_at   timestamptz not null default now()
 );
+
+-- Added after the first release: an entry no longer has to belong to a job,
+-- so an existing table has the constraint lifted here.
+alter table diary_entries alter column project_id drop not null;
+
+-- The crew screen reads a whole day across every job and person at once.
+create index if not exists diary_day_idx on diary_entries (entry_date, at);
 
 create index if not exists diary_project_idx on diary_entries (project_id, entry_date, at);
 

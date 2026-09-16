@@ -780,6 +780,37 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   color: var(--ink-2); text-decoration: underline; cursor: pointer;
 }
 
+/* Who was out today. The way into the screen is the people, not the work,
+   so they are the biggest thing on it. */
+.faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 11px; }
+.face {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; border: 0; cursor: pointer; font: inherit;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 14px 14px 15px;
+  animation: riseIn var(--t) var(--ease) both; animation-delay: calc(var(--i, 0) * 34ms);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
+}
+.face:active { transform: scale(.975); box-shadow: var(--sh-1); }
+.face b { font-size: 15.5px; letter-spacing: -.015em; margin-top: 9px; }
+.face .fr {
+  font-size: 10.5px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.face .fc { font-size: 13px; font-weight: 620; color: var(--ink-2); margin-top: 7px; }
+.face .fm { font-size: 11.5px; color: var(--ink-3); }
+.face .fx {
+  margin-top: 7px; font-size: 11px; font-weight: 700; color: var(--red);
+  background: var(--red-bg, rgba(158, 50, 38, .09)); border-radius: var(--r-pill); padding: 2px 8px;
+}
+.fi {
+  width: 38px; height: 38px; flex: none; display: grid; place-items: center;
+  border-radius: 50%; background: var(--ink); color: #fff;
+  font-size: 14px; font-weight: 700; letter-spacing: .02em;
+}
+.fi.big { width: 46px; height: 46px; font-size: 16.5px; }
+.personhead { display: flex; align-items: center; gap: 13px; }
+
 /* Which job a line belongs to. On the crew screen every row needs it —
    the whole point is that one person's day crosses several jobs. */
 .cw-job {
@@ -789,6 +820,8 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   padding: 3px 9px; text-decoration: none;
 }
 .cw-job:active { background: var(--line); }
+/* Not about a job at all — somebody's own diary for the day. */
+.cw-job.own { color: var(--ink-3); background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
 .cw-role {
   font-size: 11.5px; font-weight: 620; color: var(--ink-3);
   text-transform: uppercase; letter-spacing: .05em; margin-bottom: 9px;
