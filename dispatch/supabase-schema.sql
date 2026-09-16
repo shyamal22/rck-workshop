@@ -84,6 +84,9 @@ create table if not exists project_docs (
 
 create index if not exists project_docs_project_idx on project_docs (project_id, uploaded_at);
 
+-- Who added it, by id as well as by name — the id survives a respelling.
+alter table project_docs add column if not exists user_id uuid;
+
 -- ------------------------------------------------------------- people
 -- A person is only ever a name typed into Settings — there are no accounts
 -- in this app and there is no wish for any. This table hangs the few things
@@ -104,6 +107,15 @@ create table if not exists crew_people (
 );
 
 create index if not exists crew_people_key_idx on crew_people (name_key);
+
+-- Added when sign-in arrived. A person's row is what lets them in: the
+-- director puts their phone or email here, they sign in with a code sent to
+-- it, and user_id is filled in the first time. active = false is how access
+-- is taken away — the row and every entry they ever wrote stay.
+alter table crew_people add column if not exists user_id uuid unique;
+alter table crew_people add column if not exists phone   text not null default '';
+alter table crew_people add column if not exists email   text not null default '';
+alter table crew_people add column if not exists active  boolean not null default true;
 
 -- --------------------------------------------------------- job costing
 -- One line of what a finished job actually cost: a description and an
@@ -155,6 +167,8 @@ create table if not exists diary_entries (
 -- Added after the first release: an entry no longer has to belong to a job,
 -- so an existing table has the constraint lifted here.
 alter table diary_entries alter column project_id drop not null;
+-- Who wrote it, by id as well as by name — the id survives a respelling.
+alter table diary_entries add column if not exists user_id uuid;
 
 -- The crew screen reads a whole day across every job and person at once.
 create index if not exists diary_day_idx on diary_entries (entry_date, at);
@@ -174,38 +188,142 @@ create trigger projects_touch before update on projects
   for each row execute function touch_project();
 
 -- =====================================================================
---  Access
+--  Access — who gets in, and what each role can touch
 --
---  Like RCK Workshop, this is an internal tool with no logins: every
---  device uses the same public "anon" key, so anyone who has the app URL
---  and that key can read and write. That is deliberate — the crew have no
---  password to lose. The office/supervisor split is about keeping the app
---  simple to use, not about secrecy: don't put anything you would mind an
---  RCK phone seeing into the app, and don't publish the link outside RCK.
+--  Every phone signs in as a person: a code sent to the phone number or
+--  email the director put on their row in crew_people. From then on the
+--  database checks WHO is asking, not just whether they hold the key.
+--  Somebody taken off the list (active = false) is refused at the database,
+--  on every device, straight away.
 --
---  That now includes the costing. The app shows job_costs, margins and the
---  P&L to a Director device only, but the database does not: anyone holding
---  the anon key can read this table directly. If the margins must be secret
---  from everyone but the directors, the app needs real accounts — see the
---  RCK HR app, which is built that way.
+--  ┌──────────────────────────────────────────────────────────────────┐
+--  │  STEP 1 — DO THIS BEFORE RUNNING THE REST, OR YOU LOCK YOURSELF  │
+--  │  OUT TOO.  Put your own name and the email or phone you will     │
+--  │  sign in with into the line below. Phone as digits with the      │
+--  │  country code, e.g. 6421234567.                                  │
+--  └──────────────────────────────────────────────────────────────────┘
 -- =====================================================================
+insert into crew_people (name_key, name, role, active, email, phone)
+select lower(v.name), v.name, 'director', true, v.email, v.phone
+from (values ('YOUR NAME', 'your.email@example.com', '')) as v(name, email, phone)
+where v.name <> 'YOUR NAME' and v.email not like '%example.com'   -- only once it has been edited
+on conflict (name_key) do update
+  set role = 'director', active = true,
+      email = excluded.email, phone = excluded.phone;
+
+-- Refuses to go any further until STEP 1 has really been done.
+do $$
+begin
+  if not exists (
+    select 1 from crew_people
+    where role = 'director' and active
+      and (email <> '' or phone <> '')
+      and email not like '%example.com' and name <> 'YOUR NAME'
+  ) then
+    raise exception 'STEP 1 first: put your own name and email or phone into the insert at the top of the Access section, or every phone including yours will be locked out.';
+  end if;
+end $$;
+
+-- A phone number the way the sign-in service writes it: digits, country
+-- code, no plus. A New Zealand number typed the local way ("021 234 5678")
+-- means +64, so a row the director typed in a hurry still matches the
+-- token. The app normalises the same way before it saves; this is for rows
+-- that arrived any other way.
+create or replace function public.norm_phone(v text) returns text
+language sql immutable as $$
+  select case
+    when d like '00%' then substr(d, 3)
+    when d like '0%'  then '64' || substr(d, 2)
+    else d end
+  from (select regexp_replace(coalesce(v, ''), '\D', '', 'g') as d) x
+$$;
+
+-- The person behind the current request. Matched by user_id once that is
+-- set, and until then by the email or phone they signed in with — which is
+-- how a row the director typed in gets joined to the account that person
+-- creates when they first sign in. security definer so this can read
+-- crew_people without going through crew_people's own policy.
+create or replace function public.my_person_id() returns uuid
+language sql stable security definer set search_path = public as $$
+  select id from crew_people
+  where active and (
+    user_id = auth.uid()
+    or (user_id is null and email <> ''
+        and lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+    or (user_id is null and phone <> ''
+        and public.norm_phone(phone) = public.norm_phone(auth.jwt() ->> 'phone'))
+  )
+  order by (user_id is not null) desc
+  limit 1
+$$;
+
+create or replace function public.my_role() returns text
+language sql stable security definer set search_path = public as $$
+  select role from crew_people where id = public.my_person_id()
+$$;
+
+create or replace function public.is_active()   returns boolean language sql stable as $$ select public.my_person_id() is not null $$;
+create or replace function public.is_office()   returns boolean language sql stable as $$ select public.my_role() in ('office', 'director') $$;
+create or replace function public.is_director() returns boolean language sql stable as $$ select public.my_role() = 'director' $$;
+
+grant execute on function public.norm_phone(text), public.my_person_id(), public.my_role(),
+  public.is_active(), public.is_office(), public.is_director() to anon, authenticated;
+
 alter table projects      enable row level security;
 alter table project_docs  enable row level security;
 alter table diary_entries enable row level security;
 alter table job_costs     enable row level security;
 alter table crew_people   enable row level security;
 
+-- The old open policies, from before sign-in.
 drop policy if exists projects_all      on projects;
 drop policy if exists project_docs_all  on project_docs;
 drop policy if exists diary_entries_all on diary_entries;
 drop policy if exists job_costs_all     on job_costs;
 drop policy if exists crew_people_all   on crew_people;
 
-create policy projects_all      on projects      for all to anon, authenticated using (true) with check (true);
-create policy project_docs_all  on project_docs  for all to anon, authenticated using (true) with check (true);
-create policy diary_entries_all on diary_entries for all to anon, authenticated using (true) with check (true);
-create policy job_costs_all     on job_costs     for all to anon, authenticated using (true) with check (true);
-create policy crew_people_all   on crew_people   for all to anon, authenticated using (true) with check (true);
+drop policy if exists projects_read   on projects;
+drop policy if exists projects_insert on projects;
+drop policy if exists projects_update on projects;
+drop policy if exists projects_delete on projects;
+create policy projects_read   on projects for select to authenticated using (public.is_active());
+create policy projects_insert on projects for insert to authenticated with check (public.is_office());
+create policy projects_update on projects for update to authenticated using (public.is_active()) with check (public.is_active());
+create policy projects_delete on projects for delete to authenticated using (public.is_director());
+
+-- Office-only paperwork never reaches a site phone, at the database now.
+drop policy if exists project_docs_read   on project_docs;
+drop policy if exists project_docs_insert on project_docs;
+drop policy if exists project_docs_update on project_docs;
+drop policy if exists project_docs_delete on project_docs;
+create policy project_docs_read   on project_docs for select to authenticated
+  using (public.is_active() and (audience <> 'office' or public.is_office()));
+create policy project_docs_insert on project_docs for insert to authenticated with check (public.is_active());
+create policy project_docs_update on project_docs for update to authenticated using (public.is_office()) with check (public.is_office());
+create policy project_docs_delete on project_docs for delete to authenticated using (public.is_office());
+
+drop policy if exists diary_entries_active on diary_entries;
+create policy diary_entries_active on diary_entries for all to authenticated
+  using (public.is_active()) with check (public.is_active());
+
+-- The money is a director's, and now the database says so too.
+drop policy if exists job_costs_director on job_costs;
+create policy job_costs_director on job_costs for all to authenticated
+  using (public.is_director()) with check (public.is_director());
+
+-- Everyone who is in can see who else is (names, faces, roles). Only a
+-- director adds, removes or changes people; anybody can update their own row,
+-- which is how a photo or a spelling of a name gets set.
+drop policy if exists crew_people_read   on crew_people;
+drop policy if exists crew_people_insert on crew_people;
+drop policy if exists crew_people_update on crew_people;
+drop policy if exists crew_people_delete on crew_people;
+create policy crew_people_read   on crew_people for select to authenticated using (public.is_active());
+create policy crew_people_insert on crew_people for insert to authenticated with check (public.is_director());
+create policy crew_people_update on crew_people for update to authenticated
+  using (public.is_director() or id = public.my_person_id())
+  with check (public.is_director() or id = public.my_person_id());
+create policy crew_people_delete on crew_people for delete to authenticated using (public.is_director());
 
 -- =====================================================================
 --  File storage — job paperwork and site photos
@@ -222,5 +340,5 @@ create policy dispatch_files_read on storage.objects
   using (bucket_id = 'dispatch-files');
 
 create policy dispatch_files_write on storage.objects
-  for insert to anon, authenticated
-  with check (bucket_id = 'dispatch-files');
+  for insert to authenticated
+  with check (bucket_id = 'dispatch-files' and public.is_active());
