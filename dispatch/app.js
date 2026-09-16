@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.6.0';
+const VERSION = '2.7.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1155,6 +1155,7 @@ function restoreScroll(path) {
 }
 
 function render() {
+  document.title = 'RCK Dispatch';          // printDoc() borrows it for the print header
   if (lastPath !== null) scrollMemory[lastPath] = window.scrollY;
   route = parseHash();
   lastPath = route.path;
@@ -3492,10 +3493,14 @@ const MARK = `
   </svg>`;
 
 /** The letterhead: who we are on the left, what this is on the right. */
+/** The letterhead. `title` is the document's own heading; a day's document
+    passes the date instead and puts its real title in dayHead() below, so
+    the name of the person or job is said once, at full size. */
 function docHead(kind, title, subtitle) {
   const contact = [BRAND.email, BRAND.phone].filter(Boolean).join(' · ');
+  const bare = !subtitle && /^[A-Z][a-z]+day \d/.test(title || '');   // a day, not a title
   return `
-    <div class="doc-head">
+    <div class="doc-head${bare ? ' bare' : ''}">
       <div class="top">
         ${MARK}
         <div>
@@ -3505,10 +3510,12 @@ function docHead(kind, title, subtitle) {
         </div>
         <div class="meta">
           <div class="kind">${esc(kind)}</div>
-          <div class="when">${fmtDate(new Date().toISOString())}${S.name ? '<br>Prepared by ' + esc(S.name) : ''}</div>
+          ${bare ? `<div class="day">${esc(title)}</div>` : ''}
+          <div class="when">${bare ? '' : fmtDate(new Date().toISOString()) + (S.name ? '<br>' : '')}${
+            S.name ? 'Prepared by ' + esc(S.name) : ''}</div>
         </div>
       </div>
-      <h1>${esc(title)}</h1>
+      ${bare ? '' : `<h1>${esc(title)}</h1>`}
       ${subtitle ? `<div class="sub">${esc(subtitle)}</div>` : ''}
       <div class="rule"></div>
     </div>`;
@@ -3519,6 +3526,10 @@ function docHead(kind, title, subtitle) {
     page and will not repeat anything else — that is what puts the RCK line at
     the top of page four. */
 async function printDoc(html, running) {
+  // Safari and Chrome put the page title in their own print header. Make it
+  // say what the document is, rather than the name of the app.
+  if (running) document.title = `${BRAND.name} — ${running}`;
+
   const area = $('#printArea');
   area.innerHTML = `
     <div class="doc">
@@ -3602,16 +3613,99 @@ function printTimeline(list) {
     </div>`;
 }
 
-/** The photographs on one entry, sitting with it. On a single day there are
-    few enough that a caption would only repeat the note two lines above. */
-function inlineShots(e) {
-  const shots = (e.files || []).filter(f => /^image\//.test(f.type || ''));
-  if (!shots.length) return '';
-  return `<div class="dshots">${shots.map(f =>
-    `<img src="${esc(f.url)}" alt="">`).join('')}</div>`;
+/** The title block of a day's document: whose day, said once. A face or a
+    job mark, the name at full size, and one line with everything a reader
+    wants first. The letterhead above it has already named the company and
+    the kind of document, so neither is repeated here. */
+function dayHead(o) {
+  return `
+    <div class="dayhd">
+      <span class="dm${o.job ? ' job' : ''}">${o.mark}</span>
+      <div>
+        <h1>${esc(o.title)}</h1>
+        <div class="desc">${o.desc}</div>
+      </div>
+    </div>`;
 }
 
-function daySection(p, day, n, total, withShots) {
+/** The day as a log: the clock down the left, everything else beside it.
+    `items` are crew-feed items ({type, at, e|d, job}) or bare diary entries.
+    Names the job on a line only when the day crossed more than one, and the
+    author only when more than one person wrote in it. */
+function dayLog(items, opts) {
+  opts = opts || {};
+  const rows = items.map(raw => {
+    const it = raw.type ? raw : { type: 'entry', at: raw.at, e: raw, job: null };
+    if (it.type === 'doc') {
+      return `<tr>
+        <td class="lt">${esc(fmtTime(it.at))}</td>
+        <td><span class="lk">Document${opts.showJob && it.job ? `<span class="j">${jobNo(it.job)}</span>` : ''}</span>
+          <div class="ln">${esc(it.d.title || it.d.file_name || 'Document')}</div></td>
+        ${opts.showBy ? `<td class="lby">${esc(it.d.uploaded_by || '')}</td>` : ''}
+      </tr>`;
+    }
+    const e = it.e;
+    const flag = e.kind === 'issue' || e.kind === 'delay';
+    const shots = (e.files || []).filter(f => /^image\//.test(f.type || '')).length;
+    return `<tr${flag ? ' class="flag"' : ''}>
+      <td class="lt">${esc(fmtTime(e.at))}</td>
+      <td>
+        <span class="lk">${esc(entryLabel(e))}${
+          opts.showJob ? `<span class="j">${it.job ? jobNo(it.job) : '<em>own diary</em>'}</span>` : ''}${
+          shots ? `<span class="pc">${shots} photo${shots > 1 ? 's' : ''}</span>` : ''}</span>
+        ${e.body ? `<div class="ln">${esc(e.body)}</div>` : ''}
+      </td>
+      ${opts.showBy ? `<td class="lby">${esc(e.author || '')}</td>` : ''}
+    </tr>`;
+  }).join('');
+
+  return `
+    <table class="dlog">
+      <thead><tr><th>Time</th><th>What happened</th>${opts.showBy ? '<th style="text-align:right">By</th>' : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+/** Photographs two across and two down — four to a page, never more, on
+    pages of their own after the day. The frame is square, which crops a
+    mixed bag of portrait and landscape phone shots least badly, and each
+    page is its own table behind its own break, so a page gets exactly four
+    rather than however many the browser can squeeze. `shots` is
+    [{f, e, job, day, n}]. */
+function photoGrid(shots, opts) {
+  if (!shots.length) return '';
+  opts = opts || {};
+  const cell = sh => {
+    const flag = sh.e.kind === 'issue' || sh.e.kind === 'delay';
+    return `
+    <td><figure class="photo">
+      <div class="ph"><img src="${esc(sh.f.url)}" alt=""></div>
+      <div class="cap${flag ? ' flag' : ''}">
+        <b>${sh.n ? `Day ${sh.n} · ${esc(fmtShort(sh.day))} · ` : ''}${esc(fmtTime(sh.e.at))}</b>
+        <span class="k">${esc(entryLabel(sh.e))}</span>
+        ${opts.showJob ? `<span class="j">${sh.job ? jobNo(sh.job) : 'own diary'}</span>` : ''}
+      </div>
+    </figure></td>`;
+  };
+  const pages = [];
+  for (let i = 0; i < shots.length; i += 4) {
+    const four = shots.slice(i, i + 4);
+    const rows = [];
+    for (let r = 0; r < four.length; r += 2) {
+      rows.push(`<tr>${cell(four[r])}${four[r + 1] ? cell(four[r + 1]) : '<td></td>'}</tr>`);
+    }
+    const range = shots.length <= 4 ? ` — ${shots.length}`
+      : four.length === 1 ? ` — ${i + 1} of ${shots.length}`
+      : ` — ${i + 1}–${i + four.length} of ${shots.length}`;
+    pages.push(`
+      <div class="page-break"></div>
+      <h2>Photographs${range}${opts.over ? ' ' + esc(opts.over) : ''}</h2>
+      <table class="photos"><tbody>${rows.join('')}</tbody></table>`);
+  }
+  return pages.join('');
+}
+
+function daySection(p, day, n, total) {
   const list = entriesFor(p.id, day);
   if (!list.length) return '';
   const first = list[0], last = list[list.length - 1];
@@ -3635,9 +3729,7 @@ function daySection(p, day, n, total, withShots) {
           return `<tr${flag ? ' class="flag"' : ''}>
             <td class="dt">${esc(fmtTime(e.at))}</td>
             <td class="dk">${esc(entryLabel(e))}</td>
-            <td class="dnote">${esc(e.body || '')}${
-              withShots ? inlineShots(e)
-                : n2 ? `<span class="ph"> · ${n2} photo${n2 > 1 ? 's' : ''}</span>` : ''}</td>
+            <td class="dnote">${esc(e.body || '')}${n2 ? `<span class="ph"> · ${n2} photo${n2 > 1 ? 's' : ''}</span>` : ''}</td>
             <td class="dby">${esc(e.author || '')}</td>
           </tr>`;
         }).join('')}
@@ -3663,24 +3755,7 @@ function photoAppendix(p, days) {
   days.forEach((day, i) => entriesFor(p.id, day).forEach(e => (e.files || []).forEach(f => {
     if (/^image\//.test(f.type || '')) shots.push({ f, e, day, n: i + 1 });
   })));
-  if (!shots.length) return '';
-
-  const cell = ({ f, e, day, n }) => `
-    <td><figure class="photo">
-      <img src="${esc(f.url)}" alt="">
-      <div class="cap"><b>Day ${n} · ${esc(fmtShort(day))} · ${esc(fmtTime(e.at))}</b>
-        ${esc(entryLabel(e))}${e.body ? ' — ' + esc(clip(e.body, 74)) : ''}</div>
-    </figure></td>`;
-
-  const rows = [];
-  for (let i = 0; i < shots.length; i += 2) {
-    rows.push(`<tr>${cell(shots[i])}${shots[i + 1] ? cell(shots[i + 1]) : '<td></td>'}</tr>`);
-  }
-
-  return `
-    <div class="page-break"></div>
-    <h2>Photographs — ${shots.length} over ${days.length} day${days.length > 1 ? 's' : ''}</h2>
-    <table class="photos"><tbody>${rows.join('')}</tbody></table>`;
+  return photoGrid(shots, { over: `over ${days.length} day${days.length > 1 ? 's' : ''}` });
 }
 
 function docsTable(p, all) {
@@ -3750,34 +3825,39 @@ function printJobReport(p) {
 function printDayReport(p, day) {
   const list = entriesFor(p.id, day);
   const issues = list.filter(e => e.kind === 'issue' || e.kind === 'delay');
-  const shots = list.reduce((n, e) => n + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
+  const shots = [];
+  list.forEach(e => (e.files || []).forEach(f => { if (/^image\//.test(f.type || '')) shots.push({ f, e, job: p }); }));
   const who = Array.from(new Set(list.map(e => (e.author || '').trim()).filter(Boolean)));
+  const sep = '<span class="sep">|</span>';
 
   printDoc(`
-    ${docHead('Daily job diary', p.name, `${jobNo(p)}${p.client ? ' · ' + p.client : ''} · ${fmtDayDate(day)}`)}
+    ${docHead('Daily job diary', fmtDayDate(day))}
+
+    ${dayHead({
+      job: true,
+      mark: `<span>${esc(jobNo(p).replace('JOB-', ''))}<small>JOB</small></span>`,
+      title: p.name,
+      desc: [
+        p.client ? `<b>${esc(p.client)}</b>` : '',
+        p.site ? esc(p.site) : '',
+        `${esc(crewLabel(crewOf(p)))} · ${esc(typeLabel(typeOf(p)))}`,
+        p.supervisor ? `Supervisor <b>${esc(p.supervisor)}</b>` : ''
+      ].filter(Boolean).join(sep)
+    })}
 
     <div class="figures">
       <div><div class="n">${esc(daySpan(list) || '—')}</div><div class="l">On site</div></div>
       <div><div class="n">${list.length}</div><div class="l">Entries</div></div>
       <div><div class="n${issues.length ? ' neg' : ''}">${issues.length}</div><div class="l">Issues &amp; delays</div></div>
-      <div><div class="n">${shots}</div><div class="l">Photos</div></div>
+      <div><div class="n">${shots.length}</div><div class="l">Photos</div></div>
     </div>
 
     ${printTimeline(list)}
 
-    <table class="kv two">
-      <tr>
-        <td class="lbl">Site</td><td class="val">${esc(p.site || '—')}</td>
-        <td class="lbl">Crew</td><td class="val">${esc(crewLabel(crewOf(p)))} · ${esc(typeLabel(typeOf(p)))}</td>
-      </tr>
-      <tr>
-        <td class="lbl">Supervisor</td><td class="val">${esc(p.supervisor || '—')}</td>
-        <td class="lbl">On the day</td><td class="val">${who.length ? esc(who.join(', ')) : '—'}</td>
-      </tr>
-    </table>
+    <h2>The day${who.length ? ` — ${esc(who.join(', '))}` : ''}</h2>
+    ${list.length ? dayLog(list, { showBy: who.length > 1 }) : '<p>No entries on this day.</p>'}
 
-    <h2>The day</h2>
-    ${daySection(p, day, 0, 0, true) || '<p>No entries on this day.</p>'}
+    ${photoGrid(shots)}
 
     <div class="sig">
       <div>Supervisor &amp; date</div>
@@ -3791,72 +3871,48 @@ function printPersonDay(person, day) {
   const items = person.items;
   const entries = items.filter(it => it.type === 'entry').map(it => it.e);
   const issues = entries.filter(e => e.kind === 'issue' || e.kind === 'delay');
-  const shots = entries.reduce((n, e) => n + (e.files || []).filter(f => /^image\//.test(f.type || '')).length, 0);
   const jobs = [];
   items.forEach(it => { if (it.job && !jobs.some(j => j.id === it.job.id)) jobs.push(it.job); });
+  const shots = [];
+  items.forEach(it => {
+    if (it.type !== 'entry') return;
+    (it.e.files || []).forEach(f => { if (/^image\//.test(f.type || '')) shots.push({ f, e: it.e, job: it.job }); });
+  });
   const photo = personPhoto(person.name);
+  const multi = jobs.length > 1 || person.own > 0;
+  const sep = '<span class="sep">|</span>';
 
-  const row = it => {
-    if (it.type === 'doc') {
-      return `<tr>
-        <td class="dt">${esc(fmtTime(it.at))}</td>
-        <td class="dk">Document</td>
-        <td class="dnote">${esc(it.d.title || it.d.file_name || 'Document')}</td>
-        <td class="djob">${it.job ? jobNo(it.job) : '—'}</td>
-      </tr>`;
-    }
-    const e = it.e;
-    const flag = e.kind === 'issue' || e.kind === 'delay';
-    return `<tr${flag ? ' class="flag"' : ''}>
-      <td class="dt">${esc(fmtTime(e.at))}</td>
-      <td class="dk">${esc(entryLabel(e))}</td>
-      <td class="dnote">${esc(e.body || '')}${inlineShots(e)}</td>
-      <td class="djob">${it.job ? jobNo(it.job) : '<em>own diary</em>'}</td>
-    </tr>`;
-  };
+  const where = jobs.length === 1
+    ? `<b>${jobNo(jobs[0])}</b> ${esc(jobs[0].name)}${jobs[0].client ? ` — ${esc(jobs[0].client)}` : ''}`
+    : jobs.length ? `${jobs.length} jobs: ${jobs.map(j => `<b>${jobNo(j)}</b>`).join(', ')}`
+    : '';
 
   printDoc(`
-    ${docHead('Daily diary', person.name, fmtDayDate(day))}
+    ${docHead('Daily diary', fmtDayDate(day))}
 
-    <div class="whose">
-      <span class="face">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials(person.name))}</span>
-      <div>
-        <div class="nm">${esc(person.name)}</div>
-        <div class="rl">${person.role ? esc(roleLabel(person.role)) : 'On the tools'}</div>
-        <div class="sm">${esc(fmtDayDate(day))} — ${items.length} thing${items.length === 1 ? '' : 's'} logged${
-          jobs.length ? ` across ${jobs.length} job${jobs.length === 1 ? '' : 's'}` : ''}${
-          person.own ? `, ${person.own} in their own diary` : ''}.</div>
-      </div>
-    </div>
+    ${dayHead({
+      mark: photo ? `<img src="${esc(photo)}" alt="">` : esc(initials(person.name)),
+      title: person.name,
+      desc: [
+        person.role ? esc(roleLabel(person.role)) : 'On the tools',
+        where,
+        person.own ? `${person.own} in their own diary` : ''
+      ].filter(Boolean).join(sep)
+    })}
 
     <div class="figures">
-      <div><div class="n">${esc(daySpan(entries) || '—')}</div><div class="l">First to last</div></div>
+      <div><div class="n">${esc(daySpan(entries) || '—')}</div><div class="l">On the day</div></div>
       <div><div class="n">${items.length}</div><div class="l">Logged</div></div>
       <div><div class="n${issues.length ? ' neg' : ''}">${issues.length}</div><div class="l">Issues &amp; delays</div></div>
-      <div><div class="n">${shots}</div><div class="l">Photos</div></div>
+      <div><div class="n">${shots.length}</div><div class="l">Photos</div></div>
     </div>
 
     ${printTimeline(entries)}
 
-    ${jobs.length ? `
-    <h2>The jobs</h2>
-    <table>
-      <thead><tr><th style="width:20mm">Job</th><th>Name and client</th>
-        <th class="num" style="width:20mm">Entries</th></tr></thead>
-      <tbody>
-        ${jobs.map(j => `<tr>
-          <td><strong>${jobNo(j)}</strong></td>
-          <td>${esc(j.name)}${j.client ? `<br><em>${esc(j.client)}</em>` : ''}</td>
-          <td class="num">${items.filter(it => it.job && it.job.id === j.id).length}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>` : ''}
-
     <h2>The day</h2>
-    <table class="dtable">
-      <thead><tr class="cols"><th>Time</th><th>Entry</th><th>Notes</th><th>Job</th></tr></thead>
-      <tbody>${items.map(row).join('')}</tbody>
-    </table>
+    ${items.length ? dayLog(items, { showJob: multi }) : '<p>Nothing logged.</p>'}
+
+    ${photoGrid(shots, { showJob: multi })}
 
     <div class="sig">
       <div>${esc(person.name)} &amp; date</div>
