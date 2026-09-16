@@ -180,9 +180,6 @@ svg { width: 22px; height: 22px; display: block; fill: none; stroke: currentColo
 .status-green  { --s: var(--green);  --s-bg: var(--green-bg); }
 .status-orange { --s: var(--yellow); --s-bg: var(--yellow-bg); }  /* stored as 'orange', shown yellow */
 .status-red    { --s: var(--red);    --s-bg: var(--red-bg); }
-/* Not a fourth status: "nothing to go on yet", used only where a servicing
-   date cannot be worked out because no reading has been taken. */
-.status-grey   { --s: var(--ink-3);  --s-bg: var(--panel-2); }
 
 /* On a tinted card the grey text scale is too pale to read, so darken it. */
 .gear-card, .wo, .card.accent, .tally button { --ink-2: #49535d; --ink-3: #5f6972; }
@@ -456,62 +453,72 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 }
 
 /* =====================================================================
-   What is happening on a job
+   Who is on a job
 
-   A note used to be a note — you could not tell someone fixing the thing
-   from someone talking about it. Notes now carry a meaning, and the newest
-   one becomes the job's live line. Tone reuses the status vocabulary rather
-   than inventing colours: red is bad news, yellow is held up, dark is
-   happening now, grey is only words.
+   No colour: colour still only means status. The holder is bold, the last
+   touch is quiet.
    ===================================================================== */
-.tone-live  { --tn: var(--ink);     --tn-bg: rgba(15, 20, 24, .08); }
-.tone-hold  { --tn: var(--yellow);  --tn-bg: var(--yellow-bg); }
-.tone-stop  { --tn: var(--red);     --tn-bg: var(--red-bg); }
-.tone-done  { --tn: var(--green);   --tn-bg: var(--green-bg); }
-.tone-plain { --tn: var(--ink-2);   --tn-bg: var(--panel-2); }
-.tone-quiet { --tn: var(--ink-3);   --tn-bg: var(--panel-2); }
-.tone-written { --tn: var(--ink-2); --tn-bg: var(--panel-2); }
+.wholine {
+  display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 2px;
+  font-size: 12px; font-weight: 550; color: var(--ink-3);
+}
+.wholine .holder { color: var(--ink); font-weight: 700; }
 
-.pulse {
-  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
-  margin: 7px 0 2px; font-size: 12.5px; font-weight: 620; color: var(--tn);
+/* =====================================================================
+   Crew — one row per person, one list per day
+   ===================================================================== */
+.people { display: grid; gap: 8px; }
+.person {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px;
+  width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit; border: 0;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-2);
+  padding: 13px 16px;
+  animation: riseIn var(--t) var(--ease) both; animation-delay: calc(var(--i, 0) * 14ms);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease);
 }
-.pulse .pdot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--tn); flex: none;
+.person:active { transform: scale(.985); box-shadow: var(--sh-1); }
+.pv-name { font-size: 15.5px; font-weight: 700; letter-spacing: -.015em; }
+.pv-name i {
+  font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-3); margin-left: 8px;
 }
-.tone-quiet .pdot { background: none; box-shadow: inset 0 0 0 1.5px var(--tn); }
-.tone-live .pdot { animation: beat 2s var(--ease-soft) infinite; }
-@keyframes beat {
-  0%, 70%, 100% { transform: scale(1); opacity: 1; }
-  35% { transform: scale(1.5); opacity: .55; }
+.pv-sub { grid-column: 1; font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+.pv-num {
+  grid-column: 2; grid-row: 1 / span 2; text-align: center; min-width: 40px;
+  font-size: 21px; font-weight: 750; letter-spacing: -.03em; font-variant-numeric: tabular-nums;
 }
-.pulse .pm { font-weight: 550; color: var(--ink-3); white-space: nowrap; }
-.pulse.big {
-  margin-top: 10px; font-size: 13.5px;
-  background: var(--tn-bg); border-radius: var(--r-pill);
-  padding: 7px 13px; align-self: flex-start; width: fit-content;
-}
+.pv-num i { display: block; font-style: normal; font-size: 10px; font-weight: 620;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.pv-num.zero { color: var(--ink-3); font-weight: 600; }
 
-/* posting a note: the chip you tap is the meaning */
-.note-kinds { display: grid; gap: 8px; }
-.note-chip {
-  display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
-  border: 0; border-radius: var(--r-sm); padding: 11px 14px;
-  background: var(--tn-bg); color: var(--tn);
-  transition: transform var(--t-fast) var(--ease), opacity var(--t) var(--ease);
+.daynav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.daynav .icon-btn { background: var(--panel); box-shadow: var(--sh-2); border-radius: var(--r-sm); }
+.daynav .icon-btn[disabled] { opacity: .3; }
+.dn-date {
+  position: relative; flex: 1; text-align: center; cursor: pointer;
+  background: var(--panel); box-shadow: var(--sh-2); border-radius: var(--r-sm);
+  padding: 8px 10px; min-height: var(--tap);
+  display: flex; flex-direction: column; justify-content: center;
 }
-.tone-plain.note-chip { box-shadow: inset 0 0 0 1px var(--line-2); }
-.note-chip:active { transform: scale(.985); }
-.note-chip[disabled] { opacity: .45; }
-.note-chip .nk { display: block; font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
-.note-chip .nh { display: block; font-size: 12px; font-weight: 500; opacity: .78; margin-top: 1px; }
+.dn-date b { font-size: 14.5px; font-weight: 700; letter-spacing: -.015em; }
+.dn-date span { font-size: 11.5px; color: var(--ink-3); font-weight: 600; margin-top: 1px; }
+.dn-date input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; border: 0; }
 
-.note-tag {
-  display: inline-block; margin-bottom: 4px;
-  background: var(--tn-bg); color: var(--tn);
-  font-size: 11.5px; font-weight: 700; letter-spacing: -.005em;
-  padding: 2px 9px; border-radius: var(--r-pill);
+.log-card { padding: 4px 14px; }
+.log-item {
+  display: grid; grid-template-columns: 46px 1fr; gap: 12px;
+  padding: 13px 0; border-top: 1px solid var(--line);
 }
+.log-card .log-item:first-child { border-top: 0; }
+.log-item.to-job { cursor: pointer; }
+.log-item.to-job:active { opacity: .6; }
+.log-time { font-size: 13px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; padding-top: 1px; }
+.log-kind { font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; }
+.log-job { font-size: 12px; color: var(--ink-2); margin-top: 3px; font-weight: 550; }
+.log-item.to-job .log-job { text-decoration: underline; text-underline-offset: 2px; }
+.log-note { font-size: 14px; line-height: 1.45; margin-top: 4px; white-space: pre-wrap; }
+.log-item .thumbs img { width: 66px; height: 66px; }
+.tagname.on, .tagname.tap.on { background: var(--ink); color: #fff; }
 
 /* =====================================================================
    The landing page
@@ -542,13 +549,6 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 
 .hub-card:nth-child(3) { animation-delay: 140ms; }
 
-/* =====================================================================
-   Planned servicing
-
-   The colour answers a different question from the gear board — when is
-   this next due, not can we use it today — so a machine can be green
-   there and red here. Same three tones, because it is still status.
-   ===================================================================== */
 .chipwrap { display: flex; flex-wrap: wrap; gap: 7px; }
 .tagname {
   font-size: 12.5px; font-weight: 620; background: var(--panel-2);
@@ -559,11 +559,6 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
   transition: transform var(--t-fast) var(--ease);
 }
 .tagname.tap:active { transform: scale(.95); }
-.gear-card .hrs {
-  position: absolute; right: 12px; bottom: 11px;
-  font-size: 11.5px; font-weight: 700; color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-}
 
 /* =====================================================================
    Manuals
@@ -664,11 +659,6 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .k-wo .kttl  { font-size: 17px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-wo .kmeta { font-size: 13px; color: #a3adb9; margin-top: 3px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* the live line reads on the dark wall too: its own tones are re-pointed,
-   the status ones already are */
-body.kiosk .tone-live { --tn: #e8eef5; }
-body.kiosk .tone-plain, body.kiosk .tone-quiet, body.kiosk .tone-written { --tn: #98a2ae; }
-.k-wo .kpulse { color: var(--tn); font-weight: 700; }
 .k-wo .keta  { text-align: right; font-size: 14px; color: #c3ccd6; white-space: nowrap; }
 .k-wo .keta b { display: block; font-size: 17px; font-weight: 620; }
 .k-wo .keta .late { color: #ff8078; }
@@ -854,6 +844,26 @@ body.kiosk .tone-plain, body.kiosk .tone-quiet, body.kiosk .tone-written { --tn:
 
 .doc .avoid-break { break-inside: avoid; page-break-inside: avoid; }
 .doc .note { white-space: pre-wrap; }
+
+/* daily report: the timeline is dense, the asset blocks are boxed */
+.doc table.tight { font-size: 9.5pt; }
+.doc table.tight td { padding: 1.7mm 2.2mm; }
+.doc table.tight td.t { font-variant-numeric: tabular-nums; color: #3b4557; white-space: nowrap; }
+.doc .asset { border: .6pt solid #ddd6ca; margin-bottom: 4mm; }
+.doc .asset-head {
+  display: flex; align-items: baseline; gap: 3mm;
+  background: #1f2a44; color: #fff; padding: 2.2mm 3mm;
+}
+.doc .asset-head .code { font-size: 11.5pt; font-weight: 800; letter-spacing: -.2pt; }
+.doc .asset-head .name { font-size: 9.5pt; opacity: .85; flex: 1; }
+.doc .asset-head .n { font-size: 8.5pt; opacity: .75; }
+.doc .job { padding: 2mm 3mm 1mm; border-top: .5pt solid #ddd6ca; }
+.doc .job:first-of-type { border-top: 0; }
+.doc .job-line { font-size: 10pt; margin-bottom: 1mm; }
+.doc .job-line b { color: #b8860b; }
+.doc table.sub { margin-bottom: 1mm; }
+.doc table.sub td { border-bottom: .5pt solid #eee9df; background: none !important; }
+.doc table.sub tr:last-child td { border-bottom: 0; }
 .doc .shots { display: flex; flex-wrap: wrap; gap: 4mm; }
 .doc .shots figure { width: 82mm; margin: 0; }
 .doc .shots img { width: 100%; border: .5pt solid #ddd6ca; display: block; }

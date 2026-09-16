@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.0.0';
+const VERSION = '3.6.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -188,8 +188,6 @@ const ICONS = {
   chart:   '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   coin:    '<circle cx="12" cy="12" r="8.2"/><path d="M14.4 9.3a2.9 2.9 0 0 0-2.4-1.1c-1.5 0-2.5.8-2.5 1.9 0 2.6 5 1.3 5 3.9 0 1.1-1 1.9-2.5 1.9a2.9 2.9 0 0 1-2.5-1.2"/><path d="M12 6.6v10.8"/>',
   people:  '<circle cx="9" cy="8" r="3.4"/><path d="M3.2 20a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.3a3.4 3.4 0 0 1 0 5.5"/><path d="M17.6 14.6A5.8 5.8 0 0 1 21 20"/>',
-  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17"/><path d="M8 3.5v3M16 3.5v3"/><path d="M8.5 13.5h3v3h-3z"/>',
-  tick:    '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   book:    '<path d="M4 5.2A1.7 1.7 0 0 1 5.7 3.5H19v14H5.7A1.7 1.7 0 0 0 4 19.2z"/><path d="M4 19.2a1.7 1.7 0 0 0 1.7 1.7H19v-3.4"/><path d="M8 7.5h7"/>',
   broom:   '<path d="M13.5 4.5l6 6"/><path d="M11 12.5l-4.6 4.6a4 4 0 0 0-1.1 2.1L5 21l1.8-.3a4 4 0 0 0 2.1-1.1l4.6-4.6"/><path d="M9.4 10.9l3.7 3.7 4.2-4.2a2.6 2.6 0 0 0-3.7-3.7z"/>',
   spanner: '<path d="M15.5 8.5a3.8 3.8 0 0 0 4.6 4.6l-8 8a2.6 2.6 0 0 1-3.7-3.7l8-8a3.8 3.8 0 0 0-4.6-4.6l3 3-1.9 1.9-3-3a3.8 3.8 0 0 0 5.6 1.8z"/>'
@@ -201,59 +199,93 @@ function icon(name) {
 /** Set when the database is missing a table, so the app can say so rather
     than looking empty and broken. */
 let manualsTableMissing = false;
-let serviceTableMissing = false;
 
-/* A comment on its own never said whether someone was fixing the job or just
-   talking about it, so a board full of notes told you nothing. Posting one now
-   means saying which it is — and that answer becomes the job's live line,
-   readable from the card without opening anything.
-
-   Tone borrows the status vocabulary rather than inventing colours: red is bad
-   news, yellow is held up, dark is happening now, grey is only words. */
-const NOTE_KINDS = [
-  { key: 'working', label: 'Working on it', tone: 'live',  hint: 'Spanners on it now' },
-  { key: 'waiting', label: 'Waiting on',    tone: 'hold',  hint: 'Parts, a quote, the repairer' },
-  { key: 'problem', label: 'Hit a problem', tone: 'stop',  hint: 'Needs a decision' },
-  { key: 'looked',  label: 'Had a look',    tone: 'plain', hint: 'Checked it over, nothing done yet' },
-  { key: 'info',    label: 'Just info',     tone: 'plain', hint: 'Nothing for anyone to do' }
-];
-const noteKind = k => NOTE_KINDS.find(n => n.key === k) || null;
-
-/** What everything else on a job's history is, for the printed sheet. */
+/** What each kind of entry on a job's history is, for the printed sheet. */
 const UPDATE_LABELS = {
   created:  'Damage reported',
+  comment:  'Comment',
+  note:     'Note',
   status:   'Job updated',
   external: 'Repairer arranged',
   complete: 'Job completed',
-  reopen:   'Job reopened'
+  reopen:   'Job reopened',
+  file:     'Attachment'
 };
-const noteOf = u => noteKind(u && u.meta && u.meta.note);
 
-/** What is actually happening on a job right now, read back off its own
-    history — so every card can say it without anyone writing a status. */
-function jobPulse(o) {
+/* ================================================================
+   People — whoever is actually using the app
+
+   There is no list to keep. A person is a name that has done something:
+   reported damage, posted on a job, signed one off. That is also who a
+   job can be assigned to. Names come from each device's Settings, so a
+   person's phone and laptop should carry the same name.
+   ================================================================ */
+const UNNAMED = 'Unnamed user';
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+/** The last thing that happened on a job, and who did it. */
+function lastUpdate(o) {
   const ups = updatesFor(o.id);
-  if (!isOpen(o)) {
-    const done = ups.filter(u => u.kind === 'complete').pop();
-    return { label: 'Fixed', tone: 'done', at: o.completed_at || (done && done.created_at),
-             who: o.completed_by || (done && done.author) || '' };
-  }
-  for (let i = ups.length - 1; i >= 0; i--) {
-    const u = ups[i];
-    const n = noteOf(u);
-    if (n) return { label: n.key === 'waiting' && u.body
-                      ? 'Waiting on ' + firstLine(u.body).replace(/^waiting on\s*/i, '')
-                      : n.label,
-                    tone: n.tone, at: u.created_at, who: String(u.author || '').trim() };
-    if (u.kind === 'complete' || u.kind === 'reopen') break;
-  }
-  if (o.repairer === 'external') {
-    return { label: 'With ' + (o.external_company || 'an external repairer'),
-             tone: 'plain', at: o.updated_at, who: '' };
-  }
-  const last = ups[ups.length - 1];
-  return { label: 'No word yet', tone: 'quiet',
-           at: last ? last.created_at : o.reported_at, who: '' };
+  return ups.length ? ups[ups.length - 1] : null;
+}
+
+/** Everyone who has left a mark, most recently active first. */
+function people() {
+  const seen = new Map();
+  const touch = (raw, at, counts) => {
+    const name = String(raw || '').trim();
+    if (!name || name === UNNAMED) return;
+    const k = name.toLowerCase();
+    const cur = seen.get(k) || { name, last: '', today: 0 };
+    if (at && at > cur.last) cur.last = at;
+    if (counts && at && localDay(at) === today()) cur.today++;
+    seen.set(k, cur);
+  };
+  // the updates are the record; the work order fields only make sure a
+  // name is present, since reporting a job already leaves an update
+  DB.wo_updates.forEach(u => touch(u.author, u.created_at, true));
+  DB.work_orders.forEach(o => {
+    touch(o.reported_by, o.reported_at, false);
+    touch(o.completed_by, o.completed_at, false);
+    touch(o.assigned_to, null, false);
+  });
+  const me = whoami();
+  if (me !== UNNAMED && !seen.has(me.toLowerCase())) seen.set(me.toLowerCase(), { name: me, last: '', today: 0 });
+  return Array.from(seen.values()).map(p => Object.assign(p, {
+    open: DB.work_orders.filter(o => isOpen(o) && sameName(o.assigned_to, p.name)).length
+  })).sort((a, b) => String(b.last).localeCompare(String(a.last)) || a.name.localeCompare(b.name));
+}
+
+/** The calendar day something happened, in this phone's time — not UTC,
+    which would file an evening's work under tomorrow. */
+function localDay(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** One person's day: everything they posted, on any job or none, in
+    time order. Photos uploaded together fold into one line. */
+function dayFor(name, date) {
+  const rows = DB.wo_updates
+    .filter(u => sameName(u.author, name) && localDay(u.created_at) === date)
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const out = [];
+  rows.forEach(u => {
+    const prev = out[out.length - 1];
+    const folds = u.kind === 'file' && prev && prev.work_order_id === u.work_order_id
+      && (prev.kind === 'file' || (prev.kind === 'note' && !u.work_order_id));
+    if (folds) { prev.files.push(u.meta || {}); return; }
+    out.push(Object.assign({}, u, { files: u.kind === 'file' ? [u.meta || {}] : [] }));
+  });
+  return out;
+}
+
+/** The days a person has anything on, newest first. */
+function daysFor(name) {
+  const set = new Set();
+  DB.wo_updates.forEach(u => { if (sameName(u.author, name)) set.add(localDay(u.created_at)); });
+  return Array.from(set).filter(Boolean).sort().reverse();
 }
 
 /** "3 days ago", short enough to sit on a card. */
@@ -268,8 +300,6 @@ function ago(v) {
   const days = Math.round(hrs / 24);
   return days === 1 ? 'yesterday' : days + 'd ago';
 }
-
-const firstLine = t => String(t || '').split('\n')[0].trim();
 
 function money(n) {
   const v = Number(n) || 0;
@@ -318,8 +348,7 @@ const connected  = () => !S.localMode && !!S.supabaseUrl && !!S.supabaseKey;
 /* ================================================================
    Local cache — the app opens instantly and stays readable offline
    ================================================================ */
-const DB = { gear: [], work_orders: [], wo_updates: [], manuals: [],
-             service_plans: [], service_log: [], localSeq: 0 };
+const DB = { gear: [], work_orders: [], wo_updates: [], manuals: [], localSeq: 0 };
 
 function cacheKey() { return 'rckw.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -331,18 +360,44 @@ function loadCache() {
       DB.work_orders = raw.work_orders || [];
       DB.wo_updates = raw.wo_updates || [];
       DB.manuals = raw.manuals || [];
-      DB.service_plans = raw.service_plans || [];
-      DB.service_log = raw.service_log || [];
       DB.localSeq = raw.localSeq || 0;
     }
   } catch (e) {}
 }
+/* A phone gets about 5 MB of localStorage in total. One photo as a data URL
+   is a tenth of that, so a handful of them in the cache filled every phone
+   on the crew with "storage full". Nothing image-shaped is written here any
+   more: files live in Storage, or in the stash below until they get there. */
+function cacheSafe(db) {
+  if (S.localMode) return db;                    // practice mode is this device by design
+  const scrub = o => {
+    if (o && typeof o.url === 'string' && /^(data|blob):/.test(o.url)) {
+      const c = Object.assign({}, o); delete c.url; return c;
+    }
+    return o;
+  };
+  return Object.assign({}, db, {
+    wo_updates: db.wo_updates.map(u => u.meta && u.meta.url ? Object.assign({}, u, { meta: scrub(u.meta) }) : u),
+    manuals: db.manuals.map(m => m.file && m.file.url ? Object.assign({}, m, { file: scrub(m.file) }) : m)
+  });
+}
+
+let cacheWarned = false;
 function saveCache() {
-  try {
-    localStorage.setItem(cacheKey(), JSON.stringify(DB));
-  } catch (e) {
-    // Storage full — most likely photos in local mode.
-    toast('Device storage is full. Connect to Supabase or clear old photos.');
+  const safe = cacheSafe(DB);
+  const attempts = [
+    safe,
+    // still too big: keep the recent history, the rest is a pull away
+    Object.assign({}, safe, { wo_updates: safe.wo_updates.slice(-1500) }),
+    Object.assign({}, safe, { wo_updates: [] })
+  ];
+  for (const db of attempts) {
+    try { localStorage.setItem(cacheKey(), JSON.stringify(db)); return; } catch (e) { /* try smaller */ }
+  }
+  if (!cacheWarned) {
+    cacheWarned = true;
+    toast(S.localMode ? 'This phone is out of room for practice data. Switch to the shared database.'
+                      : 'This phone could not keep an offline copy. Everything is still saved online.');
   }
 }
 
@@ -351,6 +406,69 @@ function upsert(table, row) {
   const i = list.findIndex(r => r.id === row.id);
   if (i >= 0) list[i] = Object.assign({}, list[i], row);
   else list.push(row);
+}
+
+/* ------------------------------------------------------------------
+   The stash. A photo taken with no signal used to travel as a data URL
+   inside its row — into the cache, into the outbox, and then into the
+   database for every phone to pull. Now the bytes wait in IndexedDB,
+   which has room, and only the finished Storage URL ever gets written.
+   ------------------------------------------------------------------ */
+const Stash = {
+  db: null,
+  mem: new Map(),
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    return new Promise(res => {
+      try {
+        const req = indexedDB.open('rckw-files', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('files');
+        req.onsuccess = () => { this.db = req.result; res(this.db); };
+        req.onerror = () => res(null);
+      } catch (e) { res(null); }
+    });
+  },
+  async put(id, blob) {
+    const db = await this.open();
+    if (!db) { this.mem.set(id, blob); return; }
+    await new Promise(res => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(blob, id); tx.oncomplete = tx.onerror = res; });
+  },
+  async get(id) {
+    const db = await this.open();
+    if (!db) return this.mem.get(id) || null;
+    return new Promise(res => { const r = db.transaction('files').objectStore('files').get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); });
+  },
+  async del(id) {
+    const db = await this.open();
+    if (!db) { this.mem.delete(id); return; }
+    await new Promise(res => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').delete(id); tx.oncomplete = tx.onerror = res; });
+  }
+};
+
+/** A row as the database should see it: never a data or blob URL. */
+function cleanRow(row) {
+  const out = Object.assign({}, row);
+  ['meta', 'file'].forEach(k => {
+    const o = out[k];
+    if (o && typeof o.url === 'string' && /^(data|blob):/.test(o.url)) {
+      out[k] = Object.assign({}, o); delete out[k].url;
+    }
+  });
+  return out;
+}
+
+/** The bytes to Storage; throws if they don't get there. */
+async function uploadToStorage(file, name, type) {
+  const fname = (name || file.name || 'file').replace(/[^\w.\-]+/g, '_');
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${fname}`;
+  const base = S.supabaseUrl.replace(/\/+$/, '');
+  const res = await fetch(`${base}/storage/v1/object/workshop-files/${encodeURIComponent(path)}`, {
+    method: 'POST',
+    headers: restHeaders({ 'Content-Type': type || file.type || 'application/octet-stream', 'x-upsert': 'true' }),
+    body: file
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return `${base}/storage/v1/object/public/workshop-files/${encodeURIComponent(path)}`;
 }
 
 /* ================================================================
@@ -381,23 +499,19 @@ async function rest(path, opts) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    const [gear, orders, updates, manuals, plans, svc] = await Promise.all([
+    const [gear, orders, updates, manuals] = await Promise.all([
       rest('gear?select=*&order=code.asc', { headers: restHeaders() }),
       rest('work_orders?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('wo_updates?select=*&order=created_at.desc&limit=6000', { headers: restHeaders() }),
       // A table may not exist yet on an older database; the rest of the app
       // must keep working if it doesn't.
-      rest('manuals?select=*&order=title.asc&limit=2000', { headers: restHeaders() }).catch(() => null),
-      rest('service_plans?select=*&limit=4000', { headers: restHeaders() }).catch(() => null),
-      rest('service_log?select=*&order=done_on.desc&limit=8000', { headers: restHeaders() }).catch(() => null)
+      rest('manuals?select=*&order=title.asc&limit=2000', { headers: restHeaders() }).catch(() => null)
     ]);
     DB.gear = gear || [];
     DB.work_orders = orders || [];
     DB.wo_updates = (updates || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     if (manuals) { DB.manuals = manuals; manualsTableMissing = false; }
     else manualsTableMissing = true;
-    if (plans && svc) { DB.service_plans = plans; DB.service_log = svc; serviceTableMissing = false; }
-    else serviceTableMissing = true;
     saveCache();
   },
 
@@ -416,13 +530,16 @@ const Store = {
       const out = await rest(table, {
         method: 'POST',
         headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
-        body: JSON.stringify(row)
+        body: JSON.stringify(cleanRow(row))
       });
       const saved = Array.isArray(out) ? out[0] : out;
-      if (saved) { upsert(table, saved); saveCache(); }
+      // keep this phone's view of the file (its blob URL) over the database's
+      if (saved) { upsert(table, Object.assign({}, saved, row.meta ? { meta: row.meta } : {}, row.file ? { file: row.file } : {})); saveCache(); }
+      queuePendingUpload(table, row);
       return saved || row;
     } catch (err) {
-      Outbox.add({ kind: 'insert', table, row });
+      Outbox.add({ kind: 'insert', table, row: cleanRow(row) });
+      queuePendingUpload(table, row);
       return row;
     }
   },
@@ -458,27 +575,32 @@ const Store = {
     }
   },
 
-  /** Returns { name, url, type, size } — a public URL, or a data URL offline. */
+  /** Returns { name, type, size, url }. With no signal the bytes go to the
+      stash and the row says so; the URL arrives when the outbox catches up. */
   async upload(file) {
-    const dataUrl = await fileToDataUrl(file);
     const meta = { name: file.name || 'file', type: file.type || '', size: file.size || 0 };
-    if (!connected()) return Object.assign(meta, { url: dataUrl, local: true });
+    if (!connected()) return Object.assign(meta, { url: await fileToDataUrl(file), local: true });
     try {
-      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${(file.name || 'file').replace(/[^\w.\-]+/g, '_')}`;
-      const base = S.supabaseUrl.replace(/\/+$/, '');
-      const res = await fetch(`${base}/storage/v1/object/workshop-files/${encodeURIComponent(path)}`, {
-        method: 'POST',
-        headers: restHeaders({ 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'true' }),
-        body: file
-      });
-      if (!res.ok) throw new Error(await res.text());
-      return Object.assign(meta, { url: `${base}/storage/v1/object/public/workshop-files/${encodeURIComponent(path)}` });
+      return Object.assign(meta, { url: await uploadToStorage(file) });
     } catch (err) {
-      // Keep the file rather than lose it; it uploads on the next sync.
-      return Object.assign(meta, { url: dataUrl, local: true, pending: true });
+      const pendingId = uid();
+      await Stash.put(pendingId, file);
+      // the blob URL lets this phone show the photo now; it is never persisted
+      return Object.assign(meta, { pending: true, pendingId, url: URL.createObjectURL(file) });
     }
   }
 };
+
+/** Once a row carrying a stashed file is on its way, the file follows it. */
+function queuePendingUpload(table, row) {
+  ['meta', 'file'].forEach(field => {
+    const o = row[field];
+    if (o && o.pending && o.pendingId) {
+      Outbox.add({ kind: 'upload', table, id: row.id, field, pendingId: o.pendingId,
+                   name: o.name || 'file', type: o.type || '' });
+    }
+  });
+}
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -502,10 +624,41 @@ const Outbox = {
     paintSync();
   },
   count() { return Outbox.all().length; },
+  /** Rows queued by an older build carry their photo as a data URL. Move
+      the bytes to the stash so they upload properly instead of being
+      written into the database for every phone to pull. */
+  async migrate() {
+    const list = Outbox.all();
+    const out = [];
+    let changed = false;
+    for (const op of list) {
+      out.push(op);
+      if (op.kind !== 'insert' || !op.row) continue;
+      for (const field of ['meta', 'file']) {
+        const o = op.row[field];
+        if (!o || typeof o.url !== 'string' || !/^data:/.test(o.url)) continue;
+        try {
+          const blob = await (await fetch(o.url)).blob();
+          const pendingId = uid();
+          await Stash.put(pendingId, blob);
+          op.row[field] = Object.assign({}, o, { pending: true, pendingId }); delete op.row[field].url;
+          out.push({ opId: uid(), kind: 'upload', table: op.table, id: op.row.id, field, pendingId,
+                     name: o.name || 'file', type: o.type || blob.type || '' });
+        } catch (e) { delete op.row[field].url; }
+        changed = true;
+      }
+    }
+    if (changed) Outbox.save(out);
+  },
+  flushing: false,
   async flush() {
-    if (!connected()) return;
+    if (!connected() || Outbox.flushing) return;   // two flushes at once would send a file twice
     let list = Outbox.all();
     if (!list.length) return;
+    Outbox.flushing = true;
+    try { await Outbox.run(list); } finally { Outbox.flushing = false; }
+  },
+  async run(list) {
     const left = [];
     for (const op of list) {
       try {
@@ -514,6 +667,19 @@ const Outbox = {
             method: 'DELETE',
             headers: restHeaders({ Prefer: 'return=minimal' })
           });
+        } else if (op.kind === 'upload') {
+          const file = await Stash.get(op.pendingId);
+          if (!file) continue;              // nothing to send: the stash was cleared; the row stays as "pending"
+          const url = await uploadToStorage(file, op.name, op.type);
+          const fresh = { name: op.name, type: op.type, size: file.size || 0, url };
+          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+            method: 'PATCH',
+            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+            body: JSON.stringify({ [op.field]: fresh })
+          });
+          const local = (DB[op.table] || []).find(r => r.id === op.id);
+          if (local) { local[op.field] = fresh; saveCache(); }
+          await Stash.del(op.pendingId);
         } else if (op.kind === 'insert') {
           await rest(op.table, {
             method: 'POST',
@@ -715,7 +881,7 @@ function sectionOf(path) {
   if (path === '/') return 'hub';
   if (path === '/screen') return 'kiosk';
   if (path.startsWith('/manuals')) return 'manuals';
-  if (path.startsWith('/service')) return 'service';
+  if (path.startsWith('/crew')) return 'crew';
   return 'maintenance';
 }
 
@@ -724,10 +890,6 @@ const TABS = {
     { href: '#/gear',   label: 'Gear',        icon: 'grid',   on: p => p === '/gear' || p.startsWith('/gear/') },
     { href: '#/orders', label: 'Work orders', icon: 'orders', on: p => p === '/orders' || p.startsWith('/wo/') },
     { href: '#/report', label: 'Report',      icon: 'plus',   on: p => p === '/report', primary: true }
-  ],
-  service: [
-    { href: '#/service',       label: 'Due',      icon: 'orders', on: p => p === '/service' },
-    { href: '#/service/fleet', label: 'Machines', icon: 'grid',   on: p => p !== '/service' }
   ],
 };
 
@@ -746,8 +908,7 @@ function paintTabs(section, path) {
 const SCREENS = {
   '/':          { title: 'RCK Workshop',  render: renderHub },
   '/gear':      { title: 'Gear',          render: renderBoard },
-  '/service':        { title: 'Planned servicing', render: renderServiceBoard },
-  '/service/fleet':  { title: 'Every machine',    render: renderServiceFleet },
+  '/crew':           { title: 'Crew',         render: renderCrew },
   '/manuals':        { title: 'Manuals',      render: renderManuals },
   '/manuals/new':    { title: 'Add a manual', render: renderManualForm, back: true },
   '/orders':    { title: 'Work orders',   render: renderOrders },
@@ -780,9 +941,7 @@ function render() {
   let back = false;
   if (screen) { /* an exact route always wins over the patterns below */ }
 
-  if (!screen && route.path.startsWith('/service/done/')) { screen = { title: 'Mark it done', render: renderServiceDone }; back = true; }
-  else if (!screen && route.path.startsWith('/service/plan/')) { screen = { title: 'Service', render: renderServicePlan }; back = true; }
-  else if (!screen && route.path.startsWith('/service/')) { screen = { title: 'Servicing', render: renderServiceGear }; back = true; }
+  if (!screen && route.path.startsWith('/crew/')) { screen = { title: 'Crew', render: renderPerson }; back = true; }
   else if (!screen && route.path.startsWith('/gearedit/')) { screen = { title: 'Edit gear', render: renderGearEdit }; back = true; }
   else if (!screen && route.path.startsWith('/gear/')) { screen = { title: 'Gear', render: renderGearDetail }; back = true; }
   else if (!screen && route.path.startsWith('/wo/')) { screen = { title: 'Work order', render: renderWorkOrder }; back = true; }
@@ -795,7 +954,7 @@ function render() {
 
   const section = sectionOf(route.path);
   paintTabs(section, route.path);
-  $('#homeBtn').hidden = !['maintenance', 'manuals', 'service'].includes(section) || (back || screen.back);
+  $('#homeBtn').hidden = !['maintenance', 'manuals', 'crew'].includes(section) || (back || screen.back);
 
   const view = $('#view');
   view.innerHTML = '';
@@ -1078,17 +1237,13 @@ async function setLocation(g, text) {
   toast('Location updated');
 }
 
-/** The one line that says whether a job is moving. */
-function pulseLine(o, size) {
-  const p = jobPulse(o);
-  if (!p) return '';
-  const when = p.at ? ago(p.at) : '';
-  const meta = [p.who, when].filter(Boolean).join(' \u00b7 ');
-  return `<div class="pulse tone-${p.tone}${size === 'big' ? ' big' : ''}">
-    <span class="pdot"></span>
-    <span class="pl">${esc(p.label)}</span>
-    ${meta ? `<span class="pm">${esc(meta)}</span>` : ''}
-  </div>`;
+/** Who holds the job and who last touched it. */
+function whoLine(o) {
+  const last = lastUpdate(o);
+  const bits = [];
+  if (o.assigned_to) bits.push(`<span class="holder">${esc(o.assigned_to)}</span>`);
+  if (last) bits.push(`<span>${esc(UPDATE_LABELS[last.kind] || 'Update')} \u00b7 ${esc(last.author || '')} \u00b7 ${esc(ago(last.created_at))}</span>`);
+  return bits.length ? `<div class="wholine">${bits.join('')}</div>` : '';
 }
 
 function woCard(o, i) {
@@ -1102,7 +1257,7 @@ function woCard(o, i) {
         <span class="num">${esc(g.code || '')}</span>
       </div>
       <div class="ttl">${esc(o.title)}</div>
-      ${pulseLine(o)}
+      ${whoLine(o)}
       <div class="sub">
         <span class="pill"><span class="swatch"></span>${closed ? statusLabel(o.status) : STATUS_TEXT[o.severity]}</span>
         ${closed ? '' : `<span class="pill plain">${statusLabel(o.status)}</span>`}
@@ -1328,13 +1483,16 @@ function renderWorkOrder(view) {
       <div style="margin-top:11px">
         <span class="pill"><span class="swatch"></span>${closed ? 'Fixed' : STATUS_TEXT[o.severity]}</span>
       </div>
-      ${pulseLine(o, 'big')}
+
       ${o.description ? `<p class="small mt" style="white-space:pre-wrap;margin-bottom:0">${esc(o.description)}</p>` : ''}
     </div>
 
     <div class="card">
       <table class="data">
         <tr><th>Status</th><td>${statusLabel(o.status)}</td></tr>
+        <tr><th>Assigned to</th><td>${o.assigned_to
+          ? `<a href="#/crew/${encodeURIComponent(o.assigned_to)}">${esc(o.assigned_to)}</a>`
+          : '<span class="muted">nobody yet</span>'}</td></tr>
         <tr><th>Reported</th><td>${esc(o.reported_by || '—')} · ${fmtDateTime(o.reported_at)}</td></tr>
         <tr><th>Location</th><td>${esc(o.location_at_report || g.location || '—')}</td></tr>
         <tr><th>Back in service</th><td>${o.target_date
@@ -1361,31 +1519,22 @@ function renderWorkOrder(view) {
     </div>
 
     <div class="card">
-      <label class="field"><span>Say what's happening</span>
-        <textarea id="cmt" placeholder="What you found, what you're doing, what you're waiting on…"></textarea>
+      <label class="field"><span>Add a comment</span>
+        <textarea id="cmt" placeholder="What you found, what you did, what you're waiting on…"></textarea>
       </label>
-      <p class="tiny muted" style="margin:-2px 2px 8px">Pick the one that fits — it becomes this job's live line, so
-        everyone can see whether it's moving without opening it.</p>
-      <div class="note-kinds">
-        ${NOTE_KINDS.map(n => `
-          <button class="note-chip tone-${n.tone}" data-note="${n.key}">
-            <span class="nk">${esc(n.label)}</span>
-            <span class="nh">${esc(n.hint)}</span>
-          </button>`).join('')}
-      </div>
+      <button class="btn primary wide" id="postCmt">Post comment</button>
     </div>`;
 
   $('#printWo', view).onclick = () => printWorkOrder(o);
 
-  $$('[data-note]', view).forEach(b => b.onclick = async function () {
+  $('#postCmt', view).onclick = async function () {
     const body = $('#cmt', view).value.trim();
-    const n = noteKind(this.dataset.note);
-    if (!body && n.key !== 'working') return toast('Write a line first');
-    $$('[data-note]', view).forEach(x => x.disabled = true);
-    await logUpdate(o.id, 'comment', body || 'On it now.', { note: n.key });
-    toast(n.label + ' — posted');
+    if (!body) return toast('Write something first');
+    this.disabled = true;
+    await logUpdate(o.id, 'comment', body);
+    toast('Posted');
     render();
-  });
+  };
 
   if (isWorkshop()) wireWorkshopPanel(view, o);
 }
@@ -1395,11 +1544,9 @@ function tlItem(u) {
   const isFile = u.kind === 'file' && m.url;
   const isImage = isFile && /^image\//.test(m.type || '');
   const strong = ['created', 'status', 'complete', 'external', 'reopen'].includes(u.kind);
-  const n = noteOf(u);
   return `
     <div class="tl-item ${strong ? 'mark' : ''}">
       <div class="tl-when">${fmtDateTime(u.created_at)}</div>
-      ${n ? `<span class="note-tag tone-${n.tone}">${esc(n.label)}</span>` : ''}
       <div class="tl-who">${esc(u.author || 'Unknown')}${u.role === 'workshop' ? ' · Workshop' : ''}</div>
       ${u.body ? `<div class="tl-body">${esc(u.body)}</div>` : ''}
       ${isImage
@@ -1430,6 +1577,16 @@ function workshopPanel(o) {
           </select>
         </label>
       </div>
+
+      <label class="field"><span>Assigned to</span>
+        <select id="wAssign">
+          <option value="">Nobody yet</option>
+          ${people().map(p => `<option value="${esc(p.name)}" ${sameName(p.name, o.assigned_to) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+          ${o.assigned_to && !people().some(p => sameName(p.name, o.assigned_to))
+            ? `<option value="${esc(o.assigned_to)}" selected>${esc(o.assigned_to)}</option>` : ''}
+          <option value="__other">Someone else…</option>
+        </select>
+      </label>
 
       <label class="field"><span>Expected back in service</span>
         <input type="date" id="wTarget" value="${esc((o.target_date || '').slice(0, 10))}">
@@ -1481,9 +1638,31 @@ function wireWorkshopPanel(view, o) {
     repairer.onchange = () => { $('#extBox', view).hidden = repairer.value !== 'external'; };
   }
 
+  const assign = $('#wAssign', view);
+  if (assign) {
+    let previous = assign.value;
+    assign.onchange = () => {
+      if (assign.value !== '__other') { previous = assign.value; return; }
+      const typed = (prompt('Who is this job for?') || '').trim();
+      if (!typed) { assign.value = previous; return; }
+      const match = people().find(p => sameName(p.name, typed));
+      const name = match ? match.name : typed;
+      if (!match) {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        assign.insertBefore(opt, assign.querySelector('option[value="__other"]'));
+      }
+      assign.value = name;
+      previous = name;
+    };
+  }
+
   const save = $('#wSave', view);
   if (save) save.onclick = async function () {
+    const who = assign ? assign.value : (o.assigned_to || '');
+    if (who === '__other') return toast('Name the person first');
     const patch = {
+      assigned_to: who,
       status: $('#wStatus', view).value,
       severity: $('#wSeverity', view).value,
       target_date: $('#wTarget', view).value || null,
@@ -1495,6 +1674,10 @@ function wireWorkshopPanel(view, o) {
     };
 
     const notes = [];
+    if (!sameName(patch.assigned_to, o.assigned_to)) {
+      notes.push(patch.assigned_to ? `Assigned to ${patch.assigned_to}`
+        : `Unassigned${o.assigned_to ? ' (was ' + o.assigned_to + ')' : ''}`);
+    }
     if (patch.status !== o.status) notes.push(`Status: ${statusLabel(o.status)} → ${statusLabel(patch.status)}`);
     if (patch.severity !== o.severity) notes.push(`Now ${STATUS_TEXT[patch.severity].toLowerCase()}`);
     if ((patch.target_date || '') !== (o.target_date || '')) {
@@ -1810,7 +1993,8 @@ function renderReports(view) {
     <div class="card">
       <h2>Spreadsheet export</h2>
       <p class="muted small">All work orders as a CSV file for Excel.</p>
-      <button class="btn wide" id="csv">Download CSV</button>
+      <button class="btn wide" id="xlsx">${icon('grid')}All assets \u2014 Excel</button>
+      <button class="btn wide mt" id="csv">Work orders \u2014 CSV</button>
     </div>`;
 
   $('#fleet', view).onclick = () => printFleetStatus();
@@ -1819,11 +2003,12 @@ function renderReports(view) {
     printHistory(id === 'all' ? null : gearById(id), $('#hFrom', view).value, $('#hTo', view).value);
   };
   $('#csv', view).onclick = exportCsv;
+  $('#xlsx', view).onclick = exportAssetsXlsx;
 }
 
 function exportCsv() {
   const head = ['Work order', 'Gear', 'Name', 'Type', 'Fault', 'Detail', 'Usable', 'Status',
-    'Managed by', 'Reported by', 'Reported', 'Location', 'Expected back', 'Repairer', 'Company',
+    'Managed by', 'Assigned to', 'Reported by', 'Reported', 'Location', 'Expected back', 'Repairer', 'Company',
     'Their ref', 'Cost', 'Completed', 'Completed by', 'Work done', 'Days down'];
   const rows = DB.work_orders
     .slice().sort((a, b) => (a.number || 0) - (b.number || 0))
@@ -1831,7 +2016,7 @@ function exportCsv() {
       const g = gearById(o.gear_id) || {};
       return [woNo(o), g.code || '', g.name || '', catLabel(catOf(g)), o.title, o.description,
         o.severity === 'red' ? 'No — out of operation' : 'Yes — usable', statusLabel(o.status),
-        o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
+        o.assigned_to || '', o.reported_by, fmtDateTime(o.reported_at), o.location_at_report, o.target_date ? fmtDate(o.target_date) : '',
         o.repairer || '', o.external_company || '', o.external_ref || '', o.cost != null ? o.cost : '',
         o.completed_at ? fmtDateTime(o.completed_at) : '', o.completed_by || '', o.work_done || '',
         daysBetween(o.reported_at, o.completed_at) ?? ''];
@@ -1840,17 +2025,133 @@ function exportCsv() {
 }
 
 /** One CSV writer for both portals. The BOM keeps Excel happy with macrons. */
-function downloadCsv(rows, filename) {
-  const csv = rows
-    .map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(','))
-    .join('\r\n');
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+/* ------------------------------------------------------------------
+   Excel. A real .xlsx, written here rather than pulled from a CDN: the
+   app must work with no signal, and the format is only a zip of XML.
+   Entries are stored, not deflated — Excel is happy with that, and it
+   means no compression code to carry.
+   ------------------------------------------------------------------ */
+function exportAssetsXlsx() {
+  const status = { green: 'Working', orange: 'Damaged \u2014 usable', red: 'Out of operation' };
+  const head = ['Code', 'Type', 'Name', 'Make / model', 'Status', 'Open work orders', 'Days down',
+                'Location', 'Location updated', 'Updated by', 'Notes', 'Retired', 'Added'];
+  const rows = sortedGear(DB.gear).map(g => {
+    const open = openOrdersFor(g.id).length;
+    const down = daysDown(g);
+    return [g.code || '', catLabel(catOf(g)), g.name || '', g.make_model || '',
+      g.retired ? 'Retired' : status[gearStatus(g)], open, down == null ? '' : down,
+      g.location || '', g.location_updated_at ? fmtDateTime(g.location_updated_at) : '', g.location_updated_by || '',
+      g.notes || '', g.retired ? 'Yes' : 'No', g.created_at ? fmtDate(g.created_at) : ''];
+  });
+  const widths = [10, 12, 26, 22, 18, 10, 9, 24, 18, 14, 40, 8, 12];
+  downloadBlob(xlsxFile('Assets', head, rows, widths), `rck-assets-${today()}.xlsx`);
+  toast(`${rows.length} asset${rows.length === 1 ? '' : 's'} exported`);
+}
+
+/** One sheet: a bold frozen header row, sized columns, numbers as numbers. */
+function xlsxFile(sheetName, head, rows, widths) {
+  const xml = v => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const col = i => { let n = i + 1, o = ''; while (n) { const r = (n - 1) % 26; o = String.fromCharCode(65 + r) + o; n = (n - 1 - r) / 26; } return o; };
+  const cell = (v, r, c, bold) => {
+    const ref = col(c) + r;
+    if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}"${bold ? ' s="1"' : ''}><v>${v}</v></c>`;
+    if (v == null || v === '') return '';
+    return `<c r="${ref}" t="inlineStr"${bold ? ' s="1"' : ''}><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+  };
+  const line = (cells, r, bold) => `<row r="${r}">${cells.map((v, c) => cell(v, r, c, bold)).join('')}</row>`;
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<cols>${(widths || []).map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>
+<sheetData>${line(head, 1, true)}${rows.map((r, i) => line(r, i + 2, false)).join('')}</sheetData>
+<autoFilter ref="A1:${col(head.length - 1)}${rows.length + 1}"/>
+</worksheet>`;
+  const files = {
+    '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`,
+    'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${xml(sheetName)}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`,
+    'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`,
+    'xl/styles.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyFont="1"/></cellXfs>
+</styleSheet>`,
+    'xl/worksheets/sheet1.xml': sheet
+  };
+  return new Blob([zipStored(files)], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+/** A zip with every entry stored. Enough for Excel, and nothing to inflate. */
+function zipStored(files) {
+  const enc = new TextEncoder();
+  const table = zipStored.crc || (zipStored.crc = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })());
+  const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = table[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const d = new Date();
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF];
+  const u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+
+  const parts = []; const central = []; let offset = 0;
+  Object.keys(files).forEach(name => {
+    const nameB = enc.encode(name), data = enc.encode(files[name]), crc = crc32(data);
+    const local = new Uint8Array([...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(dosTime), ...u16(dosDate),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(nameB.length), ...u16(0), ...nameB]);
+    parts.push(local, data);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(dosTime), ...u16(dosDate),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(nameB.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(0), ...u32(offset), ...nameB]));
+    offset += local.length + data.length;
+  });
+  const cdSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(central.length), ...u16(central.length),
+    ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  const out = new Uint8Array(offset + cdSize + end.length);
+  let at = 0;
+  [...parts, ...central, end].forEach(b => { out.set(b, at); at += b.length; });
+  return out;
+}
+
+function downloadBlob(blob, filename) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+function downloadCsv(rows, filename) {
+  const csv = rows
+    .map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  downloadBlob(blob, filename);
 }
 
 /* ================================================================
@@ -1963,9 +2264,7 @@ function printWorkOrder(o) {
     <div class="callout">
       <div class="state"><span class="${state.cls}">${esc(state.word)}</span></div>
       <div class="sub">${esc(state.line)}</div>
-      ${(() => { const p = jobPulse(o);
-        return closed || !p ? '' : `<div class="sub"><strong>Last word:</strong> ${esc(p.label)}${
-          p.who ? ' — ' + esc(p.who) : ''}${p.at ? ' (' + esc(ago(p.at)) + ')' : ''}</div>`; })()}
+      ${o.assigned_to ? `<div class="sub"><strong>Assigned to:</strong> ${esc(o.assigned_to)}</div>` : ''}
     </div>
 
     <h2>What is wrong</h2>
@@ -2000,12 +2299,12 @@ function printWorkOrder(o) {
     <table>
       <tr><th style="width:30mm">When</th><th style="width:28mm">Who</th>
           <th style="width:26mm">What</th><th>Entry</th></tr>
-      ${comments.map(u => { const n = noteOf(u); return `<tr class="avoid-break">
+      ${comments.map(u => `<tr class="avoid-break">
         <td>${fmtDateTime(u.created_at)}</td>
         <td>${esc(u.author || '—')}${u.role === 'workshop' ? '<br><span class="quiet">Workshop</span>' : ''}</td>
-        <td>${n ? `<strong>${esc(n.label)}</strong>` : esc(UPDATE_LABELS[u.kind] || 'Note')}</td>
+        <td>${esc(UPDATE_LABELS[u.kind] || 'Note')}</td>
         <td class="note">${esc(u.body || '')}</td>
-      </tr>`; }).join('') || '<tr><td colspan="4" class="quiet">Nothing recorded.</td></tr>'}
+      </tr>`).join('') || '<tr><td colspan="4" class="quiet">Nothing recorded.</td></tr>'}
     </table>
 
     ${photoSheet(ups)}
@@ -2205,10 +2504,10 @@ function renderKiosk(view) {
                     </div>
                     <div style="min-width:0">
                       <div class="kttl">${esc(o.title)}</div>
-                      <div class="kmeta">${(() => { const p = jobPulse(o);
-                        return `<b class="kpulse tone-${p.tone}">${esc(p.label)}</b>${p.at ? ' ' + esc(ago(p.at)) : ''}`; })()}${
-                        o.repairer === 'external'
-                        ? ' · ' + esc(o.external_company || 'external') : ''}</div>
+                      <div class="kmeta">${statusLabel(o.status)}${(() => { const l = lastUpdate(o);
+                        return l ? ` · ${esc(l.author || '')} ${esc(ago(l.created_at))}` : ''; })()}${
+                        o.assigned_to ? ' · <b>' + esc(o.assigned_to) + '</b>' : ''}${
+                        o.repairer === 'external' ? ' · ' + esc(o.external_company || 'external') : ''}</div>
                     </div>
                     <div class="keta">
                       ${o.target_date
@@ -2267,10 +2566,6 @@ function renderHub(view) {
   const open = activeOrders().length;
   const red = gear.filter(g => gearStatus(g) === 'red').length;
 
-  const board = serviceBoard();
-  const svc = { total: board.length,
-                red: board.filter(d => d.state === 'red').length,
-                orange: board.filter(d => d.state === 'orange').length };
 
   view.innerHTML = `
     <div class="hub">
@@ -2281,16 +2576,14 @@ function renderHub(view) {
         <span class="hub-stat">${open} open work order${open === 1 ? '' : 's'}${red ? ` · ${red} out of action` : ''}</span>
       </a>
 
-      <a class="hub-card" href="#/service">
-        <span class="hub-icon">${icon('calendar')}</span>
-        <b>Planned servicing and maintenance</b>
-        <span class="hub-sub">Services and inspections, before anything breaks</span>
-        <span class="hub-stat">${svc.total
-          ? (svc.red || svc.orange
-              ? [svc.red ? `${svc.red} overdue` : '', svc.orange ? `${svc.orange} due soon` : ''].filter(Boolean).join(' · ')
-              : 'Everything up to date')
-          : 'Nothing planned yet'}</span>
+      <a class="hub-card" href="#/crew">
+        <span class="hub-icon">${icon('people')}</span>
+        <b>Crew</b>
+        <span class="hub-sub">Who is active, and what each person did in a day</span>
+        <span class="hub-stat">${(() => { const n = people().filter(p => p.today).length;
+          return n ? `${n} ${n === 1 ? 'person' : 'people'} active today` : 'Nobody active yet today'; })()}</span>
       </a>
+
       <a class="hub-card" href="#/manuals">
         <span class="hub-icon">${icon('book')}</span>
         <b>Manuals</b>
@@ -2305,466 +2598,280 @@ function renderHub(view) {
 }
 
 /* ================================================================
-   Planned servicing and maintenance
+   Crew — who is doing what
 
-   The other half of the job: the work done so gear doesn't break, rather
-   than because it has. A plan is a rule — this service, every so many
-   months and/or so many hours. The log is what actually happened. When
-   something is next due is worked out from the two every time it is
-   asked for, never stored, so it cannot drift out of step.
-
-   Deliberately apart from work orders. A service coming due does not take
-   a machine out of operation and does not touch its colour on the gear
-   board, which still answers only "can we use it today".
+   Nobody is set up here. The list is whoever has done something in the
+   app; a person's day is what they posted, on any job or none. Tapping
+   your own name lets you note things that aren't a job — driving to a
+   site, picking up parts — so the day reads whole.
    ================================================================ */
-function serviceBanner() {
-  return serviceTableMissing
-    ? `<div class="banner">The servicing tables aren't in the database yet, so plans
-       you set up here stay on this phone. Run <code>supabase-schema.sql</code> in
-       Supabase again — it is safe to re-run — then reopen the app.</div>`
-    : '';
+function renderCrew(view) {
+  const list = people();
+  const me = whoami();
+  view.innerHTML = `
+    ${list.length ? `<div class="people">
+      ${list.map((p, i) => `
+        <button class="person" data-name="${esc(p.name)}" style="--i:${Math.min(i, 14)}">
+          <span class="pv-name">${esc(p.name)}${sameName(p.name, me) ? '<i>you</i>' : ''}</span>
+          <span class="pv-sub">${p.last ? `Last active ${esc(ago(p.last))}` : 'Nothing posted yet'}${
+            p.open ? ` \u00b7 ${p.open} open job${p.open === 1 ? '' : 's'}` : ''}</span>
+          <span class="pv-num${p.today ? '' : ' zero'}">${p.today}<i>today</i></span>
+        </button>`).join('')}
+    </div>` : `<div class="empty"><b>Nobody yet</b>People appear here once they have done something in the app.</div>`}
+    <p class="muted small center mt">A person is whoever has reported, posted or signed off.
+      The name comes from each phone's Settings, so use the same one on every device.</p>`;
+  $$('[data-name]', view).forEach(b => b.onclick = () => go('#/crew/' + encodeURIComponent(b.dataset.name)));
 }
 
-/* Common intervals, so setting up thirty-odd machines isn't an evening's
-   typing. These fill the form in; nothing is forced. */
-const SERVICE_PRESETS = [
-  { name: '250 hour service',   every_hours: 250 },
-  { name: '500 hour service',   every_hours: 500 },
-  { name: '1000 hour service',  every_hours: 1000 },
-  { name: 'Six-monthly service', every_months: 6 },
-  { name: 'Annual service',     every_months: 12 },
-  { name: 'CoF',                every_months: 6 },
-  { name: 'Grease and check over', every_months: 1 }
-];
+const personState = { date: '' };
 
-const plansFor = id => DB.service_plans
-  .filter(p => p.gear_id === id && p.active !== false)
-  .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-const planById = id => DB.service_plans.find(p => p.id === id);
-const activePlans = () => DB.service_plans.filter(p => p.active !== false && gearById(p.gear_id));
+function renderPerson(view) {
+  const name = decodeURIComponent(route.path.split('/')[2] || '');
+  if (!name) { view.innerHTML = `<div class="empty"><b>Nobody selected</b></div>`; return; }
+  if (!personState.date) personState.date = today();
+  const date = personState.date;
+  const isMe = sameName(name, whoami());
+  const rows = dayFor(name, date);
+  const days = daysFor(name);
+  const mine = DB.work_orders.filter(o => isOpen(o) && sameName(o.assigned_to, name));
 
-/** The services done against a plan, newest first. */
-const serviceHistory = planId => DB.service_log
-  .filter(e => e.plan_id === planId)
-  .sort((a, b) => String(b.done_on || '').localeCompare(String(a.done_on || '')));
-
-const gearHistory = gearId => DB.service_log
-  .filter(e => e.gear_id === gearId)
-  .sort((a, b) => String(b.done_on || '').localeCompare(String(a.done_on || '')));
-
-/** Same day of the month, n months on, without rolling into the next one. */
-function addMonths(dateStr, n) {
-  const d = new Date(String(dateStr) + 'T00:00:00');
-  if (isNaN(d)) return null;
-  const day = d.getDate();
-  d.setDate(1);
-  d.setMonth(d.getMonth() + Number(n));
-  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/** How close a service is, worked out from the plan and what has been done.
-
-    Months and hours are answered separately and the tighter one wins, so a
-    machine that has sat in the yard all winter still comes up for its annual,
-    and one working double shifts comes up on hours long before the date. */
-function serviceDue(plan) {
-  const g = gearById(plan.gear_id) || {};
-  const last = serviceHistory(plan.id)[0] || null;
-  const out = {
-    plan, gear: g, last,
-    dueDate: null, daysLeft: null,
-    dueHours: null, hoursLeft: null,
-    state: 'green', text: '', sub: '', rank: 1e9
-  };
-
-  if (plan.every_months) {
-    const from = (last && last.done_on) || plan.starts_on || (plan.created_at || '').slice(0, 10);
-    if (from) {
-      out.dueDate = addMonths(from, plan.every_months);
-      out.daysLeft = daysFromToday(out.dueDate);
-    }
-  }
-
-  if (plan.every_hours) {
-    const base = last && last.hours != null ? Number(last.hours)
-               : plan.start_hours != null ? Number(plan.start_hours) : null;
-    if (base != null) {
-      out.dueHours = base + Number(plan.every_hours);
-      if (g.hours != null && g.hours !== '') out.hoursLeft = out.dueHours - Number(g.hours);
-    }
-  }
-
-  // how urgent each measure is, on the same scale, so they can be compared
-  const byDays = out.daysLeft;
-  // a working day is roughly eight hours on the meter; near enough to rank by
-  const byHoursAsDays = out.hoursLeft == null ? null : out.hoursLeft / 8;
-  const worst = [byDays, byHoursAsDays].filter(v => v != null).sort((a, b) => a - b)[0];
-
-  const dateBits = [];
-  if (out.dueDate) {
-    dateBits.push(out.daysLeft < 0 ? `${-out.daysLeft} day${out.daysLeft === -1 ? '' : 's'} overdue`
-      : out.daysLeft === 0 ? 'due today'
-      : `${out.daysLeft} day${out.daysLeft === 1 ? '' : 's'}`);
-  }
-  if (out.hoursLeft != null) {
-    dateBits.push(out.hoursLeft < 0 ? `${Math.round(-out.hoursLeft)} hours over`
-      : `${Math.round(out.hoursLeft)} hours`);
-  } else if (plan.every_hours) {
-    dateBits.push(g.hours == null || g.hours === '' ? 'no hour reading' : 'no starting hours');
-  }
-
-  if (worst == null) {
-    out.state = 'unknown';
-    out.text = 'Not enough to go on';
-    out.sub = plan.every_hours ? 'Log the machine\u2019s hours to start the clock' : 'Set a start date';
-    out.rank = 1e8;
-  } else {
-    // due soon is the fortnight before, or the last tenth of an hours interval
-    const hoursSoon = plan.every_hours ? Math.max(25, plan.every_hours * 0.1) : 0;
-    const soon = (byDays != null && byDays <= 14) ||
-                 (out.hoursLeft != null && out.hoursLeft <= hoursSoon);
-    out.state = worst < 0 ? 'red' : soon ? 'orange' : 'green';
-    out.text = worst < 0 ? 'Overdue' : soon ? 'Due soon' : 'Up to date';
-    out.sub = dateBits.join(' \u00b7 ');
-    out.rank = worst;
-  }
-
-  return out;
-}
-
-/** Everything due, worst first — the planner's list. */
-function serviceBoard() {
-  return activePlans().map(serviceDue).sort((a, b) => a.rank - b.rank);
-}
-
-/** How a machine is tracking overall: its tightest plan. */
-function gearServiceState(gearId) {
-  const dues = plansFor(gearId).map(serviceDue);
-  if (!dues.length) return null;
-  if (dues.some(d => d.state === 'red')) return 'red';
-  if (dues.some(d => d.state === 'orange')) return 'orange';
-  if (dues.every(d => d.state === 'unknown')) return 'unknown';
-  return 'green';
-}
-
-async function logHours(g, hours) {
-  await Store.patch('gear', g.id, {
-    hours: Number(hours), hours_at: new Date().toISOString(), hours_by: whoami()
-  });
-}
-
-let serviceFilter = 'due';
-
-function renderServiceBoard(view) {
-  const board = serviceBoard();
-  const counts = {
-    red: board.filter(d => d.state === 'red').length,
-    orange: board.filter(d => d.state === 'orange').length,
-    green: board.filter(d => d.state === 'green').length,
-    unknown: board.filter(d => d.state === 'unknown').length
-  };
-  const noPlan = activeGear().filter(g => !plansFor(g.id).length);
-  const shown = serviceFilter === 'all' ? board
-    : serviceFilter === 'due' ? board.filter(d => d.state === 'red' || d.state === 'orange')
-    : board.filter(d => d.state === serviceFilter);
+  $('#title').textContent = name;
 
   view.innerHTML = `
-    ${serviceBanner()}
-    <div class="tally">
-      <button class="status-red" data-f="red" aria-pressed="${serviceFilter === 'red'}">
-        <span class="n">${counts.red}</span><span class="l">Overdue</span></button>
-      <button class="status-orange" data-f="orange" aria-pressed="${serviceFilter === 'orange'}">
-        <span class="n">${counts.orange}</span><span class="l">Due soon</span></button>
-      <button class="status-green" data-f="green" aria-pressed="${serviceFilter === 'green'}">
-        <span class="n">${counts.green}</span><span class="l">Up to date</span></button>
-    </div>
-
-    <div class="filters">
-      <button class="chip" data-f="due" aria-pressed="${serviceFilter === 'due'}">Needs doing</button>
-      <button class="chip" data-f="all" aria-pressed="${serviceFilter === 'all'}">Everything</button>
-      ${counts.unknown ? `<button class="chip" data-f="unknown" aria-pressed="${serviceFilter === 'unknown'}">
-        Waiting on a reading (${counts.unknown})</button>` : ''}
-    </div>
-
-    ${shown.length ? shown.map((d, i) => svcRow(d, i)).join('')
-      : `<div class="empty"><b>${serviceFilter === 'due' ? 'Nothing due' : 'Nothing here'}</b>${
-          board.length ? 'Every service on the fleet is up to date.'
-                       : 'No servicing set up yet — start with a machine below.'}</div>`}
-
-    ${noPlan.length ? `
-      <div class="section-title">No servicing set up (${noPlan.length})</div>
-      <p class="muted small" style="margin:-4px 4px 9px">These machines have no plan against them, so nothing will ever come due.</p>
-      <div class="chipwrap">
-        ${noPlan.map(g => `<button class="tagname tap" data-gear="${g.id}">${esc(g.code)}</button>`).join('')}
-      </div>` : ''}`;
-
-  $$('[data-f]', view).forEach(b => b.onclick = () => {
-    serviceFilter = serviceFilter === b.dataset.f && b.classList.contains('chip') ? 'all' : b.dataset.f;
-    renderServiceBoard(view);
-  });
-  $$('[data-gear]', view).forEach(b => b.onclick = () => go('#/service/' + b.dataset.gear));
-  wireSvcRows(view);
-}
-
-function svcRow(d, i) {
-  const g = d.gear;
-  return `
-    <button class="wo status-${d.state === 'unknown' ? 'grey' : d.state}" data-svc="${d.plan.id}"
-            style="--i:${Math.min(i || 0, 10)}">
-      <div class="hdr">
-        <span class="num">${esc(g.code || '')}</span>
-        <span class="num">${esc(catLabel(catOf(g)))}</span>
-      </div>
-      <div class="ttl">${esc(d.plan.name || 'Service')}</div>
-      <div class="sub">
-        <span class="pill"><span class="swatch"></span>${esc(d.text)}</span>
-        ${d.sub ? `<span>${esc(d.sub)}</span>` : ''}
-        ${d.dueDate ? `<span>due ${fmtDate(d.dueDate)}</span>` : ''}
-        ${d.last ? `<span>last ${fmtDate(d.last.done_on)}</span>` : '<span>never done</span>'}
-      </div>
-    </button>`;
-}
-function wireSvcRows(root) {
-  $$('[data-svc]', root).forEach(b => b.onclick = () => {
-    const p = planById(b.dataset.svc);
-    if (p) go('#/service/' + p.gear_id);
-  });
-}
-
-/** Every machine and how its servicing is tracking. */
-function renderServiceFleet(view) {
-  const gear = sortedGear(activeGear());
-  view.innerHTML = `
-    ${serviceBanner()}
-    ${gear.length ? `<div class="gear-grid">
-      ${gear.map((g, i) => {
-        const st = gearServiceState(g.id);
-        const plans = plansFor(g.id);
-        const next = plans.map(serviceDue).filter(d => d.state !== 'unknown').sort((a, b) => a.rank - b.rank)[0];
-        return `
-          <button class="gear-card status-${st === null || st === 'unknown' ? 'grey' : st}"
-                  data-gear="${g.id}" style="--i:${Math.min(i, 14)}">
-            <div class="code">${esc(g.code)}</div>
-            <div class="name">${esc(g.name || catLabel(catOf(g)))}</div>
-            <div class="loc">${plans.length
-              ? `${plans.length} service${plans.length === 1 ? '' : 's'} planned`
-              : 'Nothing planned'}</div>
-            <div class="loc">${next ? esc(next.text + (next.sub ? ' \u00b7 ' + next.sub : ''))
-              : plans.length ? 'Waiting on a reading' : '\u2014'}</div>
-            ${g.hours != null && g.hours !== '' ? `<div class="hrs">${Number(g.hours).toLocaleString('en-NZ')} h</div>` : ''}
-          </button>`;
-      }).join('')}
-    </div>` : `<div class="empty"><b>No gear yet</b>Add the fleet from the maintenance side first.</div>`}`;
-  $$('[data-gear]', view).forEach(b => b.onclick = () => go('#/service/' + b.dataset.gear));
-}
-
-/** One machine: its hours, its plans, and what has been done. */
-function renderServiceGear(view) {
-  const g = gearById(route.path.split('/')[2]);
-  if (!g) { view.innerHTML = `<div class="empty"><b>Gear not found</b></div>`; return; }
-  const plans = plansFor(g.id);
-  const dues = plans.map(serviceDue).sort((a, b) => a.rank - b.rank);
-  const done = gearHistory(g.id);
-
-  $('#title').textContent = g.code;
-
-  view.innerHTML = `
-    ${serviceBanner()}
-    <div class="card">
-      <div class="tiny" style="color:var(--ink-3);letter-spacing:.03em;font-weight:700">${esc(catLabel(catOf(g)))}</div>
-      <h2 style="font-size:19px;margin:2px 0 4px">${esc(g.code)}${g.name ? ' — ' + esc(g.name) : ''}</h2>
-      <a class="small muted" href="#/gear/${g.id}">Open it on the maintenance side</a>
-
-      <label class="field mt"><span>Hour meter reading</span>
-        <input type="number" id="svcHours" step="1" inputmode="numeric"
-               value="${g.hours != null ? esc(g.hours) : ''}" placeholder="e.g. 4820">
+    <div class="daynav">
+      <button class="icon-btn" id="pPrev" aria-label="Previous day">
+        <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg></button>
+      <label class="dn-date">
+        <b>${esc(fmtDate(date))}</b>
+        <span>${date === today() ? 'today' : `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}`}</span>
+        <input type="date" id="pDate" value="${esc(date)}">
       </label>
-      <p class="tiny muted" style="margin:-4px 2px 9px">${g.hours_at
-        ? `Last read ${fmtDate(g.hours_at)}${g.hours_by ? ' by ' + esc(g.hours_by) : ''}. Hour-based services count from here.`
-        : 'Nothing read yet. Hour-based services stay quiet until there is a reading.'}</p>
-      <button class="btn wide" id="svcSaveHours">Save the reading</button>
+      <button class="icon-btn" id="pNext" aria-label="Next day" ${date >= today() ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
     </div>
 
-    <div class="section-title">Planned (${plans.length})</div>
-    ${dues.length ? dues.map(d => `
-      <div class="card accent status-${d.state === 'unknown' ? 'grey' : d.state}">
-        <div class="row" style="align-items:baseline;gap:10px">
-          <h2 style="font-size:16px" class="grow">${esc(d.plan.name || 'Service')}</h2>
-          <span class="pill"><span class="swatch"></span>${esc(d.text)}</span>
+    ${isMe ? `
+      <div class="card">
+        <label class="field"><span>Add a note for ${date === today() ? 'today' : fmtDate(date)}</span>
+          <textarea id="pNote" placeholder="Something that isn't a job — driving to Ngaruawahia, picking up parts…"></textarea>
+        </label>
+        <input type="file" id="pPhotos" accept="image/*" multiple hidden>
+        <div class="btn-row">
+          <button class="btn" id="pPick">${icon('camera')}Add photos</button>
+          <span class="small muted" id="pPicked"></span>
         </div>
-        <div class="small mt" style="color:var(--ink-2)">
-          Every ${[d.plan.every_months ? `${d.plan.every_months} month${d.plan.every_months === 1 ? '' : 's'}` : '',
-                   d.plan.every_hours ? `${d.plan.every_hours} hours` : ''].filter(Boolean).join(' or ')}${
-            d.sub ? ' \u00b7 ' + esc(d.sub) : ''}
-        </div>
-        <div class="small" style="color:var(--ink-3);margin-top:3px">
-          ${d.last ? `Last done ${fmtDate(d.last.done_on)}${d.last.hours != null ? ` at ${Number(d.last.hours).toLocaleString('en-NZ')} h` : ''}${d.last.done_by ? ' by ' + esc(d.last.done_by) : ''}`
-                   : 'Never done'}${d.dueDate ? ` \u00b7 next due ${fmtDate(d.dueDate)}` : ''}${
-            d.dueHours != null ? ` \u00b7 at ${Number(d.dueHours).toLocaleString('en-NZ')} h` : ''}
-        </div>
-        <div class="btn-row mt">
-          <a class="btn sm primary" href="#/service/done/${d.plan.id}">${icon('tick')}Mark it done</a>
-          <a class="btn sm" href="#/service/plan/${d.plan.id}">Edit</a>
-        </div>
-      </div>`).join('')
-      : `<div class="card muted small">Nothing planned for this machine yet.</div>`}
+        <button class="btn primary wide mt" id="pPost">Add it</button>
+      </div>` : ''}
 
-    <a class="btn primary wide mt" href="#/service/plan/new?gear=${g.id}">${icon('plus')}Add a service</a>
+    ${rows.length ? `<div class="card log-card">
+      ${rows.map(dayRow).join('')}
+    </div>` : `<div class="empty"><b>Nothing on ${date === today() ? 'today' : 'this day'}</b>${
+      isMe ? 'Anything you post on a job shows here on its own.' : `${esc(name)} hasn't posted anything.`}</div>`}
 
-    <div class="section-title">Done (${done.length})</div>
-    ${done.length ? `<div class="card">
-      ${done.slice(0, 20).map(e => `
-        <div class="m-row">
-          <span class="grow">
-            <b>${esc(e.name || 'Service')}</b>
-            <span class="tiny" style="display:block;color:var(--ink-3)">
-              ${fmtDate(e.done_on)}${e.hours != null ? ` \u00b7 ${Number(e.hours).toLocaleString('en-NZ')} h` : ''}${
-                e.done_by ? ' \u00b7 ' + esc(e.done_by) : ''}${e.note ? ' \u00b7 ' + esc(e.note) : ''}
-            </span>
-          </span>
-        </div>`).join('')}
-    </div>` : `<div class="card muted small">Nothing recorded yet.</div>`}
-    ${done.length > 20 ? '<p class="muted small center">Showing the 20 most recent.</p>' : ''}`;
+    <div class="btn-row mt">
+      <button class="btn" id="pPrint">${icon('printer')}Print the day</button>
+    </div>
 
-  $('#svcSaveHours', view).onclick = async function () {
-    const v = $('#svcHours', view).value;
-    if (v === '') return toast('Put the reading in first');
-    this.disabled = true;
-    await logHours(g, v);
-    toast('Reading saved');
-    render();
+    ${mine.length ? `<div class="section-title">Open jobs (${mine.length})</div>${mine.map(woCard).join('')}` : ''}
+
+    ${days.length ? `<div class="section-title">Days with something on</div>
+      <div class="chipwrap">${days.slice(0, 30).map(d =>
+        `<button class="tagname tap${d === date ? ' on' : ''}" data-day="${d}">${esc(fmtDate(d))}</button>`).join('')}</div>` : ''}`;
+
+  const step = n => {
+    const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + n);
+    personState.date = localDay(d.toISOString()); renderPerson(view);
   };
-}
+  $('#pPrev', view).onclick = () => step(-1);
+  $('#pNext', view).onclick = () => step(1);
+  $('#pDate', view).onchange = e => { personState.date = e.target.value || today(); renderPerson(view); };
+  $$('[data-day]', view).forEach(b => b.onclick = () => { personState.date = b.dataset.day; renderPerson(view); });
+  $('#pPrint', view).onclick = () => printDay(name, date, rows);
+  wireWoCards(view);
+  $$('[data-wo-open]', view).forEach(b => b.onclick = () => go('#/wo/' + b.dataset.woOpen));
 
-/** Recording a service. Doing it here is what resets the clock. */
-function renderServiceDone(view) {
-  const plan = planById(route.path.split('/')[3]);
-  if (!plan) { view.innerHTML = `<div class="empty"><b>Service not found</b></div>`; return; }
-  const g = gearById(plan.gear_id) || {};
-  const d = serviceDue(plan);
-
-  $('#title').textContent = 'Mark it done';
-
-  view.innerHTML = `
-    <div class="card">
-      <div class="tiny" style="color:var(--ink-3);letter-spacing:.03em;font-weight:700">${esc(g.code || '')}</div>
-      <h2 style="font-size:18px;margin:2px 0 8px">${esc(plan.name || 'Service')}</h2>
-      <p class="small muted" style="margin:0">${d.last
-        ? `Last done ${fmtDate(d.last.done_on)}. Recording it again starts the clock from the date you put in.`
-        : 'This is the first one. Everything after it is counted from here.'}</p>
-
-      <label class="field mt"><span>Done on</span>
-        <input type="date" id="dOn" value="${esc(today())}"></label>
-      <label class="field"><span>Hour meter at the time${plan.every_hours ? '' : ' (optional)'}</span>
-        <input type="number" id="dHours" step="1" inputmode="numeric"
-               value="${g.hours != null ? esc(g.hours) : ''}" placeholder="e.g. 4820"></label>
-      <label class="field"><span>What was done (optional)</span>
-        <textarea id="dNote" placeholder="Oils and filters, greased, checked the tracks…"></textarea></label>
-      <button class="btn primary wide" id="dSave">Record it</button>
-    </div>`;
-
-  $('#dSave', view).onclick = async function () {
-    const on = $('#dOn', view).value || today();
-    const hoursRaw = $('#dHours', view).value;
-    if (plan.every_hours && hoursRaw === '') return toast('This one counts hours — put the reading in');
+  const post = $('#pPost', view);
+  const pick = $('#pPick', view);
+  if (pick) {
+    const input = $('#pPhotos', view);
+    pick.onclick = () => input.click();
+    input.onchange = () => {
+      const n = (input.files || []).length;
+      $('#pPicked', view).textContent = n ? `${n} photo${n === 1 ? '' : 's'} chosen` : '';
+    };
+  }
+  if (post) post.onclick = async function () {
+    const body = $('#pNote', view).value.trim();
+    const photos = Array.from(($('#pPhotos', view) || {}).files || []);
+    if (!body && !photos.length) return toast('Write something or add a photo first');
     this.disabled = true;
-    const hours = hoursRaw === '' ? null : Number(hoursRaw);
-    await Store.insert('service_log', {
-      id: uid(), plan_id: plan.id, gear_id: plan.gear_id, name: plan.name,
-      done_on: on, hours, done_by: whoami(), note: $('#dNote', view).value.trim(),
-      created_at: new Date().toISOString()
+    if (photos.length) this.textContent = 'Uploading\u2026';
+    // a note on no job still belongs on the day it is about
+    const at = date === today() ? new Date() : new Date(date + 'T12:00:00');
+    await Store.insert('wo_updates', {
+      id: uid(), work_order_id: null, created_at: at.toISOString(),
+      author: whoami(), role: S.role, kind: 'note', body, meta: {}
     });
-    // the meter only goes forwards; don't wind a machine back on an old entry
-    if (hours != null && (g.hours == null || g.hours === '' || hours >= Number(g.hours))) await logHours(g, hours);
-    toast('Recorded — the clock starts again');
-    go('#/service/' + plan.gear_id);
+    // photos ride as file rows right behind the note, the same way they do
+    // on a job — so offline handling and the stash apply here unchanged.
+    // The day view folds them back onto the note.
+    let i = 0;
+    for (const raw of photos) {
+      const f = await compressImage(raw);
+      const up = await Store.upload(f);
+      await Store.insert('wo_updates', {
+        id: uid(), work_order_id: null, created_at: new Date(at.getTime() + (++i)).toISOString(),
+        author: whoami(), role: S.role, kind: 'file', body: '', meta: up
+      });
+    }
+    toast(photos.length ? `Added with ${photos.length} photo${photos.length === 1 ? '' : 's'}` : 'Added');
+    renderPerson(view);
   };
 }
 
-/** Setting up or changing a plan. */
-function renderServicePlan(view) {
-  const seg = route.path.split('/')[3];
-  const editing = seg === 'new' ? null : planById(seg);
-  const g = editing ? gearById(editing.gear_id) : gearById(route.query.gear);
-  if (!g) { view.innerHTML = `<div class="empty"><b>Pick a machine first</b></div>`; return; }
-  const p = editing || {};
-
-  $('#title').textContent = editing ? 'Edit service' : 'Add a service';
-
-  view.innerHTML = `
-    <div class="card">
-      <div class="tiny" style="color:var(--ink-3);letter-spacing:.03em;font-weight:700">${esc(g.code)}${
-        g.name ? ' — ' + esc(g.name) : ''}</div>
-
-      ${editing ? '' : `<p class="small muted mt">Start from one of these, or write your own.</p>
-        <div class="chipwrap mt">
-          ${SERVICE_PRESETS.map((x, i) => `<button class="tagname tap" data-preset="${i}">${esc(x.name)}</button>`).join('')}
-        </div>`}
-
-      <label class="field mt"><span>What is it?</span>
-        <input type="text" id="pName" value="${esc(p.name || '')}" placeholder="e.g. 500 hour service"></label>
-
-      <p class="small muted">How often? Fill in one or both — whichever comes first wins.</p>
-      <div class="row" style="gap:10px">
-        <label class="field grow"><span>Every … months</span>
-          <input type="number" id="pMonths" step="1" min="1" inputmode="numeric"
-                 value="${p.every_months != null ? esc(p.every_months) : ''}" placeholder="—"></label>
-        <label class="field grow"><span>Every … hours</span>
-          <input type="number" id="pHours" step="1" min="1" inputmode="numeric"
-                 value="${p.every_hours != null ? esc(p.every_hours) : ''}" placeholder="—"></label>
+/** One line of a person's day. */
+function dayRow(u) {
+  const wo = u.work_order_id ? orderById(u.work_order_id) : null;
+  const g = wo ? gearById(wo.gear_id) : null;
+  const pics = (u.files || []).filter(f => f && /^image\//.test(f.type || ''));
+  const docs = (u.files || []).filter(f => f && f.url && !/^image\//.test(f.type || ''));
+  const label = u.kind === 'file'
+    ? (pics.length && !docs.length ? `${pics.length} photo${pics.length === 1 ? '' : 's'}`
+      : docs.length && !pics.length ? `${docs.length} file${docs.length === 1 ? '' : 's'}` : 'Photos and files')
+    : (UPDATE_LABELS[u.kind] || 'Update');
+  return `
+    <div class="log-item${wo ? ' to-job' : ''}" ${wo ? `data-wo-open="${wo.id}"` : ''}>
+      <div class="log-time">${fmtTime(u.created_at)}</div>
+      <div class="log-body">
+        <div class="log-head"><span class="log-kind">${esc(label)}</span></div>
+        ${wo ? `<div class="log-job">${esc(g ? g.code : '')} \u00b7 ${woNo(wo)} — ${esc(wo.title)}</div>` : ''}
+        ${u.body && u.kind !== 'file' ? `<div class="log-note">${esc(u.body)}</div>` : ''}
+        ${pics.length || docs.length ? `<div class="thumbs">${pics.map(f =>
+            `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}${
+          docs.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('file')}${esc(f.name || 'file')}</a>`).join('')}
+        </div>` : ''}
       </div>
-
-      <label class="field"><span>Counting from</span>
-        <input type="date" id="pFrom" value="${esc((p.starts_on || today()).slice(0, 10))}"></label>
-      <label class="field"><span>Hours at that point (optional)</span>
-        <input type="number" id="pStartHours" step="1" inputmode="numeric"
-               value="${p.start_hours != null ? esc(p.start_hours) : (g.hours != null ? esc(g.hours) : '')}"
-               placeholder="e.g. 4820"></label>
-      <p class="tiny muted" style="margin:-4px 2px 10px">Only used until the first one is recorded — after that it counts
-        from what was actually done.</p>
-
-      <button class="btn primary wide" id="pSave">${editing ? 'Save changes' : 'Add it'}</button>
-      ${editing ? `<button class="btn wide mt" id="pDrop">Remove this service</button>` : ''}
     </div>`;
+}
 
-  $$('[data-preset]', view).forEach(b => b.onclick = () => {
-    const x = SERVICE_PRESETS[Number(b.dataset.preset)];
-    $('#pName', view).value = x.name;
-    $('#pMonths', view).value = x.every_months || '';
-    $('#pHours', view).value = x.every_hours || '';
+function fmtTime(v) {
+  const d = new Date(v);
+  if (isNaN(d)) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** The daily report: the day as one timeline, then the same day asset by
+    asset, so a manager can read either "what happened when" or "what got
+    done to what" without re-sorting anything in their head. */
+function printDay(name, date, rows) {
+  const jobOf = u => u.work_order_id ? orderById(u.work_order_id) : null;
+  const what = u => {
+    if (u.kind !== 'file') return UPDATE_LABELS[u.kind] || 'Update';
+    const n = (u.files || []).length;
+    const pics = (u.files || []).filter(f => f && /^image\//.test(f.type || '')).length;
+    return pics === n ? `${n} photo${n === 1 ? '' : 's'}` : `${n} file${n === 1 ? '' : 's'}`;
+  };
+  const detail = u => {
+    if (u.kind === 'file') return (u.files || []).map(f => f && f.name).filter(Boolean).join(', ');
+    let t = String(u.body || '');
+    // the report row already says "Damage reported" and names the job, so
+    // the auto-written "Damage reported: <title> — " on the front is noise
+    if (u.kind === 'created') t = t.replace(/^damage reported:\s*[^\u2014]*\u2014\s*/i, '');
+    t = t ? t[0].toUpperCase() + t.slice(1) : '';
+    const n = (u.files || []).length;
+    if (n && u.kind !== 'file') t += (t ? ' \u00b7 ' : '') + `${n} photo${n === 1 ? '' : 's'}`;
+    return t;
+  };
+
+  // group by asset, keeping the order the person first touched each one
+  const byAsset = [];
+  const loose = [];
+  rows.forEach(u => {
+    const wo = jobOf(u);
+    if (!wo) { loose.push(u); return; }
+    let block = byAsset.find(x => x.gearId === wo.gear_id);
+    if (!block) { block = { gearId: wo.gear_id, gear: gearById(wo.gear_id) || {}, jobs: [] }; byAsset.push(block); }
+    let job = block.jobs.find(j => j.wo.id === wo.id);
+    if (!job) { job = { wo, rows: [] }; block.jobs.push(job); }
+    job.rows.push(u);
   });
 
-  $('#pSave', view).onclick = async function () {
-    const name = $('#pName', view).value.trim();
-    const months = $('#pMonths', view).value;
-    const hours = $('#pHours', view).value;
-    if (!name) return toast('Give it a name');
-    if (!months && !hours) return toast('Say how often — months, hours, or both');
-    const startHours = $('#pStartHours', view).value;
-    const row = {
-      gear_id: g.id, name,
-      every_months: months ? Number(months) : null,
-      every_hours: hours ? Number(hours) : null,
-      starts_on: $('#pFrom', view).value || today(),
-      start_hours: startHours === '' ? null : Number(startHours),
-      active: true
-    };
-    this.disabled = true;
-    if (editing) await Store.patch('service_plans', editing.id, row);
-    else await Store.insert('service_plans', Object.assign({ id: uid(), note: '',
-      created_at: new Date().toISOString() }, row));
-    toast(editing ? 'Saved' : 'Added');
-    go('#/service/' + g.id);
-  };
+  const first = rows[0], last = rows[rows.length - 1];
+  const span = first && last ? (first === last ? fmtTime(first.created_at)
+    : `${fmtTime(first.created_at)} \u2013 ${fmtTime(last.created_at)}`) : '\u2014';
+  const jobs = byAsset.reduce((n, x) => n + x.jobs.length, 0);
+  const photos = rows.reduce((n, u) => n + (u.files || []).filter(f => f && /^image\//.test(f.type || '')).length, 0);
 
-  const drop = $('#pDrop', view);
-  if (drop) drop.onclick = async () => {
-    if (!confirm(`Remove "${p.name}" from ${g.code}?\n\nWhat has already been done stays on the record.`)) return;
-    await Store.patch('service_plans', editing.id, { active: false });
-    toast('Removed');
-    go('#/service/' + g.id);
-  };
+  printDoc(`
+    ${docHead('Daily report', '', [['Date', fmtDate(date)], ['Person', name]])}
+
+    <div class="facts">
+      <div class="col">
+        <div class="lab">Person</div>
+        <div class="big">${esc(name)}</div>
+        <div class="line">${esc(fmtDate(date))}</div>
+      </div>
+      <div class="col">
+        <div class="lab">On the day</div>
+        <div class="big">${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}</div>
+        <div class="line">${span}</div>
+      </div>
+      <div class="col">
+        <div class="lab">Touched</div>
+        <div class="big">${byAsset.length} asset${byAsset.length === 1 ? '' : 's'}</div>
+        <div class="line">${jobs} job${jobs === 1 ? '' : 's'}${photos ? ` \u00b7 ${photos} photo${photos === 1 ? '' : 's'}` : ''}${
+          loose.length ? ` \u00b7 ${loose.length} note${loose.length === 1 ? '' : 's'} not on a job` : ''}</div>
+      </div>
+    </div>
+
+    <h2>The day</h2>
+    ${rows.length ? `<table class="tight">
+      <tr><th style="width:14mm">Time</th><th style="width:28mm">What</th>
+          <th style="width:40mm">Asset \u00b7 job</th><th>Detail</th></tr>
+      ${rows.map(u => { const wo = jobOf(u); const g = wo ? gearById(wo.gear_id) : null;
+        return `<tr class="avoid-break">
+          <td class="t">${fmtTime(u.created_at)}</td>
+          <td>${esc(what(u))}</td>
+          <td>${wo ? `<b>${esc(g ? g.code : '')}</b> <span class="quiet">${woNo(wo)}</span>` : '<span class="quiet">\u2014</span>'}</td>
+          <td class="note">${esc(detail(u))}</td>
+        </tr>`; }).join('')}
+    </table>` : '<p class="quiet">Nothing posted this day.</p>'}
+
+    ${byAsset.length || loose.length ? `<h2>Asset by asset</h2>` : ''}
+    ${byAsset.map(x => `
+      <div class="asset avoid-break">
+        <div class="asset-head">
+          <span class="code">${esc(x.gear.code || '')}</span>
+          <span class="name">${esc(x.gear.name || catLabel(catOf(x.gear)))}</span>
+          <span class="n">${x.jobs.reduce((n, j) => n + j.rows.length, 0)} entr${x.jobs.reduce((n, j) => n + j.rows.length, 0) === 1 ? 'y' : 'ies'}</span>
+        </div>
+        ${x.jobs.map(j => `
+          <div class="job">
+            <div class="job-line"><b>${woNo(j.wo)}</b> ${esc(j.wo.title)}
+              <span class="quiet">\u00b7 ${isOpen(j.wo) ? esc(statusLabel(j.wo.status)) : 'Fixed'}</span></div>
+            <table class="tight sub">
+              ${j.rows.map(u => `<tr>
+                <td class="t" style="width:14mm">${fmtTime(u.created_at)}</td>
+                <td style="width:28mm">${esc(what(u))}</td>
+                <td class="note">${esc(detail(u))}</td>
+              </tr>`).join('')}
+            </table>
+          </div>`).join('')}
+      </div>`).join('')}
+    ${loose.length ? `
+      <div class="asset avoid-break">
+        <div class="asset-head"><span class="code">Not on a job</span>
+          <span class="n">${loose.length} note${loose.length === 1 ? '' : 's'}</span></div>
+        <table class="tight sub">
+          ${loose.map(u => `<tr>
+            <td class="t" style="width:14mm">${fmtTime(u.created_at)}</td>
+            <td class="note">${esc(u.body || '')}</td>
+          </tr>`).join('')}
+        </table>
+      </div>` : ''}
+
+    <div class="sig"><div>${esc(name)}</div><div>Workshop manager &amp; date</div></div>
+    ${docFoot(esc(name) + ' \u00b7 ' + fmtDate(date))}`);
 }
 
 /* ================================================================
@@ -2983,6 +3090,9 @@ function renderSetup(view) {
       <h2>Status</h2>
       <table class="data">
         <tr><th>Connection</th><td>${S.localMode ? 'This device only' : connected() ? 'Shared database' : 'Not set up'}</td></tr>
+        ${connected() && stuckFiles().length ? `<tr><th>Stuck photos</th><td>${stuckFiles().length} still in the database
+          the old way. ${isWorkshop() ? 'This device is moving them to storage in the background.'
+                                       : 'A workshop device moves them to storage on its own.'}</td></tr>` : ''}
         <tr><th>Gear</th><td>${DB.gear.length}</td></tr>
         <tr><th>Work orders</th><td>${DB.work_orders.length}</td></tr>
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
@@ -3105,6 +3215,48 @@ async function refresh() {
     syncState = 'bad';
   }
   paintSync();
+  if (syncState === 'ok' && isWorkshop()) repairStuckFiles();   // in the background; see below
+}
+
+/* ------------------------------------------------------------------
+   Photos that reached the database as data URLs — an older build sent
+   them that way when a phone had no signal — sit in every phone's pull
+   and fill every phone's cache. A workshop device moves each one into
+   Storage and points the row at it, a few at a time, until none are
+   left. Any device can do it; the workshop ones are the ones on wifi.
+   ------------------------------------------------------------------ */
+function stuckFiles() {
+  const out = [];
+  DB.wo_updates.forEach(r => { if (r.meta && /^data:/.test(r.meta.url || '')) out.push({ table: 'wo_updates', row: r, field: 'meta' }); });
+  DB.manuals.forEach(r => { if (r.file && /^data:/.test(r.file.url || '')) out.push({ table: 'manuals', row: r, field: 'file' }); });
+  return out;
+}
+
+let repairing = false;
+async function repairStuckFiles(limit) {
+  if (repairing || !connected()) return 0;
+  const batch = stuckFiles().slice(0, limit || 4);
+  if (!batch.length) return 0;
+  repairing = true;
+  let done = 0;
+  try {
+    for (const { table, row, field } of batch) {
+      const o = row[field];
+      const blob = await (await fetch(o.url)).blob();
+      const url = await uploadToStorage(blob, o.name || 'file', o.type || blob.type);
+      const fresh = { name: o.name || 'file', type: o.type || blob.type || '', size: blob.size, url };
+      await rest(`${table}?id=eq.${encodeURIComponent(row.id)}`, {
+        method: 'PATCH',
+        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify({ [field]: fresh })
+      });
+      row[field] = fresh;
+      done++;
+    }
+    saveCache();
+  } catch (e) { /* next refresh has another go */ }
+  repairing = false;
+  return done;
 }
 
 let pollTimer = null;
@@ -3153,6 +3305,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
   render();
   startPolling();
   keepUpToDate();
+  Outbox.migrate().then(() => refresh());
 })();
 
 /* ----------------------------------------------------------------------

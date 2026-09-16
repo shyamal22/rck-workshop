@@ -139,66 +139,29 @@ drop policy if exists manuals_all on manuals;
 create policy manuals_all on manuals for all to anon, authenticated using (true) with check (true);
 
 -- =====================================================================
---  Planned servicing and maintenance
+--  Crew — who is doing what
 --
---  The other half of the job: the work you do so the gear doesn't break,
---  rather than because it has. A plan is a rule — this service, every so
---  many months and/or so many hours — and the log is what actually
---  happened. When it is next due is worked out from the two, never
---  stored, so it can't drift.
---
---  Deliberately separate from work orders. A service falling due does
---  not take a machine out of operation, and does not change its colour
---  on the gear board: that still answers only "can we use it today".
+--  Nobody is set up. A person is a name that has done something in the
+--  app, and a job can be assigned to any of them. A note that isn't
+--  about a job is an update with no job on it, so a person's day is one
+--  list from one table.
 -- =====================================================================
-alter table gear add column if not exists hours     numeric;
-alter table gear add column if not exists hours_at  timestamptz;
-alter table gear add column if not exists hours_by  text not null default '';
-
-create table if not exists service_plans (
-  id           uuid primary key default gen_random_uuid(),
-  gear_id      uuid references gear(id) on delete cascade,
-  name         text not null default '',
-  every_months integer,                      -- either, or both; whichever comes first
-  every_hours  integer,
-  starts_on    date,                          -- the clock starts here until the first service
-  start_hours  numeric,
-  note         text not null default '',
-  active       boolean not null default true,
-  created_at   timestamptz not null default now()
-);
-
-create table if not exists service_log (
-  id         uuid primary key default gen_random_uuid(),
-  plan_id    uuid references service_plans(id) on delete cascade,
-  gear_id    uuid,
-  name       text not null default '',        -- kept on the row, so history reads
-  done_on    date not null default current_date,
-  hours      numeric,
-  done_by    text not null default '',
-  note       text not null default '',
-  created_at timestamptz not null default now()
-);
-
-alter table service_plans enable row level security;
-alter table service_log   enable row level security;
-drop policy if exists service_plans_all on service_plans;
-drop policy if exists service_log_all   on service_log;
-create policy service_plans_all on service_plans for all to anon, authenticated using (true) with check (true);
-create policy service_log_all   on service_log   for all to anon, authenticated using (true) with check (true);
+alter table work_orders add column if not exists assigned_to text not null default '';
+alter table wo_updates  alter column work_order_id drop not null;
 
 -- =====================================================================
 --  Removed features
 --
---  The maintenance crew and costs sections were taken out of the app.
---  Their tables are deliberately NOT dropped here — this file is re-run
---  routinely, and a drop would destroy the record the moment anyone did.
---  They simply sit unused and cost nothing.
+--  Costs, planned servicing and an earlier crew diary were taken out of
+--  the app. Their tables are deliberately NOT dropped here — this file is re-run routinely, and a drop would destroy
+--  the record the moment anyone did. They sit unused and cost nothing.
 --
 --  To clear them out for good, run these by hand, once, knowingly:
 --
 --    drop table if exists crew_log;
 --    drop table if exists crew;
 --    drop table if exists costs;
---    alter table work_orders drop column if exists assigned_to;
+--    drop table if exists service_log;
+--    drop table if exists service_plans;
+--    alter table gear drop column if exists hours, drop column if exists hours_at, drop column if exists hours_by;
 -- =====================================================================

@@ -17,48 +17,45 @@ the last job is signed off the gear goes green again on its own.
 The landing page offers three doors:
 
 - **Maintenance** — gear status, damage reports, work orders, repair history.
-- **Planned servicing and maintenance** — services and inspections, before anything breaks.
+- **Crew** — who is active, and what each person did in a day.
 - **Manuals** — the operator and workshop books, on every phone.
 
 Everything else — the work orders list, reports, the wall screen, managing the
 fleet and settings — is in the ⋮ menu.
 
-The **maintenance crew** and **costs** sections were removed. Their database tables
-are left in place rather than dropped, since `supabase-schema.sql` is re-run
-routinely and a drop would destroy the record the first time anyone did; the end of
-that file has the statements to clear them out by hand if you ever want to.
+**Costs**, **planned servicing** and an earlier, heavier crew section were removed. Their database tables are left in place rather than dropped, since
+`supabase-schema.sql` is re-run routinely and a drop would destroy the record the
+first time anyone did; the end of that file has the statements to clear them out by
+hand if you ever want to.
 
-## Planned servicing and maintenance
+## Crew
 
-The other half of the job: the work done so gear doesn't break, rather than because
-it has.
+A manager's problem: five people, four machines each, comments going in all day —
+and no way to see what any one of them actually did.
 
-A **plan** is a rule — this service, every so many months and/or every so many
-hours. The **log** is what actually happened. When something is next due is worked
-out from the two every time it is asked for, never stored, so it cannot drift out
-of step with the record.
+**Nobody is set up.** A person is whoever has done something in the app — reported
+damage, posted on a job, signed one off. The name comes from each phone's Settings,
+so use the same one on every device you carry.
 
-- **Set one up** from a machine's page. Presets fill the form in — 250/500/1000
-  hour service, six-monthly, annual, CoF, grease and check over — so thirty-odd
-  machines aren't an evening's typing. Nothing is forced; write your own.
-- **Months and hours are answered separately, and the tighter one wins.** A machine
-  that sat in the yard all winter still comes up for its annual; one on double
-  shifts comes up on hours long before the date.
-- **Hour-based plans need a reading.** Put the hour meter in on the machine's page.
-  Until someone does, those plans say *"not enough to go on"* rather than pretending
-  everything is fine.
-- **Due soon** is the fortnight before a date, or the last tenth of an hours
-  interval. Before that it is up to date; past it, overdue.
-- **Mark it done** and the clock starts again from the date and hours you put in.
-  What was done stays on the record against the machine.
-- The **Due** tab is the planner's list, worst first. The **Machines** tab is every
-  machine and how it is tracking, with the machines that have no plan at all called
-  out — nothing will ever come due against them.
+- The **Crew** door lists everyone, most recently active first, with how many things
+  they posted today and how many open jobs they hold.
+- Tap a person and you get **their day**: everything they posted, in time order, on
+  whichever job it was — a comment, a damage report, the photos they added. Step
+  back a day at a time, or jump to any date. **Print the day** gives the manager a
+  one-page daily report.
+- On **your own** page there is a box for things that aren't a job — driving to a
+  site, picking up parts — so the day reads whole. Photos can go with it, and they
+  sit on the note in the day rather than as lines of their own. A note like that is stored as an
+  update with no job on it, which is why it shows in your day but never in any job's
+  history.
+- A photo added to a job counts once in the day, not once per photo.
 
-Servicing is deliberately apart from work orders. A service falling due does **not**
-take a machine out of operation and does **not** change its colour on the gear
-board: that still answers only *can we use it today*. A truck can be green there and
-red here, and both are true.
+**Assigning.** The workshop can set **Assigned to** on any work order. The picker
+offers the people using the app, and *Someone else…* takes a name that isn't yet.
+The job card, the wall screen and the printed sheet all name who holds it; a
+person's page lists their open jobs under their day.
+
+Comments are just comments again — one box, one button.
 
 ## Manuals
 
@@ -102,29 +99,7 @@ here carries a status colour, because colour still only means whether gear is wo
   on the printed history.
 - Sign the job off with **what was done**. The gear turns green automatically.
 
-### Saying what's happening
-
-A plain comment never told you whether someone was fixing the thing or only
-talking about it, so a job could carry six notes and still tell you nothing.
-Posting one now means saying which it is — write the line, then tap the one that
-fits:
-
-| | means |
-|---|---|
-| **Working on it** | spanners on it now — no typing needed, one tap says it |
-| **Waiting on** | parts, a quote, the repairer. Type what for and the card says it |
-| **Hit a problem** | needs a decision |
-| **Had a look** | checked it over, nothing done yet |
-| **Just info** | nothing for anyone to do |
-
-The newest one becomes the job's **live line**, and it follows the job everywhere:
-on the work-order card, at the top of the job, on the wall screen and on the
-printed sheet. So the board answers *is this moving?* without anyone opening
-anything — including when the answer is **No word yet**, which is the one a
-workshop most needs to see.
-
-Colour keeps its meaning: red is bad news, yellow is held up, dark is happening
-now, grey is only words.
+Every job card says who holds it and who last touched it, and how long ago.
 
 **On the workshop wall**
 - The **Workshop screen** (`#/screen`) is a full-screen board: counts of working /
@@ -145,7 +120,11 @@ then comments and history, attachments and photos, and sign-off lines.
 - **Fleet status** — every machine, colour, location, due date, plus all open jobs.
 - **Repair history** — whole fleet or one machine, any date range: every repair,
   what was done, who did it, days out of action, cost, and the paperwork on file.
-- **CSV export** of all work orders for Excel.
+- **Excel export of every asset** — one row each: code, type, name, make/model,
+  status, open work orders, days down, location and when it was last updated,
+  notes, retired, added. A real `.xlsx` with a frozen header and a filter row,
+  written by the app itself so it works with no signal.
+- **CSV export** of all work orders.
 
 Every change is written to the work order's history, with who did it and when, so
 the record of a machine's repairs is complete without anyone having to keep it.
@@ -251,6 +230,14 @@ push to `main` updates it automatically.
 ---
 
 ## Things worth knowing
+
+- **Photos taken with no signal** wait on the phone (in a proper file store, not
+  the small cache) and go to Storage on their own when it comes back. Nothing
+  image-shaped is ever written into the database or the offline cache — one photo
+  stored the wrong way is a tenth of a phone's whole allowance, which is how every
+  phone on the crew once came to say "storage full". If an older build left any in
+  the database, a workshop device quietly moves them to Storage; Settings shows the
+  count until it reaches zero.
 
 - **No logins.** Everyone shares one key, so anyone holding that key can read and
   write. That's deliberate — no passwords for the crew to lose. Because this repo
