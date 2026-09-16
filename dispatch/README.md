@@ -46,18 +46,21 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 - A tab of its own, next to Jobs and Today, and everybody has it. The job diary answers
   *what happened on this job*; this answers **what did Tane do today**, which is the question
   you actually ask when four crews are out at once.
-- **One day, every person, every job they touched, in the order it happened.** Each person
-  gets their own block — their name, how many things they logged, how many jobs, how many
-  photos — and under it their day, running from first entry to last. Issues and delays are
-  marked red the same as they are in the diary, and every line says which job it belongs to
-  and links straight through to that diary.
-- **Arrows move a day at a time**, there's a date box for anything further back, and a chip
-  per person to pin the view to one of them. Left alone it stays on today — including past
-  midnight, so a phone left open overnight rolls over on its own.
-- **Say something** posts a comment straight into any job's diary, **with photos**, without
-  going to find the job first. The job list puts the ones you supervise at the top. Photos
-  with no words become a *Photos* entry; words with no photos a *Note*. It lands in that
-  job's diary exactly as if it had been written there, under your name.
+- **The way in is the people, not the work.** The screen opens on a tile per person who was
+  out that day — their initials, their name, what they logged, how many jobs, how many
+  photos, and a red mark if anything went wrong. Nothing else. Tap one and you get **that
+  person's diary for the day**: everything they put into any job, in the order they did it,
+  with a link on every line through to the job it belongs to.
+- **Arrows move a day at a time**, and there's a date box for anything further back. Left
+  alone it stays on today — including past midnight, so a phone left open overnight rolls
+  over on its own.
+- **An entry doesn't have to belong to a job.** *Say something* asks *About a job?* and the
+  first answer is **Just my diary — no job**: the doctor's appointment, the yard pickup, the
+  hour spent chasing a delivery. It goes in under your name on the day, shows on your own
+  page with an **Own diary** tag, and appears in no job's diary at all. Pick a job instead and
+  it lands in that diary exactly as if it had been written there.
+- **Photos either way.** Photos with no words become a *Photos* entry; words with no photos a
+  *Note*. The job list puts the ones you supervise at the top.
 - Documents show up too — who added what, to which job. A site phone never sees the
   office-only ones here, same as everywhere else. Money never appears on this screen.
 
@@ -181,6 +184,7 @@ Android), then **Settings** → name, role, and the two values.
 | Keep the job diary, add photos | ✓ | ✓ | ✓ |
 | See **Crew & supervisors** — everyone's day | ✓ | ✓ | ✓ |
 | Comment into a diary from the crew screen | ✓ | ✓ | ✓ |
+| Keep a diary of their own, with no job on it | ✓ | ✓ | ✓ |
 | Start a job, mark it completed | ✓ | ✓ | ✓ |
 | Print reports | ✓ | ✓ | ✓ |
 | Add documents | ✓ | ✓ | ✓ |
