@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.4.0';
+const VERSION = '2.4.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1139,6 +1139,8 @@ function render() {
 
   $('#title').textContent = screen.title;
   $('#backBtn').hidden = !(back || screen.back);
+  // Nothing to go home to when you are already there.
+  $('#homeBtn').hidden = route.path === '/';
   $('#menu').hidden = true;
 
   paintTabs();
@@ -4156,6 +4158,7 @@ function startPolling() {
    ================================================================ */
 $('#menuBtn').onclick = () => { $('#menu').hidden = !$('#menu').hidden; };
 $('#backBtn').onclick = () => history.back();
+$('#homeBtn').onclick = () => go('#/');
 $$('#menu [data-go]').forEach(b => b.onclick = () => { $('#menu').hidden = true; go(b.dataset.go); });
 document.addEventListener('click', e => {
   if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('#menuBtn')) $('#menu').hidden = true;

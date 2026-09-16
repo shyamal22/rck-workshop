@@ -69,7 +69,8 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   its diary on site in the afternoon.
 - **The app opens on a landing page with three tools: Jobs, Crew & supervisors, and Profit
   & loss.** Everyone gets the first two. P&L appears on Director devices only, and nothing
-  hints at it otherwise.
+  hints at it otherwise. A **house button** sits at the top of every other screen and goes
+  straight back to it — the back arrow retraces your steps, the house skips them.
 - **The profit and loss on a job** is filled in after it is finished, on the job's own
   **Profit & loss** screen. It is deliberately small: a **description and a cost**, as many
   lines as the job needs. The description box suggests the usual ones — asphalt, emulsion,
