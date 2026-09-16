@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.5.0';
+const VERSION = '2.6.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1133,6 +1133,7 @@ const SCREENS = {
   '/pnl':     { title: 'Profit & loss', render: renderPnl,    back: true },
   '/today':   { title: 'Today on site', render: renderToday },
   '/crew':    { title: 'Crew & supervisors', render: renderCrew },
+  '/faces':   { title: 'Crew photos',   render: renderFaces, back: true },
   '/log':     { title: 'Log',           render: renderLogPicker, back: true },
   '/new':     { title: 'New job',       render: renderJobEdit, back: true },
 
@@ -1682,19 +1683,84 @@ function faceMark(name, cls) {
     : `<span class="fi ${cls || ''}">${esc(initials(name))}</span>`;
 }
 
-/** Set, replace or clear the photo kept against a name. */
-async function savePersonPhoto(name, up) {
+/** Set, replace or clear the photo kept against a name.
+
+    `role` is only ever passed when somebody is saving their own — a director
+    putting a face to Tane would otherwise relabel Tane a director. */
+async function savePersonPhoto(name, up, role) {
   const row = personRow(name);
   const patch = {
     name: (name || '').trim(),
     photo_url: up ? up.url : '',
     photo_name: up ? up.name : '',
-    role: S.role,
     updated_at: new Date().toISOString(),
     updated_by: whoami()
   };
+  if (role) patch.role = role;
   if (row) return Store.patch('crew_people', row.id, patch);
-  return Store.insert('crew_people', Object.assign({ id: uid(), name_key: personKey(name) }, patch));
+  return Store.insert('crew_people',
+    Object.assign({ id: uid(), name_key: personKey(name), role: role || '' }, patch));
+}
+
+/** Everyone the app has ever seen a name for: whoever has written in a diary,
+    added a document, been named as a supervisor, or already has a row here.
+    There are no accounts, so this is the nearest thing to a staff list. */
+function knownPeople() {
+  const by = {};
+  const add = (name, role) => {
+    const n = (name || '').trim();
+    if (!n) return null;
+    const k = personKey(n);
+    const p = by[k] || (by[k] = { key: k, name: n, role: '', entries: 0 });
+    if (!p.role && role) p.role = role;
+    return p;
+  };
+  DB.crew_people.forEach(r => add(r.name || r.name_key, r.role));
+  DB.diary_entries.forEach(e => { const p = add(e.author, e.role); if (p) p.entries++; });
+  DB.project_docs.forEach(d => add(d.uploaded_by, ''));
+  DB.projects.forEach(j => add(j.supervisor, 'supervisor'));
+  return Object.values(by).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* One place that knows how to take a photo of somebody and file it, so the
+   three screens that offer it cannot drift apart. */
+function wirePhotoPicker(root, opts) {
+  const pick = $(opts.pick, root);
+  const file = $(opts.file, root);
+  if (!pick || !file) return;
+
+  pick.onclick = () => {
+    if (peopleTableMissing) return toast('Run the latest supabase-schema.sql first');
+    if (!(opts.name() || '').trim()) return toast(opts.noName || 'Name them first');
+    file.click();
+  };
+  file.onchange = async () => {
+    const f = (file.files || [])[0];
+    file.value = '';
+    if (!f) return;
+    const name = opts.name();
+    pick.disabled = true;
+    const was = pick.textContent;
+    pick.textContent = 'Saving…';
+    try {
+      await savePersonPhoto(name, await Store.upload(await squareImage(f, 420)), opts.role);
+      toast('Photo saved');
+    } catch (err) {
+      pick.disabled = false;
+      pick.textContent = was;
+      toast('Could not save: ' + err.message);
+    }
+    render();
+  };
+
+  const clear = opts.clear ? $(opts.clear, root) : null;
+  if (clear) clear.onclick = async () => {
+    const name = opts.name();
+    if (!confirm(`Remove ${esc(name)}'s photo? Their initials are used instead.`)) return;
+    await savePersonPhoto(name, null, opts.role);
+    toast('Photo removed');
+    render();
+  };
 }
 
 /** The name as that person actually writes it, found anywhere they have
@@ -1847,6 +1913,8 @@ function renderCrew(view) {
     ${crewDayNav(day, isToday)}
     ${crewSayBox(day, isToday)}
 
+    ${isDirector() ? `<a class="btn wide mb" href="#/faces">${icon('camera')}Crew photos</a>` : ''}
+
     ${people.length ? `
       <div class="section-title">Out ${isToday ? 'today' : 'that day'}</div>
       <div class="faces">
@@ -1904,6 +1972,9 @@ function renderPersonDay(view, people, day, isToday, who) {
         <h2 style="margin:0">${esc(p.name)}</h2>
         <div class="small muted">${p.role ? esc(roleLabel(p.role)) : 'On the tools'}${isMe ? ' · you' : ''}</div>
       </div>
+      ${isDirector() || isMe ? `
+        <input type="file" id="pFace" accept="image/*" hidden>
+        <button class="btn sm" id="pFacePick">${icon('camera')}${personPhoto(p.name) ? 'Change' : 'Photo'}</button>` : ''}
     </div>
 
     <div class="card">
@@ -1930,7 +2001,118 @@ function renderPersonDay(view, people, day, isToday, who) {
     go(el.dataset.go);
   });
   $('#printPerson', view).onclick = () => printPersonDay(p, day);
+  // Crews rarely set their own, so a director can put a face to anybody.
+  // Their role is left alone — only your own save writes that.
+  wirePhotoPicker(view, {
+    pick: '#pFacePick', file: '#pFace',
+    name: () => p.name, role: isMe ? S.role : ''
+  });
   wireCrewSay(view, day);
+}
+
+/* ================================================================
+   Screen — crew photos
+   Nobody on a paving crew is going to open Settings to add a picture of
+   themselves, so the director does the lot in one sitting. Every name the
+   app has ever seen, with a face or without one.
+   ================================================================ */
+function renderFaces(view) {
+  if (!isDirector()) {
+    view.innerHTML = `
+      <div class="card">
+        <h2>Director only</h2>
+        <p class="muted small">Setting other people's photos is a director's job. Your own is in
+        Settings, under <strong>Your photo</strong>.</p>
+        <a class="btn wide mt" href="#/crew">Back to the crew</a>
+      </div>`;
+    return;
+  }
+  $('#title').textContent = 'Crew photos';
+
+  const people = knownPeople();
+  const withPhoto = people.filter(x => personPhoto(x.name)).length;
+
+  view.innerHTML = `
+    <p class="muted small mb">A photo goes against the name, not the phone — so it shows on the
+    crew screen and at the top of that person's printed day, wherever it was added from.</p>
+
+    ${peopleTableMissing ? `<div class="banner">The database has not got the
+      <code>crew_people</code> table yet. Run the current <code>supabase-schema.sql</code> in
+      Supabase → SQL Editor first — it is safe to re-run and touches nothing you have entered.</div>` : ''}
+
+    <div class="card">
+      <div class="stat">
+        <div><span class="n">${people.length}</span><span class="l">People</span></div>
+        <div><span class="n">${withPhoto}</span><span class="l">With a photo</span></div>
+        <div><span class="n">${people.length - withPhoto}</span><span class="l">Without</span></div>
+      </div>
+    </div>
+
+    <input type="file" id="fFace" accept="image/*" hidden>
+
+    ${people.length ? people.map((x, i) => `
+      <div class="facerow" data-key="${esc(x.key)}" style="--i:${i}">
+        ${faceMark(x.name, 'big')}
+        <div class="grow">
+          <b>${esc(x.name)}</b>
+          <span>${x.role ? esc(roleLabel(x.role)) : 'On the tools'}${
+            x.entries ? ` · ${x.entries} entr${x.entries === 1 ? 'y' : 'ies'}` : ''}</span>
+        </div>
+        <button class="btn sm" data-set="${esc(x.name)}">${
+          personPhoto(x.name) ? 'Change' : icon('camera') + 'Add'}</button>
+        ${personPhoto(x.name) ? `<button class="cdel" data-clear="${esc(x.name)}" title="Remove">${icon('trash')}</button>` : ''}
+      </div>`).join('')
+    : '<div class="empty"><b>Nobody yet</b>Names appear here once somebody writes in a diary or is put on a job as supervisor.</div>'}
+
+    <div class="card mt">
+      <h2>Somebody not here yet</h2>
+      <p class="muted small">A new starter has no name in the app until they write something.
+      Add it and their photo now, and it will be waiting when they do — spell it exactly as
+      they will in Settings.</p>
+      <label class="field"><span>Their name</span>
+        <input type="text" id="newFace" placeholder="e.g. Joe R"></label>
+      <input type="file" id="newFaceFile" accept="image/*" hidden>
+      <button class="btn wide" id="newFacePick">${icon('camera')}Add them with a photo</button>
+    </div>
+
+    <a class="btn wide mt" href="#/crew">Back to the crew</a>`;
+
+  // One hidden input does for every row: remember who was tapped, then use it.
+  let target = '';
+  const file = $('#fFace', view);
+  $$('[data-set]', view).forEach(b => b.onclick = () => {
+    if (peopleTableMissing) return toast('Run the latest supabase-schema.sql first');
+    target = b.dataset.set;
+    file.click();
+  });
+  file.onchange = async () => {
+    const f = (file.files || [])[0];
+    file.value = '';
+    if (!f || !target) return;
+    toast('Saving ' + target + '\u2019s photo…');
+    try {
+      await savePersonPhoto(target, await Store.upload(await squareImage(f, 420)));
+      toast('Photo saved');
+    } catch (err) {
+      toast('Could not save: ' + err.message);
+    }
+    target = '';
+    render();
+  };
+
+  $$('[data-clear]', view).forEach(b => b.onclick = async () => {
+    const name = b.dataset.clear;
+    if (!confirm(`Remove ${name}'s photo? Their initials are used instead.`)) return;
+    await savePersonPhoto(name, null);
+    toast('Photo removed');
+    render();
+  });
+
+  wirePhotoPicker(view, {
+    pick: '#newFacePick', file: '#newFaceFile',
+    name: () => $('#newFace', view).value,
+    noName: 'Type their name first'
+  });
 }
 
 /* ---------------------------------------------------------------------
@@ -4199,37 +4381,11 @@ function renderSetup(view) {
 
   /* A face is small — 420px square is plenty for a tile and a printed
      letterhead, and keeps the row light enough to sync on site. */
-  const pickPhoto = $('#myPhotoPick', view);
-  if (pickPhoto) {
-    const file = $('#myPhotoFile', view);
-    pickPhoto.onclick = () => {
-      if (!S.name) return toast('Put your name in first, then add the photo');
-      if (peopleTableMissing) return toast('Run the latest supabase-schema.sql first');
-      file.click();
-    };
-    file.onchange = async () => {
-      const f = (file.files || [])[0];
-      file.value = '';
-      if (!f) return;
-      pickPhoto.disabled = true;
-      pickPhoto.textContent = 'Saving…';
-      try {
-        const up = await Store.upload(await squareImage(f, 420));
-        await savePersonPhoto(S.name, up);
-        toast('Photo saved');
-      } catch (err) {
-        toast('Could not save: ' + err.message);
-      }
-      render();
-    };
-  }
-  const clearPhoto = $('#myPhotoClear', view);
-  if (clearPhoto) clearPhoto.onclick = async () => {
-    if (!confirm('Remove your photo? Your initials are used instead.')) return;
-    await savePersonPhoto(S.name, null);
-    toast('Photo removed');
-    render();
-  };
+  wirePhotoPicker(view, {
+    pick: '#myPhotoPick', file: '#myPhotoFile', clear: '#myPhotoClear',
+    name: () => S.name, role: S.role,
+    noName: 'Put your name in first, then add the photo'
+  });
 
   $('#saveMe', view).onclick = () => {
     const role = $('#sRole', view).value;

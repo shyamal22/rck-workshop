@@ -815,6 +815,25 @@ table.data th { font-size: 11px; text-transform: uppercase; letter-spacing: .07e
 .fi.img { background: var(--panel-2); overflow: hidden; }
 .fi.img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .myface { display: flex; align-items: center; gap: 14px; }
+
+/* One person waiting for a face. A list the director works down once and
+   rarely opens again, so it is a row rather than a card. */
+.facerow {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-1);
+  padding: 10px 12px; margin-bottom: 8px;
+  animation: riseIn var(--t) var(--ease) both; animation-delay: calc(var(--i, 0) * 22ms);
+}
+/* Scoped to the middle column on purpose: the avatar is a <span> too, and a
+   bare `.facerow span` rule turned its grid centring into a block and clipped
+   the initials inside the circle. */
+.facerow .grow { min-width: 0; }
+.facerow .grow b { display: block; font-size: 14.5px; letter-spacing: -.01em; }
+.facerow .grow span {
+  display: block; font-size: 11.5px; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.facerow .btn { flex: none; }
 .personhead { display: flex; align-items: center; gap: 13px; }
 
 /* Which job a line belongs to. On the crew screen every row needs it —
