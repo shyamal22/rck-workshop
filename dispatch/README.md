@@ -65,6 +65,12 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   your phone, so a face set on Tane's phone is the one the office sees on the crew tiles and
   at the top of Tane's printed day. It is cropped square and kept small so it syncs on site.
   No photo and you get initials — nothing breaks, it just looks plainer.
+- **A director can put a face to anybody**, because nobody on a paving crew is going to open
+  Settings to add a picture of themselves. **Crew photos** on the crew screen lists every
+  name the app has ever seen — whoever has written in a diary, added a document, or been put
+  on a job as supervisor — with a face or without one, and a box at the bottom for a new
+  starter who has not written anything yet. There is also a camera on anybody's own page.
+  Setting somebody else's photo never touches their role: only your own save writes that.
 - **Print a person's day.** On anybody's page, **Print [name]'s day** gives one sheet: their
   face and role at the top, the day's shape as a timeline, which jobs they were on, then
   every entry in order with its photographs beside it and the job it belongs to on the end.
@@ -203,6 +209,7 @@ Android), then **Settings** → name, role, and the two values.
 | Comment into a diary from the crew screen | ✓ | ✓ | ✓ |
 | Keep a diary of their own, with no job on it | ✓ | ✓ | ✓ |
 | Set their own photo, print anyone's day | ✓ | ✓ | ✓ |
+| **Set a photo for anybody** — Crew photos | | | ✓ |
 | Start a job, mark it completed | ✓ | ✓ | ✓ |
 | Print reports | ✓ | ✓ | ✓ |
 | Add documents | ✓ | ✓ | ✓ |
