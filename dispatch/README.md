@@ -206,29 +206,6 @@ never sent to the web server. Treat the link like a key: only send it to RCK peo
 By hand instead: open the app URL, **Add to Home Screen** (Share menu on iPhone, ⋮ on
 Android), then **Settings** → name, role, and the two values.
 
-**Turning sign-in on (once, by a director)**
-
-Do these in this order, or you will lock your own phone out with everybody else's.
-
-1. In Supabase → **Authentication → Email templates → Magic Link**, replace the body with
-   a line that includes the code: *Your RCK Dispatch code is {{ .Token }}* — the default
-   template sends a link instead of a code. A link still works (it opens the app signed
-   in), but a code is what the crew will expect.
-2. If the crew are to sign in by **phone**, turn on **Authentication → Providers → Phone**
-   and put in an SMS provider (Twilio is the usual one). Sign-in by email needs nothing.
-3. Open `supabase-schema.sql` and find **STEP 1** at the top of the Access section. Put
-   your own name and the email or phone you will sign in with into that one line.
-4. Paste the whole file into **SQL Editor** and run it. It refuses to go past STEP 1 until
-   step 3 has really been done, so an unedited run changes nothing about access. It is safe
-   to run again later.
-5. Open the app, sign in with a code to that email or phone, go to **People** on the crew
-   screen, and add everybody else with their phone or email. Until you do, they see *You're
-   not on the crew list* when they open the app — nothing lost, just not in yet.
-
-Every phone that was set up before this signs in once and carries on. The name and role a
-person used to choose in Settings now come from their row on the list, so a director sets
-them; the crew cannot promote themselves.
-
 **The three roles**
 
 | | Supervisor | Office | Director |
@@ -240,8 +217,7 @@ them; the crew cannot promote themselves.
 | Comment into a diary from the crew screen | ✓ | ✓ | ✓ |
 | Keep a diary of their own, with no job on it | ✓ | ✓ | ✓ |
 | Set their own photo, print anyone's day | ✓ | ✓ | ✓ |
-| **People** — add someone, take their access away, set their role or photo | | | ✓ |
-| Read the money at all, however the app is driven | | | ✓ |
+| **Set a photo for anybody** — Crew photos | | | ✓ |
 | Start a job, mark it completed | ✓ | ✓ | ✓ |
 | Print reports | ✓ | ✓ | ✓ |
 | Add documents | ✓ | ✓ | ✓ |
@@ -278,19 +254,10 @@ Workshop in the same repository and GitHub Pages serves it from
 
 ## Things worth knowing
 
-- **Everyone signs in, nobody has a password.** A person is on the crew list with a phone
-  number or email; the first time they open the app they get a six-digit code sent to it,
-  and the phone stays signed in. The database checks *who* is asking on every request — so
-  a supervisor's phone cannot read the money, office-only paperwork never reaches a site
-  phone, and somebody taken off the list is refused everywhere at once. The app's screens
-  follow the same rules, but it is the database that enforces them.
-- **Taking somebody off.** A director opens **People** on the crew screen and taps the bin
-  beside the name. They are out on every device straight away — mid-day, mid-entry — and
-  cannot get back in until restored. Everything they ever wrote stays, under their name.
-- **The key on its own opens nothing.** Every phone still holds the project's public key,
-  but without a sign-in the database answers every question with an empty list. A phone
-  that has left the company with the app still on it is a phone that can no longer see or
-  write anything.
+- **No logins.** Everyone shares one key, so anyone holding that key can read and
+  write. That's deliberate — no passwords for the crew to lose. The office/supervisor
+  split keeps the app simple to use; it is **not** a security boundary. Don't put
+  anything you'd mind an RCK phone seeing into the app, and don't publish the link.
 - **Practice mode** in Settings lets someone try the whole app without touching the
   shared data. Nothing entered in practice mode is visible to anyone else.
 - **Two ways to get rid of a job, and they are not the same.** **Archive** takes it off the
@@ -298,11 +265,10 @@ Workshop in the same repository and GitHub Pages serves it from
   that was cancelled, and it can be undone. **Delete** destroys the job with its diary, its
   documents and its costing, for everyone, with no undo; it asks you to type the job number
   first. Both are a director's call. A completed job can still be reopened by the office.
-- **The money is a director's, at the database.** The profit and loss tables are readable
-  and writable only by a signed-in director; a supervisor's or office phone asking for them
-  gets nothing back, however the app is driven. Photographs are the one thing still served
-  by unguessable link rather than by sign-in, so the crew screen and printed diaries load
-  them without a token — they are photographs of roads.
+- **The money is not a secret from the database.** The profit and loss is hidden from site
+  and office phones by the app, not by the database — same as the office-only documents.
+  Anyone holding the key can read it directly. See the note on logins above before deciding
+  what to put in those boxes.
 - **The board is filtered by crew.** Yellow, Subbie, Civil and Green, each with its own
   colour so a chip is recognised before it is read, plus **Unassigned** whenever a job has
   no crew on it yet. Type of work is still on every job, and in the reports and the

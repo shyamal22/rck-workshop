@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.0.0';
+const VERSION = '2.7.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -453,195 +453,6 @@ const Settings = {
 };
 let S = Settings.read();
 
-/* ================================================================
-   Sign-in — who this phone is
-   A phone signs in as a person: a six-digit code sent to the phone
-   number or email the director put on their row. The tokens that come
-   back are what every request to the database carries from then on, so
-   the database knows who is asking — and can say no to somebody taken
-   off the list, on every device, at once.
-   ================================================================ */
-/** A phone number the way the sign-in service wants it: digits with the
-    country code and no plus. A New Zealand number typed the local way
-    ("021 234 5678") is taken to mean +64. */
-function normPhone(v) {
-  let d = String(v || '').replace(/[^\d+]/g, '');
-  if (!d) return '';
-  if (d.startsWith('+')) d = d.slice(1);
-  else if (d.startsWith('00')) d = d.slice(2);
-  else if (d.startsWith('0')) d = '64' + d.slice(1);
-  return d;
-}
-function showPhone(d) { return d ? '+' + d : ''; }
-
-const Auth = {
-  _s: null,
-  read() {
-    if (this._s === null) {
-      try { this._s = JSON.parse(localStorage.getItem('rckd.session') || 'null'); } catch (e) { this._s = null; }
-    }
-    return this._s;
-  },
-  write(sess) { this._s = sess; localStorage.setItem('rckd.session', JSON.stringify(sess)); },
-  clear() { this._s = null; localStorage.removeItem('rckd.session'); },
-  signedIn() { return !!(this.read() && this.read().refresh_token); },
-  userId() { const s = this.read(); return s && s.user ? s.user.id : null; },
-  who() { const s = this.read(); return s && s.user ? (s.user.email || showPhone(s.user.phone) || '') : ''; },
-
-  base() { return S.supabaseUrl.replace(/\/+$/, '') + '/auth/v1'; },
-  async call(path, body, bearer) {
-    const headers = { apikey: S.supabaseKey, 'Content-Type': 'application/json' };
-    if (bearer) headers.Authorization = 'Bearer ' + bearer;
-    const res = await fetch(this.base() + path, { method: 'POST', headers, body: JSON.stringify(body || {}) });
-    let out = null;
-    try { out = await res.json(); } catch (e) {}
-    if (!res.ok) {
-      const msg = (out && (out.msg || out.error_description || out.message || out.error)) || res.statusText;
-      throw new Error(msg);
-    }
-    return out;
-  },
-
-  /** Where to send the code: {email} or {phone}, from whatever was typed. */
-  dest(typed) {
-    const v = String(typed || '').trim();
-    if (!v) return null;
-    if (v.includes('@')) return { email: v.toLowerCase() };
-    const d = normPhone(v);
-    return d.length >= 8 ? { phone: d } : null;
-  },
-  async send(dest) {
-    await this.call('/otp', Object.assign({ create_user: true }, dest));
-  },
-  async verify(dest, code) {
-    const out = await this.call('/verify', Object.assign({
-      type: dest.phone ? 'sms' : 'email', token: String(code || '').trim()
-    }, dest));
-    this.take(out);
-  },
-  /** Keep what a sign-in or a refresh handed back. */
-  take(out) {
-    if (!out || !out.access_token) throw new Error('No session came back');
-    this.write({
-      access_token: out.access_token,
-      refresh_token: out.refresh_token,
-      expires_at: Date.now() + (Number(out.expires_in) || 3600) * 1000,
-      user: out.user ? { id: out.user.id, email: out.user.email || '', phone: out.user.phone || '' }
-        : (this.read() && this.read().user) || null
-    });
-  },
-  /* A refresh token is single-use. A pull fires five requests at once and
-     every one of them would notice the same expiry, so one refresh must
-     serve all of them — the rest wait on it rather than spending the
-     token again and losing. */
-  _refreshing: null,
-  refresh() {
-    if (this._refreshing) return this._refreshing;
-    this._refreshing = (async () => {
-      const s = this.read();
-      if (!s || !s.refresh_token) throw new Error('Not signed in');
-      const out = await this.call('/token?grant_type=refresh_token', { refresh_token: s.refresh_token });
-      this.take(out);
-      return this.read().access_token;
-    })().finally(() => { this._refreshing = null; });
-    return this._refreshing;
-  },
-  /** A token good for the next minute at least, refreshing if it is not. */
-  async token() {
-    const s = this.read();
-    if (!s || !s.refresh_token) return null;
-    if (s.access_token && s.expires_at - Date.now() > 60000) return s.access_token;
-    try { return await this.refresh(); } catch (e) { return s.access_token || null; }
-  },
-  async signOut() {
-    const s = this.read();
-    try { if (s && s.access_token) await this.call('/logout', {}, s.access_token); } catch (e) {}
-    this.clear();
-  },
-  /** A magic link lands on the app with the session in the hash. Take it
-      and put the hash back the way the app expects it. */
-  fromHash() {
-    const h = location.hash.replace(/^#\/?/, '');
-    if (!/access_token=/.test(h)) return false;
-    const q = new URLSearchParams(h.replace(/^\?/, ''));
-    if (!q.get('access_token') || !q.get('refresh_token')) return false;
-    this.write({
-      access_token: q.get('access_token'),
-      refresh_token: q.get('refresh_token'),
-      expires_at: Date.now() + (Number(q.get('expires_in')) || 3600) * 1000,
-      user: null
-    });
-    history.replaceState(null, '', location.pathname + '#/');
-    return true;
-  },
-  /** Fill in who we are, from the token, when a magic link left it out. */
-  async fillUser() {
-    const s = this.read();
-    if (!s || s.user) return;
-    const res = await fetch(this.base() + '/user', { headers: { apikey: S.supabaseKey, Authorization: 'Bearer ' + s.access_token } });
-    if (res.ok) {
-      const u = await res.json();
-      s.user = { id: u.id, email: u.email || '', phone: u.phone || '' };
-      this.write(s);
-    }
-  }
-};
-
-/** Once signed in, the row on the director's list says who this phone is:
-    the name that goes on entries and the role that opens the screens. Both
-    are taken from there, and the row learns our user id the first time. */
-async function adoptMe() {
-  const m = me();
-  if (!m) return;
-  const patch = {};
-  if (m.name && m.name !== S.name) patch.name = m.name;
-  if (m.role && m.role !== S.role) patch.role = m.role;
-  if (Object.keys(patch).length) Settings.write(patch);
-  if (!m.user_id && Auth.userId()) {
-    try { await Store.patch('crew_people', m.id, { user_id: Auth.userId() }); } catch (e) {}
-  }
-}
-
-/** The person this signed-in phone is, on the director's list — or null,
-    which is a screen of its own. Matched by user id once that is written,
-    and by the email or phone they signed in with until then. */
-function me() {
-  if (!connected() || !authWanted()) return null;
-  const s = Auth.read();
-  if (!s || !s.user) return null;
-  const uid = s.user.id;
-  const em = (s.user.email || '').toLowerCase();
-  const ph = normPhone(s.user.phone || '');
-  return DB.crew_people.find(r => r.user_id && r.user_id === uid)
-    || DB.crew_people.find(r => !r.user_id && em && (r.email || '').toLowerCase() === em)
-    || DB.crew_people.find(r => !r.user_id && ph && normPhone(r.phone) === ph)
-    || null;
-}
-/* Whether the database has the access rules at all. Until a director runs
-   the current schema it has the old open policies, and this app must carry
-   on exactly as before — the rollout goes to every phone at once, and the
-   crew must not be locked out for the days between the app updating and the
-   SQL being run. is_active() only exists once the new schema has run, so
-   asking for it is the question. Remembered per device; re-asked on every
-   pull, so the switch happens on its own. */
-function authWanted() { return !!S.authMode; }
-async function probeAuthMode() {
-  if (!connected()) return;
-  try {
-    const base = S.supabaseUrl.replace(/\/+$/, '');
-    const res = await fetch(`${base}/rest/v1/rpc/is_active`, {
-      method: 'POST', headers: restHeaders({ 'Content-Type': 'application/json' }), body: '{}'
-    });
-    // 404 = no such function = old schema. Anything else means it is there.
-    const wanted = res.status !== 404;
-    if (wanted !== !!S.authMode) Settings.write({ authMode: wanted });
-  } catch (e) { /* no signal: keep whatever we knew */ }
-}
-
-/* Signed in, and on the list, and not taken off it — where the database
-   asks for that at all. */
-function admitted() { return !connected() || !authWanted() || (Auth.signedIn() && !!me()); }
-
 /** Can this device plan jobs and see the office-only documents? */
 const isOffice   = () => roleDef(S.role).officeAccess;
 /** ... and see the overview across every job, and archive them? */
@@ -700,31 +511,9 @@ function restHeaders(extra) {
     Authorization: 'Bearer ' + S.supabaseKey
   }, extra || {});
 }
-/** restHeaders() with the signed-in person's token in place of the key —
-    the database decides what they may do from that. */
-async function authHeaders(extra) {
-  const h = restHeaders(extra);
-  const tok = authWanted() ? await Auth.token() : null;
-  if (tok) h.Authorization = 'Bearer ' + tok;
-  return h;
-}
-let sessionLost = false;
 async function rest(path, opts) {
   const base = S.supabaseUrl.replace(/\/+$/, '');
-  opts = opts || {};
-  const tok = authWanted() ? await Auth.token() : null;
-  if (tok) opts.headers = Object.assign({}, opts.headers, { Authorization: 'Bearer ' + tok });
-  let res = await fetch(`${base}/rest/v1/${path}`, opts);
-  // A stale token gets one refresh and one more go. A second refusal means
-  // the session is gone — signed out elsewhere, or the person removed.
-  if (res.status === 401 && tok) {
-    try {
-      const fresh = await Auth.refresh();
-      opts.headers = Object.assign({}, opts.headers, { Authorization: 'Bearer ' + fresh });
-      res = await fetch(`${base}/rest/v1/${path}`, opts);
-    } catch (e) { /* fall through to the refusal below */ }
-    if (res.status === 401) { sessionLost = true; Auth.clear(); }
-  }
+  const res = await fetch(`${base}/rest/v1/${path}`, opts);
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.json()).message || ''; } catch (e) {}
@@ -771,7 +560,6 @@ function reconcile(table, fromServer) {
 const Store = {
   async pull() {
     if (!connected()) return;
-    await probeAuthMode();
     const [projects, docs, entries, costs, people] = await Promise.all([
       rest('projects?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
       rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
@@ -791,7 +579,6 @@ const Store = {
     peopleTableMissing = !people;
     if (people) DB.crew_people = reconcile('crew_people', people);
     saveCache();
-    await adoptMe();
   },
 
   async insert(table, row) {
@@ -859,7 +646,7 @@ const Store = {
       const base = S.supabaseUrl.replace(/\/+$/, '');
       const res = await fetch(`${base}/storage/v1/object/dispatch-files/${encodeURIComponent(path)}`, {
         method: 'POST',
-        headers: await authHeaders({ 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'true' }),
+        headers: restHeaders({ 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'true' }),
         body: file
       });
       if (!res.ok) throw new Error(await res.text());
@@ -1216,7 +1003,6 @@ async function addEntry(projectId, data, files) {
     files: uploads,
     author: whoami(),
     role: S.role,
-    user_id: Auth.userId(),
     created_at: new Date().toISOString()
   };
   const saved = await Store.insert('diary_entries', row);
@@ -1242,8 +1028,7 @@ async function addDoc(projectId, data, file) {
     file_size: up.size,
     notes: data.notes || '',
     uploaded_by: whoami(),
-    uploaded_at: new Date().toISOString(),
-    user_id: Auth.userId()
+    uploaded_at: new Date().toISOString()
   };
   return Store.insert('project_docs', row);
 }
@@ -1348,9 +1133,7 @@ const SCREENS = {
   '/pnl':     { title: 'Profit & loss', render: renderPnl,    back: true },
   '/today':   { title: 'Today on site', render: renderToday },
   '/crew':    { title: 'Crew & supervisors', render: renderCrew },
-  '/people':  { title: 'People',        render: renderPeople, back: true },
-  '/faces':   { title: 'People',        render: renderPeople, back: true },
-  '/signin':  { title: 'Sign in',       render: renderSignIn },
+  '/faces':   { title: 'Crew photos',   render: renderFaces, back: true },
   '/log':     { title: 'Log',           render: renderLogPicker, back: true },
   '/new':     { title: 'New job',       render: renderJobEdit, back: true },
 
@@ -1394,14 +1177,6 @@ function render() {
 
   if (!screen) { go('#/'); return; }
 
-  // A shared database, and this phone is not (or no longer) signed in as
-  // somebody on the list: everything but sign-in and Settings is the
-  // sign-in screen. Settings stays reachable so a wrong key can be fixed.
-  if (connected() && !admitted() && !['/signin', '/setup', '/join'].includes(route.path)) {
-    screen = { title: 'Sign in', render: renderSignIn };
-    back = false;
-  }
-
   $('#title').textContent = screen.title;
   $('#backBtn').hidden = !(back || screen.back);
   // Nothing to go home to when you are already there.
@@ -1429,6 +1204,15 @@ function render() {
    still waiting to reach the database, say so on every screen — and if the
    database refused it, say what it said, because that never fixes itself. */
 function paintUnsent(view) {
+  if (keyDead && connected() && route.path !== '/setup') {
+    const box = document.createElement('div');
+    box.className = 'banner bad';
+    box.innerHTML = `<strong>This phone's key no longer works.</strong> The database has been given
+      a new one. If you should still have access, ask the office for a new setup link and open
+      it on this phone; what is on the screen is what was here before, and nothing new will arrive.
+      <a href="#/setup" style="display:inline-block;margin-top:8px;font-weight:640">Settings →</a>`;
+    view.insertBefore(box, view.firstChild);
+  }
   const n = Outbox.count();
   if (!n) return;
   const problem = Outbox.problem();
@@ -1447,8 +1231,7 @@ function paintUnsent(view) {
 }
 
 function needsSetup() {
-  if (connected()) return false;          // a shared database: sign-in decides, below
-  return !S.name || !S.localMode;
+  return !S.name || (!connected() && !S.localMode);
 }
 
 /** The big middle tab is whatever this device does most: the office plans
@@ -1568,16 +1351,29 @@ function renderJoin(view) {
   view.innerHTML = `
     <div class="card">
       <h2>Set up RCK Dispatch</h2>
-      <p class="muted small">This links your phone to the shared job list, then signs you in
-      with a code sent to your phone or email. You only do this once.</p>
+      <p class="muted small">This links your phone to the shared job list. You only do this once.</p>
+      <label class="field"><span>Your name</span>
+        <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
+      <label class="field"><span>You are</span>
+        <select id="jRole">
+          ${ROLES.map(r => `<option value="${r.key}">${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
+        </select></label>
       <button class="btn primary wide" id="jGo">Connect</button>
       <div id="jOut" class="small mt"></div>
     </div>
 
-    <p class="muted small center">Once you are in, use <strong>Add to Home Screen</strong>
+    <p class="muted small center">Once connected, use <strong>Add to Home Screen</strong>
     in your browser's share menu so it opens like a normal app.</p>`;
 
   $('#jGo', view).onclick = async function () {
+    const name = $('#jName', view).value.trim();
+    const role = $('#jRole', view).value;
+    if (!name) return toast('Enter your name');
+    if (roleDef(role).officeAccess && SITE.officePin) {
+      const pin = prompt('Office code:');
+      if (pin !== SITE.officePin) return toast('Wrong code');
+    }
+
     this.disabled = true;
     this.textContent = 'Connecting…';
     const out = $('#jOut', view);
@@ -1599,127 +1395,12 @@ function renderJoin(view) {
       return;
     }
 
-    Settings.write({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, localMode: false });
-    Auth.clear();
+    Settings.write({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, name, role, localMode: false });
     loadCache();
-    await probeAuthMode();
-    if (!authWanted()) {
-      // The old way in, until the database asks for sign-in: a name and a role on the phone.
-      const name = (prompt('Your name, as it will appear on the diary:') || '').trim();
-      if (!name) { this.disabled = false; this.textContent = 'Connect'; return toast('Enter your name'); }
-      Settings.write({ name });
-      await refresh();
-      toast('Connected — you\'re all set');
-      go('#/');
-      return;
-    }
-    go('#/signin');
+    await refresh();
+    toast('Connected — you\'re all set');
+    go('#/');
   };
-}
-
-/* ================================================================
-   Screen — sign in
-   A code to the phone number or email the director put on your row.
-   No password, nothing to remember: the phone stays signed in.
-   ================================================================ */
-const signin = { dest: null, sent: false };
-
-function renderSignIn(view) {
-  $('#title').textContent = 'Sign in';
-  const m = Auth.signedIn() ? me() : null;
-
-  // Signed in, but the list has nobody by this phone or email. The database
-  // hides a removed person's own row from them, so from here "never added"
-  // and "taken off" look the same — and the message says so.
-  if (Auth.signedIn() && !sessionLost && !m) {
-    view.innerHTML = `
-      <div class="card">
-        <h2>You're not on the crew list</h2>
-        <p class="muted small">You signed in as <strong>${esc(Auth.who() || 'this phone')}</strong>, but nobody by
-        that phone or email is on the list — either you have not been added yet, or your access has been
-        taken off. Nothing you wrote has been lost either way.</p>
-        <p class="muted small">Ask a director at ${esc(BRAND.name)} to add exactly this:
-        <strong>${esc(Auth.who())}</strong>.</p>
-        <div class="btn-row mt">
-          <button class="btn sm" id="siRetry">Check again</button>
-          <button class="btn sm" id="siOut">Sign out</button>
-        </div>
-      </div>`;
-    $('#siRetry', view).onclick = async () => { await refresh(); render(); if (!me()) toast('Still not on the list'); };
-    $('#siOut', view).onclick = async () => { await Auth.signOut(); render(); };
-    return;
-  }
-
-  const lost = sessionLost;
-  sessionLost = false;
-
-  view.innerHTML = `
-    <div class="card">
-      <h2>${lost ? 'Signed out' : 'Sign in to ' + esc(BRAND.name)}</h2>
-      ${lost ? '<div class="banner">Your sign-in stopped working — you may have been taken off the list, or signed out from another device. Sign in again to check.</div>' : ''}
-      ${!signin.sent ? `
-        <p class="muted small">A six-digit code goes to the phone number or email the office has for you.
-        No password — the phone stays signed in.</p>
-        <label class="field"><span>Your phone number or email</span>
-          <input type="text" id="siDest" inputmode="email" autocapitalize="off" autocorrect="off"
-            placeholder="021 234 5678 or you@example.com" value="${esc(signin.dest ? (signin.dest.email || showPhone(signin.dest.phone)) : '')}"></label>
-        <button class="btn primary wide" id="siSend">Send me a code</button>`
-      : `
-        <p class="muted small">A code has gone to <strong>${esc(signin.dest.email || showPhone(signin.dest.phone))}</strong>.
-        Type it here${signin.dest.email ? ', or tap the link in the email' : ''}.</p>
-        <label class="field"><span>The six-digit code</span>
-          <input type="text" id="siCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456"></label>
-        <button class="btn primary wide" id="siGo">Sign in</button>
-        <div class="btn-row mt">
-          <button class="btn sm" id="siAgain">Send another</button>
-          <button class="btn sm" id="siBack">Different number</button>
-        </div>`}
-      <div id="siOut" class="small mt"></div>
-    </div>
-    <p class="muted tiny center">Wrong database? <a href="#/setup">Settings</a>.</p>`;
-
-  const out = $('#siOut', view);
-  const fail = msg => { out.innerHTML = `<span style="color:var(--red)">${esc(msg)}</span>`; };
-
-  const send = $('#siSend', view);
-  if (send) send.onclick = async function () {
-    const dest = Auth.dest($('#siDest', view).value);
-    if (!dest) return fail('That does not look like a phone number or an email.');
-    this.disabled = true; this.textContent = 'Sending…';
-    try {
-      await Auth.send(dest);
-      signin.dest = dest; signin.sent = true;
-      render();
-      const c = $('#siCode'); if (c) c.focus();
-    } catch (err) {
-      this.disabled = false; this.textContent = 'Send me a code';
-      fail(/rate|60 seconds|too many/i.test(err.message) ? 'One code a minute — give it a moment and try again.' : 'Could not send it: ' + err.message);
-    }
-  };
-  const goBtn = $('#siGo', view);
-  if (goBtn) goBtn.onclick = async function () {
-    const code = $('#siCode', view).value.trim();
-    if (!/^\d{6,8}$/.test(code)) return fail('Type the six digits from the message.');
-    this.disabled = true; this.textContent = 'Checking…';
-    try {
-      await Auth.verify(signin.dest, code);
-      signin.sent = false;
-      await refresh();
-      toast(me() ? `Signed in as ${me().name}` : 'Signed in');
-      go('#/');
-      render();
-    } catch (err) {
-      this.disabled = false; this.textContent = 'Sign in';
-      fail(/expired|invalid|not found/i.test(err.message) ? 'That code is wrong or has expired. Send another.' : 'Could not sign in: ' + err.message);
-    }
-  };
-  const again = $('#siAgain', view);
-  if (again) again.onclick = async () => {
-    try { await Auth.send(signin.dest); toast('Sent again'); }
-    catch (err) { fail(/rate|60 seconds|too many/i.test(err.message) ? 'One code a minute — give it a moment.' : err.message); }
-  };
-  const back = $('#siBack', view);
-  if (back) back.onclick = () => { signin.sent = false; render(); };
 }
 
 /* ================================================================
@@ -2242,7 +1923,7 @@ function renderCrew(view) {
     ${crewDayNav(day, isToday)}
     ${crewSayBox(day, isToday)}
 
-    ${isDirector() ? `<a class="btn wide mb" href="#/people">${icon('people')}People — who has access, and photos</a>` : ''}
+    ${isDirector() ? `<a class="btn wide mb" href="#/faces">${icon('camera')}Crew photos</a>` : ''}
 
     ${people.length ? `
       <div class="section-title">Out ${isToday ? 'today' : 'that day'}</div>
@@ -2340,151 +2021,73 @@ function renderPersonDay(view, people, day, isToday, who) {
 }
 
 /* ================================================================
-   Screen — people
-   The crew list is the door. A person on it, with a phone or email,
-   can sign in; a person taken off it cannot — anywhere, at once.
-   Director only. Also where their photos are set, because nobody on
-   a paving crew opens Settings to add a picture of themselves.
+   Screen — crew photos
+   Nobody on a paving crew is going to open Settings to add a picture of
+   themselves, so the director does the lot in one sitting. Every name the
+   app has ever seen, with a face or without one.
    ================================================================ */
-const peopleView = { editing: null, adding: false };
-
-function renderPeople(view) {
+function renderFaces(view) {
   if (!isDirector()) {
     view.innerHTML = `
       <div class="card">
         <h2>Director only</h2>
-        <p class="muted small">Who has access, and other people's photos, are a director's job.
-        Your own photo is in Settings, under <strong>Your photo</strong>.</p>
+        <p class="muted small">Setting other people's photos is a director's job. Your own is in
+        Settings, under <strong>Your photo</strong>.</p>
         <a class="btn wide mt" href="#/crew">Back to the crew</a>
       </div>`;
     return;
   }
-  $('#title').textContent = 'People';
+  $('#title').textContent = 'Crew photos';
 
-  if (connected() && !authWanted()) {
-    view.innerHTML = `
-      <div class="card">
-        <h2>Sign-in is not switched on yet</h2>
-        <p class="muted small">The database still lets any phone with the key in. To decide who has
-        access, run the current <code>supabase-schema.sql</code> — the README has the steps, and
-        the file refuses to run until you have put your own details in, so it cannot lock you out.
-        Photos can still be set from anybody's page on the crew screen.</p>
-        <a class="btn wide mt" href="#/crew">Back to the crew</a>
-      </div>`;
-    return;
-  }
-
-  const rows = DB.crew_people.slice()
-    .sort((a, b) => (a.active === false) - (b.active === false) || (a.name || '').localeCompare(b.name || ''));
-  const inCount = rows.filter(r => r.active !== false).length;
-  const myId = me() ? me().id : null;
-  const canSignIn = r => !!((r.email || '').trim() || normPhone(r.phone));
-
-  const form = (r) => `
-    <div class="card pform" data-id="${r ? r.id : ''}">
-      <h2 style="margin-bottom:10px">${r ? 'Edit ' + esc(r.name) : 'Add somebody'}</h2>
-      <label class="field"><span>Name — as it will print</span>
-        <input type="text" class="pName" value="${esc(r ? r.name : '')}" placeholder="e.g. Tane W"></label>
-      <label class="field"><span>Phone (for the sign-in code)</span>
-        <input type="tel" class="pPhone" value="${esc(r ? showPhone(normPhone(r.phone)) : '')}" placeholder="021 234 5678"></label>
-      <label class="field"><span>Email (instead of, or as well as)</span>
-        <input type="email" class="pEmail" value="${esc(r ? r.email : '')}" placeholder="name@example.com" autocapitalize="off"></label>
-      <label class="field"><span>Role</span>
-        <select class="pRole">${ROLES.map(x => `<option value="${x.key}" ${(r ? r.role : 'supervisor') === x.key ? 'selected' : ''}>${esc(x.label)} — ${esc(x.blurb)}</option>`).join('')}</select></label>
-      <div class="btn-row">
-        <button class="btn primary sm pSave">${r ? 'Save' : 'Add them'}</button>
-        <button class="btn sm pCancel">Cancel</button>
-      </div>
-    </div>`;
+  const people = knownPeople();
+  const withPhoto = people.filter(x => personPhoto(x.name)).length;
 
   view.innerHTML = `
-    <p class="muted small mb">Everyone here can sign in with a code to their phone or email and
-    write in the diaries. <strong>Remove access</strong> shuts them out on every device straight
-    away; what they wrote stays. Photos go against the name and show on the crew screen and
-    printed days.</p>
+    <p class="muted small mb">A photo goes against the name, not the phone — so it shows on the
+    crew screen and at the top of that person's printed day, wherever it was added from.</p>
 
-    ${peopleTableMissing ? `<div class="banner">The database has not got the people table yet. Run the
-      current <code>supabase-schema.sql</code> in Supabase → SQL Editor first.</div>` : ''}
+    ${peopleTableMissing ? `<div class="banner">The database has not got the
+      <code>crew_people</code> table yet. Run the current <code>supabase-schema.sql</code> in
+      Supabase → SQL Editor first — it is safe to re-run and touches nothing you have entered.</div>` : ''}
 
     <div class="card">
       <div class="stat">
-        <div><span class="n">${inCount}</span><span class="l">With access</span></div>
-        <div><span class="n">${rows.length - inCount}</span><span class="l">Removed</span></div>
-        <div><span class="n">${rows.filter(r => r.active !== false && !canSignIn(r)).length}</span><span class="l">No phone / email</span></div>
-        <div><span class="n">${rows.filter(r => r.photo_url).length}</span><span class="l">With a photo</span></div>
+        <div><span class="n">${people.length}</span><span class="l">People</span></div>
+        <div><span class="n">${withPhoto}</span><span class="l">With a photo</span></div>
+        <div><span class="n">${people.length - withPhoto}</span><span class="l">Without</span></div>
       </div>
     </div>
 
-    ${peopleView.adding ? form(null) : `<button class="btn primary wide logbtn" id="pAdd">${icon('plus')}Add somebody</button>`}
-
     <input type="file" id="fFace" accept="image/*" hidden>
 
-    ${rows.map((r, i) => peopleView.editing === r.id ? form(r) : `
-      <div class="facerow${r.active === false ? ' off' : ''}" data-key="${esc(r.name_key)}" style="--i:${i}">
-        ${faceMark(r.name, 'big')}
+    ${people.length ? people.map((x, i) => `
+      <div class="facerow" data-key="${esc(x.key)}" style="--i:${i}">
+        ${faceMark(x.name, 'big')}
         <div class="grow">
-          <b>${esc(r.name)}${r.id === myId ? ' <em class="you">you</em>' : ''}</b>
-          <span>${r.active === false ? '<strong class="cw-iss">Access removed</strong> · ' : ''}${
-            r.role ? esc(roleLabel(r.role)) : 'On the tools'}${
-            canSignIn(r) ? ' · ' + esc([r.email, showPhone(normPhone(r.phone))].filter(Boolean).join(' · '))
-              : ' · <strong>no phone or email — cannot sign in</strong>'}${
-            r.user_id ? '' : canSignIn(r) ? ' · not signed in yet' : ''}</span>
+          <b>${esc(x.name)}</b>
+          <span>${x.role ? esc(roleLabel(x.role)) : 'On the tools'}${
+            x.entries ? ` · ${x.entries} entr${x.entries === 1 ? 'y' : 'ies'}` : ''}</span>
         </div>
-        <button class="btn sm" data-edit="${r.id}">Edit</button>
-        <button class="btn sm" data-set="${esc(r.name)}" title="Photo">${icon('camera')}</button>
-        ${r.active === false
-          ? `<button class="btn sm" data-restore="${r.id}">Restore</button>`
-          : r.id === myId ? '' : `<button class="cdel" data-remove="${r.id}" title="Remove access">${icon('trash')}</button>`}
-      </div>`).join('') || '<div class="empty"><b>Nobody yet</b>Add the crew with the button above — or run the schema first if the table is missing.</div>'}
+        <button class="btn sm" data-set="${esc(x.name)}">${
+          personPhoto(x.name) ? 'Change' : icon('camera') + 'Add'}</button>
+        ${personPhoto(x.name) ? `<button class="cdel" data-clear="${esc(x.name)}" title="Remove">${icon('trash')}</button>` : ''}
+      </div>`).join('')
+    : '<div class="empty"><b>Nobody yet</b>Names appear here once somebody writes in a diary or is put on a job as supervisor.</div>'}
+
+    <div class="card mt">
+      <h2>Somebody not here yet</h2>
+      <p class="muted small">A new starter has no name in the app until they write something.
+      Add it and their photo now, and it will be waiting when they do — spell it exactly as
+      they will in Settings.</p>
+      <label class="field"><span>Their name</span>
+        <input type="text" id="newFace" placeholder="e.g. Joe R"></label>
+      <input type="file" id="newFaceFile" accept="image/*" hidden>
+      <button class="btn wide" id="newFacePick">${icon('camera')}Add them with a photo</button>
+    </div>
 
     <a class="btn wide mt" href="#/crew">Back to the crew</a>`;
 
-  const add = $('#pAdd', view);
-  if (add) add.onclick = () => { peopleView.adding = true; peopleView.editing = null; render(); };
-  $$('[data-edit]', view).forEach(b => b.onclick = () => { peopleView.editing = b.dataset.edit; peopleView.adding = false; render(); });
-  $$('.pCancel', view).forEach(b => b.onclick = () => { peopleView.editing = null; peopleView.adding = false; render(); });
-
-  $$('.pSave', view).forEach(b => b.onclick = async function () {
-    const card = this.closest('.pform');
-    const id = card.dataset.id;
-    const name = $('.pName', card).value.trim();
-    const phone = normPhone($('.pPhone', card).value);
-    const email = $('.pEmail', card).value.trim().toLowerCase();
-    const role = $('.pRole', card).value;
-    if (!name) return toast('Give them a name');
-    if (!phone && !email) return toast('A phone number or an email, or they cannot sign in');
-    this.disabled = true;
-    try {
-      if (id) {
-        await Store.patch('crew_people', id, { name, phone, email, role, updated_at: new Date().toISOString(), updated_by: whoami() });
-      } else {
-        if (DB.crew_people.some(r => r.name_key === personKey(name))) throw new Error('Somebody with that name is already on the list');
-        await Store.insert('crew_people', { id: uid(), name_key: personKey(name), name, phone, email, role,
-          active: true, photo_url: '', photo_name: '', updated_at: new Date().toISOString(), updated_by: whoami() });
-      }
-      toast('Saved');
-      peopleView.editing = null; peopleView.adding = false;
-      render();
-    } catch (err) { this.disabled = false; toast('Could not save: ' + err.message); }
-  });
-
-  $$('[data-remove]', view).forEach(b => b.onclick = async () => {
-    const r = DB.crew_people.find(x => x.id === b.dataset.remove);
-    if (!r) return;
-    if (!confirm(`Remove ${r.name}'s access?\n\nThey will be signed out on every device and cannot sign in again until restored. Everything they wrote stays.`)) return;
-    await Store.patch('crew_people', r.id, { active: false, updated_at: new Date().toISOString(), updated_by: whoami() });
-    toast(`${r.name} removed`);
-    render();
-  });
-  $$('[data-restore]', view).forEach(b => b.onclick = async () => {
-    const r = DB.crew_people.find(x => x.id === b.dataset.restore);
-    if (!r) return;
-    await Store.patch('crew_people', r.id, { active: true, updated_at: new Date().toISOString(), updated_by: whoami() });
-    toast(`${r.name} restored`);
-    render();
-  });
-
-  // photos: one hidden input serves every row
+  // One hidden input does for every row: remember who was tapped, then use it.
   let target = '';
   const file = $('#fFace', view);
   $$('[data-set]', view).forEach(b => b.onclick = () => {
@@ -2496,14 +2099,30 @@ function renderPeople(view) {
     const f = (file.files || [])[0];
     file.value = '';
     if (!f || !target) return;
-    toast('Saving ' + target + '’s photo…');
+    toast('Saving ' + target + '\u2019s photo…');
     try {
       await savePersonPhoto(target, await Store.upload(await squareImage(f, 420)));
       toast('Photo saved');
-    } catch (err) { toast('Could not save: ' + err.message); }
+    } catch (err) {
+      toast('Could not save: ' + err.message);
+    }
     target = '';
     render();
   };
+
+  $$('[data-clear]', view).forEach(b => b.onclick = async () => {
+    const name = b.dataset.clear;
+    if (!confirm(`Remove ${name}'s photo? Their initials are used instead.`)) return;
+    await savePersonPhoto(name, null);
+    toast('Photo removed');
+    render();
+  });
+
+  wirePhotoPicker(view, {
+    pick: '#newFacePick', file: '#newFaceFile',
+    name: () => $('#newFace', view).value,
+    noName: 'Type their name first'
+  });
 }
 
 /* ---------------------------------------------------------------------
@@ -4705,18 +4324,6 @@ function renderSetup(view) {
   view.innerHTML = `
     <div class="card">
       <h2>You</h2>
-      ${connected() && authWanted() && Auth.signedIn() ? `
-      <table class="data">
-        <tr><th>Signed in as</th><td>${esc(Auth.who() || '—')}</td></tr>
-        <tr><th>On the list as</th><td>${me() ? esc(me().name) : '<em>not on the list</em>'}</td></tr>
-        <tr><th>Role</th><td>${me() ? esc(roleLabel(me().role)) : '—'} <span class="muted">— set by the director</span></td></tr>
-      </table>
-      <div class="btn-row mt">
-        <button class="btn sm" id="signOut">Sign out of this phone</button>
-      </div>
-      <p class="muted tiny mt" style="margin-bottom:0">Your name and role come from the crew list. To change either,
-      ask a director — they are in <strong>People</strong> on the crew screen.</p>`
-      : `
       <label class="field"><span>Your name</span>
         <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>This device is used by</span>
@@ -4725,7 +4332,7 @@ function renderSetup(view) {
         </select></label>
       <div class="tiny muted">${ROLES.map(r =>
         `<p style="margin-bottom:6px"><strong>${esc(r.label)}</strong> — ${esc(r.hint)}</p>`).join('')}</div>
-      <button class="btn primary wide" id="saveMe">Save</button>`}
+      <button class="btn primary wide" id="saveMe">Save</button>
     </div>
 
     <div class="card">
@@ -4845,15 +4452,7 @@ function renderSetup(view) {
     noName: 'Put your name in first, then add the photo'
   });
 
-  const so = $('#signOut', view);
-  if (so) so.onclick = async () => {
-    if (!confirm('Sign this phone out? You will need a new code to get back in.')) return;
-    await Auth.signOut();
-    go('#/signin');
-  };
-
-  const saveMe = $('#saveMe', view);
-  if (saveMe) saveMe.onclick = () => {
+  $('#saveMe', view).onclick = () => {
     const role = $('#sRole', view).value;
     const name = $('#sName', view).value.trim();
     if (!name) return toast('Enter your name');
@@ -5016,14 +4615,22 @@ function paintSync() {
     : 'Connected';
 }
 
+/* The key this phone holds has been changed at the database — which is how
+   a phone is taken off: the office changes the key and hands the new one
+   only to the phones that stay. That should read as exactly that, not as a
+   red dot and a shrug. */
+let keyDead = false;
 async function refresh() {
   if (!connected()) { syncState = 'idle'; paintSync(); return; }
   try {
     await Outbox.flush();
     await Store.pull();
     syncState = 'ok';
+    if (keyDead) { keyDead = false; render(); }
   } catch (e) {
     syncState = 'bad';
+    const dead = /\b401\b|invalid api key|jwt/i.test(e.message || '');
+    if (dead !== keyDead) { keyDead = dead; render(); }
   }
   paintSync();
 }
@@ -5107,10 +4714,6 @@ function watchForUpdate(reg) {
 
 (async function boot() {
   loadCache();
-  // Arrived by a link in an email: the session is in the hash.
-  if (connected() && authWanted() && Auth.fromHash()) {
-    try { await Auth.fillUser(); } catch (e) {}
-  }
   paintSync();
   render();
   await refresh();
