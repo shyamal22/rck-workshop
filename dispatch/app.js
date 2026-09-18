@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.7.1';
+const VERSION = '2.7.2';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -692,6 +692,44 @@ const Outbox = {
     else localStorage.removeItem('rckd.outbox.problem');
   },
 
+  /* One queued write, sent as the database expects it. */
+  async send(op) {
+    if (op.kind === 'insert') {
+      await rest(op.table, {
+        method: 'POST',
+        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(op.row)
+      });
+    } else if (op.kind === 'delete') {
+      await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+        method: 'DELETE',
+        headers: restHeaders({ Prefer: 'return=minimal' })
+      });
+    } else {
+      await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
+        method: 'PATCH',
+        headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify(op.patch)
+      });
+    }
+  },
+
+  /* A write queued by an earlier version of the app can carry a field this
+     database has never heard of. Version 3.0.0 (sign-in, since withdrawn)
+     stamped a user_id on new entries and documents; on a database that never
+     got that column the row is refused every twenty seconds, for ever. The
+     field carried nothing the app needs, so it is dropped and the write sent
+     again. Only that one field: anything else the database refuses is a real
+     problem and stays in front of the person. */
+  strayField(op, err) {
+    const m = /Could not find the '([a-z_]+)' column/i.exec(err.message || '');
+    if (!m || m[1] !== 'user_id') return false;
+    const body = op.kind === 'insert' ? op.row : op.kind === 'patch' ? op.patch : null;
+    if (!body || !(m[1] in body)) return false;
+    delete body[m[1]];
+    return true;
+  },
+
   async flush() {
     if (!connected()) return;
     const list = Outbox.all();
@@ -700,23 +738,11 @@ const Outbox = {
     let refused = null;
     for (const op of list) {
       try {
-        if (op.kind === 'insert') {
-          await rest(op.table, {
-            method: 'POST',
-            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
-            body: JSON.stringify(op.row)
-          });
-        } else if (op.kind === 'delete') {
-          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
-            method: 'DELETE',
-            headers: restHeaders({ Prefer: 'return=minimal' })
-          });
-        } else {
-          await rest(`${op.table}?id=eq.${encodeURIComponent(op.id)}`, {
-            method: 'PATCH',
-            headers: restHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
-            body: JSON.stringify(op.patch)
-          });
+        try {
+          await Outbox.send(op);
+        } catch (err) {
+          if (!Outbox.strayField(op, err)) throw err;
+          await Outbox.send(op);
         }
       } catch (err) {
         left.push(op);
