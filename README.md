@@ -274,3 +274,4 @@ its own. They share nothing but the look, so a phone that knows one knows the ot
 | [`hr/`](hr/) | **RCK HR** — an earlier, differently shaped take on staff records and licences. Shares no data with `people/` |
 | [`dispatch/`](dispatch/) | **RCK Dispatch** — jobs, site paperwork and the daily job diary |
 | [`costing/`](costing/) | **RCK Costing** — what a job was priced at, what it cost, and what it made (no database — it lives on the phone) |
+| [`quotes/`](quotes/) | **RCK Quotes** — every quote sent, its status, and the cost allowed inside it; a won quote hands itself to Costing (no database — it lives on the phone) |

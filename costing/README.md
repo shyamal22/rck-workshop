@@ -173,3 +173,4 @@ Nothing links to it from anywhere. The home-screen icon is the whole of the dist
 | [`../`](../) | **RCK Workshop** — plant and truck damage, work orders and repairs |
 | [`../hr/`](../hr/) | **RCK HR** — staff records, licences and compliance |
 | [`../dispatch/`](../dispatch/) | **RCK Dispatch** — jobs, site paperwork and the daily job diary |
+| [`../quotes/`](../quotes/) | **RCK Quotes** — every quote sent, its status and the cost allowed inside it. A quote accepted there can hand itself to this app as a job |
