@@ -40,8 +40,24 @@ installed app is not treated that way, which is why step 2 matters.
   lines RCK Costing uses — labour, plant, materials, subcontractors, traffic
   management, cartage, and any line you name yourself. The app shows the **margin
   priced in**, in dollars and per cent, while you type.
-- The allowances and the margin are **internal only**. They are on your screen and
-  nowhere on the client's page.
+- **What it was priced on** — the internal note beside the allowances: the asphalt
+  rate and whose quote it came from, the production assumed per shift, what was
+  excluded. Six months later it answers *"why did we price it like that?"*, and it
+  travels with the job into Costing when the quote is won.
+- The allowances, the margin and the pricing basis are **internal only**. They are
+  on your screen, on the internal sheet, and nowhere on the client's page.
+- **Print the internal sheet** — one tap on the quote page: the prices, the
+  allowances against them, the margin band and the pricing basis on one page,
+  headed *Internal costing — not for the client*. The one to hand the director.
+
+**Pricing it somewhere else first?**
+- If the job is priced in a Claude chat that already knows your format, don't retype
+  it: **Paste a quote** (on the board, and on the New quote screen) reads what that
+  chat produced into a draft — client, scope, line items, allowances and the pricing
+  basis in one paste.
+- **Copy the ask** puts a prompt on the clipboard; paste it at the end of the pricing
+  chat and it answers with an import block this screen reads perfectly. A quote
+  pasted as plain text is read too, line by line, best-effort.
 
 **Sending it**
 - **Print the quote** — letterheaded, one page: the scope, the prices, subtotal,
