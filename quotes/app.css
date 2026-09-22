@@ -498,6 +498,21 @@ input[type="search"]::placeholder { color: var(--ink-2); }
 .doc tr.tot td { border-top: .7pt solid var(--d-ink-3); border-bottom: 0; font-weight: 700; }
 .doc .sub { font-size: 7.5pt; color: var(--d-ink-3); font-weight: 400; }
 
+.doc .pos { color: var(--d-green); font-weight: 650; }
+.doc .neg { color: var(--d-red); font-weight: 650; }
+.doc .band .n.pos { color: var(--d-green); }
+.doc .band .n.neg { color: var(--d-red); }
+
+.doc .entry {
+  display: flex; gap: 4mm; align-items: flex-start;
+  padding: 1.6mm 0; border-bottom: .5pt solid var(--d-line);
+  break-inside: avoid; page-break-inside: avoid;
+}
+.doc .entry:last-child { border-bottom: 0; }
+.doc .entry .e-body { flex: 1; min-width: 0; }
+.doc .entry .e-note { font-size: 9pt; white-space: pre-wrap; }
+.doc .entry .e-who { font-size: 8pt; color: var(--d-ink-3); margin-top: 1mm; }
+
 .doc .kv { width: 100%; padding: 0; }
 .doc .kv td { border: 0; padding: .8mm 0; }
 .doc .kv.two td { width: auto; padding-right: 3mm; }

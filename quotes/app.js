@@ -23,7 +23,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const SITE = window.RCKQ_CONFIG || {};
 const GST = isFinite(Number(SITE.gst)) ? Number(SITE.gst) : 0.15;
 const DEFAULT_VALID_DAYS = Number(SITE.validDays) || 30;
@@ -542,6 +542,7 @@ const ROUTES = {
   'quote':   renderQuote,
   'items':   renderItems,
   'costs':   renderCosts,
+  'paste':   renderPaste,
   'settings': renderSettings
 };
 
@@ -820,8 +821,9 @@ function renderBoard(v) {
       ? `<div class="card">${list.map(quoteRow).join('')}</div>`
       : `<div class="card"><div class="empty">${hasAny
           ? 'Nothing matches.'
-          : `<b>No quotes yet</b>Tap <span style="color:var(--accent)">＋</span> and price the first one. It stays a draft until you mark it sent.`}
-        </div></div>`}`;
+          : `<b>No quotes yet</b>Tap <span style="color:var(--accent)">＋</span> and price the first one — or paste one straight from your Claude pricing chat. It stays a draft until you mark it sent.`}
+        </div></div>`}
+    <a class="linkline" href="#/paste">Paste a quote from your pricing chat</a>`;
 
   $$('#seg button', v).forEach(b => b.onclick = () => { boardFilter = b.dataset.f; render(); });
   const q = $('#q', v);
@@ -858,6 +860,7 @@ function renderDetails(v, args) {
   v.innerHTML = `
     <h1 class="large-title">${editing ? 'Details' : 'New quote'}</h1>
     <p class="page-sub">${editing ? quoteNo(editing) : 'The job and the client. The prices go in next.'}</p>
+    ${editing ? '' : `<a class="btn tinted" href="#/paste">${icon('copy')}Priced it in your Claude chat? Paste it in</a>`}
 
     <div class="form">
       <label class="field"><span>What the job is</span>
@@ -1033,9 +1036,14 @@ function renderQuote(v, args) {
             `<div class="tot"><div class="m-l">Allowed cost</div><div class="m-v">${fmtMoney(m.allow, true)}</div></div>`
           : `<div><div class="m-l muted">No allowances entered — enter them and the margin works itself out.</div></div>`}
       </div>
+      ${q.basis ? `<div class="hintline"><b>Priced on:</b> <span style="white-space:pre-wrap">${esc(q.basis)}</span></div>` : ''}
       <button class="row-item" data-go="#/costs/${q.id}">
-        <div class="r-main" style="color:var(--accent)">Edit the allowances</div>${CHEV}
+        <div class="r-main" style="color:var(--accent)">Edit the allowances${q.basis ? '' : ' & what it was priced on'}</div>${CHEV}
       </button>
+      ${allowLines.length || q.basis
+        ? `<button class="row-item" id="printInternal">
+             <div class="r-main" style="color:var(--accent)">Print the internal sheet</div>${CHEV}
+           </button>` : ''}
     </div>
 
     <h2 class="sect">The job</h2>
@@ -1127,12 +1135,14 @@ function renderQuote(v, args) {
     if (m.total == null) return toast('Put prices on the quote first');
     printQuote(q);
   };
+  const printInternal = $('#printInternal', v);
+  if (printInternal) printInternal.onclick = () => printInternalSheet(q);
 
   $('#dup', v).onclick = () => {
     const copy = Store.insert('quotes', {
       name: q.name, client: q.client, contact: q.contact, site: q.site,
       work_type: q.work_type, reference: q.reference, description: q.description,
-      valid_days: q.valid_days, client_note: q.client_note,
+      valid_days: q.valid_days, client_note: q.client_note, basis: q.basis,
       items: (q.items || []).map(it => Object.assign({}, it, { id: uid() })),
       allowances: Object.assign({}, q.allowances),
       status: 'draft', created_by: whoami()
@@ -1175,7 +1185,8 @@ function renderItems(v, args) {
         <label><span>Qty</span><input type="number" class="i-qty" inputmode="decimal" step="any"
           value="${esc(hasMoney(it.qty) ? it.qty : '')}" placeholder="—"></label>
         <label><span>Unit</span><select class="i-unit">
-          ${UNITS.map(u => `<option value="${u}" ${u === (it.unit || 'lump sum') ? 'selected' : ''}>${u}</option>`).join('')}
+          ${UNITS.concat(it.unit && !UNITS.includes(it.unit) ? [it.unit] : [])
+            .map(u => `<option value="${u}" ${u === (it.unit || 'lump sum') ? 'selected' : ''}>${u}</option>`).join('')}
         </select></label>
         <label style="flex:1.4"><span>Rate $</span><input type="number" class="i-rate" inputmode="decimal" step="any"
           value="${esc(hasMoney(it.rate) ? it.rate : '')}" placeholder="—"></label>
@@ -1290,6 +1301,12 @@ function renderCosts(v, args) {
       ${allCostLines().map(lineInput).join('')}
     </div>
     <button class="btn" id="addLine">${icon('plus')}Add a cost line</button>
+
+    <div class="form">
+      <label class="field"><span>What it was priced on <span class="muted">— internal</span></span>
+        <textarea id="basis" placeholder="The rates and assumptions behind the price: asphalt at $x/t from whoever quoted it, production assumed per shift, weather risk, what's excluded. Six months from now this is the note that answers &quot;why did we price it like that?&quot;">${esc(q.basis || '')}</textarea></label>
+    </div>
+
     <div class="card pad" id="liveMargin"></div>
     <button class="btn primary" id="save">Save the allowances</button>`;
 
@@ -1325,7 +1342,7 @@ function renderCosts(v, args) {
   $('#addLine', v).onclick = () => {
     const name = (prompt('Name the cost line — e.g. "Accommodation"') || '').trim();
     if (!name) return;
-    Store.patch('quotes', q.id, { allowances: readForm() });
+    Store.patch('quotes', q.id, { allowances: readForm(), basis: $('#basis', v).value.trim() });
     const key = addCostLine(name);
     render();
     setTimeout(() => {
@@ -1335,9 +1352,224 @@ function renderCosts(v, args) {
   };
 
   $('#save', v).onclick = () => {
-    Store.patch('quotes', q.id, { allowances: readForm() });
+    Store.patch('quotes', q.id, { allowances: readForm(), basis: $('#basis', v).value.trim() });
     toast('Allowances saved');
     go('#/quote/' + q.id);
+  };
+}
+
+/* ================================================================
+   Screen — paste a quote in.
+
+   The quotes are priced in a Claude chat that already knows the
+   format; this is the door they come through. Paste what that chat
+   produced and the app reads it into a draft — the client, the
+   scope, the line items and the internal allowances — ready to be
+   checked over rather than retyped.
+
+   The reliable path is the import block: "Copy the ask" puts a
+   prompt on the clipboard that tells the pricing chat exactly what
+   to answer with. But a plain pasted quote is read too, line by
+   line, best-effort.
+   ================================================================ */
+const IMPORT_PROMPT =
+`Turn the quote above into an import block for my RCK Quotes app. Reply with ONLY a JSON code block in exactly this shape:
+
+{"name":"what the job is","client":"","contact":"","site":"","work_type":"e.g. mill & pave","reference":"their RFQ/tender number","description":"scope of work in the client's language","valid_days":30,"client_note":"","items":[{"desc":"","qty":null,"unit":"m²","rate":null}],"allowances":{"labour":null,"plant":null,"materials":null,"subbies":null,"tm":null,"cartage":null,"other":null},"pricing_basis":"what it was priced on — the rates, quantities and assumptions behind the price, supplier quotes relied on, anything a variation claim would need (internal, never shown to the client)"}
+
+Rules: every figure excludes GST. Use null for anything not known — never 0. A rate with qty null is a lump sum. unit is one of: lump sum, m², m, m³, t, hr, day, each. allowances are my INTERNAL cost allowances (labour, plant, materials, subcontractors, traffic management, cartage) — leave out any line the quote doesn't say; add extra lines by name if the quote has them.`;
+
+/** The first thing in the text that parses as JSON: a fenced block,
+    the outermost braces, or the text itself. */
+function extractJson(text) {
+  const candidates = [];
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) candidates.push(fence[1]);
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a >= 0 && b > a) candidates.push(text.slice(a, b + 1));
+  candidates.push(text);
+  for (const c of candidates) {
+    try {
+      const o = JSON.parse(c);
+      if (o && typeof o === 'object' && !Array.isArray(o)) return o;
+    } catch (e) {}
+  }
+  return null;
+}
+
+/** The first of these keys the object answers to, so the pricing
+    chat's wording doesn't have to be exact. */
+function pickKey(obj, names) {
+  const lower = {};
+  Object.keys(obj || {}).forEach(k => { lower[k.toLowerCase().replace(/[^a-z0-9]+/g, '_')] = obj[k]; });
+  for (const n of names) if (lower[n] != null && lower[n] !== '') return lower[n];
+  return null;
+}
+
+function normUnit(raw) {
+  const u = String(raw || '').toLowerCase().replace(/[.\s]/g, '');
+  const map = {
+    'm2': 'm²', 'sqm': 'm²', 'm^2': 'm²', 'm²': 'm²', 'sm': 'm²',
+    'm3': 'm³', 'm^3': 'm³', 'm³': 'm³', 'cum': 'm³',
+    'm': 'm', 'lm': 'm', 'linm': 'm', 'metre': 'm', 'metres': 'm',
+    't': 't', 'tonne': 't', 'tonnes': 't', 'ton': 't', 'tons': 't',
+    'hr': 'hr', 'hrs': 'hr', 'hour': 'hr', 'hours': 'hr',
+    'day': 'day', 'days': 'day',
+    'each': 'each', 'ea': 'each', 'no': 'each', 'item': 'each', 'unit': 'each',
+    'lumpsum': 'lump sum', 'ls': 'lump sum', 'sum': 'lump sum', 'lump': 'lump sum', '': 'lump sum'
+  };
+  if (map[u]) return map[u];
+  return String(raw).trim();
+}
+
+/** Read one imported item, whatever it calls its columns. An amount
+    with no rate becomes the rate (over the qty when there is one). */
+function readImportItem(row) {
+  if (row == null) return null;
+  if (typeof row === 'string') return readTextItem(row);
+  const desc = String(pickKey(row, ['desc', 'description', 'item', 'name', 'line', 'title']) || '').trim();
+  let qty = readNum(pickKey(row, ['qty', 'quantity']));
+  let unit = normUnit(pickKey(row, ['unit', 'units', 'uom']));
+  let rate = readMoney(pickKey(row, ['rate', 'unit_rate', 'price', 'unit_price']));
+  const amount = readMoney(pickKey(row, ['amount', 'total', 'line_total', 'value']));
+  if (rate == null && amount != null) {
+    if (qty != null && qty !== 0) rate = amount / qty;
+    else { rate = amount; qty = null; unit = 'lump sum'; }
+  }
+  if (qty == null && unit !== 'lump sum' && rate != null && !UNITS.includes(unit)) unit = 'lump sum';
+  if (!desc && rate == null) return null;
+  return { id: uid(), desc, qty, unit: unit || 'lump sum', rate };
+}
+
+/** Best-effort read of one plain text line: "desc — 2,400 m² @ $38.50",
+    or "desc ... $12,600" as a lump sum. */
+function readTextItem(line) {
+  const t = String(line || '').trim().replace(/\s+/g, ' ');
+  if (!t || /^(sub\s*total|total|gst|balance|quote|pricing|item\b)/i.test(t)) return null;
+  let m = t.match(/^(.+?)[\s—–:|-]+([\d,]+(?:\.\d+)?)\s*(m²|m2|sq\s*m|m³|m3|m\b|t\b|tonnes?|hrs?\b|hours?\b|days?\b|each|ea\b)\s*[@x×]\s*\$?\s*([\d,]+(?:\.\d+)?)/i);
+  if (m) return { id: uid(), desc: m[1].replace(/[\s—–:|-]+$/, '').trim(), qty: readNum(m[2]), unit: normUnit(m[3]), rate: readMoney(m[4]) };
+  m = t.match(/^(.+?)[\s—–:|-]+\$\s*([\d,]+(?:\.\d+)?)\s*(?:\+\s*gst)?$/i);
+  if (m) return { id: uid(), desc: m[1].replace(/[\s—–:|-]+$/, '').trim(), qty: null, unit: 'lump sum', rate: readMoney(m[2]) };
+  return null;
+}
+
+/** The whole pasted text as a draft quote, or a thrown reason why not. */
+function parseImport(text) {
+  const obj = extractJson(text);
+  const data = {
+    status: 'draft', items: [], allowances: {}, created_by: whoami(),
+    valid_days: DEFAULT_VALID_DAYS
+  };
+  const newLines = [];
+
+  if (obj) {
+    data.name = String(pickKey(obj, ['name', 'job', 'title', 'project', 'quote_name']) || '').trim();
+    data.client = String(pickKey(obj, ['client', 'customer', 'company', 'to']) || '').trim();
+    data.contact = String(pickKey(obj, ['contact', 'attention', 'attn']) || '').trim();
+    data.site = String(pickKey(obj, ['site', 'location', 'address']) || '').trim();
+    data.reference = String(pickKey(obj, ['reference', 'ref', 'rfq', 'their_reference', 'your_reference']) || '').trim();
+    data.description = String(pickKey(obj, ['description', 'scope', 'scope_of_work']) || '').trim();
+    data.client_note = String(pickKey(obj, ['client_note', 'note', 'notes']) || '').trim();
+    data.basis = String(pickKey(obj, ['pricing_basis', 'basis', 'priced_on', 'assumptions', 'pricing_notes', 'internal_notes']) || '').trim();
+    const wt = String(pickKey(obj, ['work_type', 'type', 'type_of_work', 'work']) || '').trim();
+    if (wt) data.work_type = matchType(wt);
+    const vd = readNum(pickKey(obj, ['valid_days', 'validity', 'valid_for']));
+    if (vd != null && vd > 0) data.valid_days = Math.round(vd);
+
+    const rows = pickKey(obj, ['items', 'lines', 'line_items', 'pricing', 'prices']);
+    (Array.isArray(rows) ? rows : []).forEach(r => {
+      const it = readImportItem(r);
+      if (it) data.items.push(it);
+    });
+
+    const alw = pickKey(obj, ['allowances', 'costs', 'cost_allowances', 'internal_costs', 'expected_costs', 'allowance']);
+    if (alw && typeof alw === 'object' && !Array.isArray(alw)) {
+      Object.keys(alw).forEach(raw => {
+        const val = readMoney(alw[raw]);
+        if (val == null) return;
+        /* Land on an existing line whether the chat said "tm", "Traffic
+           management" or "subbies" — by key or by label — before a new
+           line is invented for it. */
+        const want = slug(raw);
+        const hit = allCostLines().find(l => l.key === want || slug(l.label) === want) ||
+                    (want === 'subcontractors' ? allCostLines().find(l => l.key === 'subbies') : null);
+        const key = hit ? hit.key : want;
+        if (!hit) newLines.push(String(raw).trim());
+        data.allowances[key] = val;
+      });
+    }
+  } else {
+    /* No JSON — read the quote as text, line by line. */
+    let fields = 0;
+    const lines = text.split(/\n+/);
+    lines.forEach(line => {
+      const t = line.trim();
+      let m;
+      if ((m = t.match(/^(?:client|customer|for)\s*[:—–-]\s*(.+)$/i))) { if (!data.client) { data.client = m[1].trim(); fields++; } return; }
+      if ((m = t.match(/^(?:site|location|address)\s*[:—–-]\s*(.+)$/i))) { if (!data.site) { data.site = m[1].trim(); fields++; } return; }
+      if ((m = t.match(/^(?:contact|attention|attn)\s*[:—–-]\s*(.+)$/i))) { if (!data.contact) { data.contact = m[1].trim(); fields++; } return; }
+      if ((m = t.match(/^(?:reference|ref|rfq|your reference)\s*[:—–-]\s*(.+)$/i))) { if (!data.reference) { data.reference = m[1].trim(); fields++; } return; }
+      if ((m = t.match(/^(?:job|project|quote(?: for)?)\s*[:—–-]\s*(.+)$/i))) { if (!data.name) { data.name = m[1].trim(); fields++; } return; }
+      const it = readTextItem(t);
+      if (it) data.items.push(it);
+    });
+    /* A paste that reads as neither prices nor labelled fields isn't a
+       quote — say so, rather than filing a junk draft. */
+    if (!data.items.length && !fields)
+      throw new Error('Nothing readable found — no priced lines and no Client / Site / Job fields.');
+    if (!data.name) {
+      const first = lines.map(l => l.trim()).find(l => l && !/[:@$]/.test(l));
+      if (first) data.name = first.slice(0, 90);
+    }
+  }
+
+  if (!data.name && !data.items.length)
+    throw new Error('Nothing readable found — no job name and no priced lines.');
+  if (!data.name) data.name = 'Pasted quote';
+  return { data, newLines };
+}
+
+function renderPaste(v) {
+  setNav({ back: true, backLabel: 'Quotes', title: 'Paste a quote' });
+  v.innerHTML = `
+    <h1 class="large-title">Paste a quote</h1>
+    <p class="page-sub">Price the job in your Claude pricing chat as usual, ask it for the
+      import block, and paste the answer here. The client, scope, prices and internal
+      allowances land in a draft for you to check — nothing retyped.</p>
+
+    <div class="form">
+      <label class="field"><span>The quote, as the chat gave it</span>
+        <textarea id="pasteBox" style="min-height:180px" placeholder='Paste the JSON import block — or the whole quote as text, and the app will read what it can.'></textarea></label>
+    </div>
+    <button class="btn primary" id="readIt">${icon('doc')}Read it into a draft</button>
+
+    <div class="card pad small muted">
+      <b>First time?</b> Tap below, paste the copied ask at the end of your pricing chat,
+      and it will answer with a block this screen reads perfectly. The ask travels with
+      the quote you priced, so nothing needs re-explaining.
+    </div>
+    <button class="btn" id="copyAsk">${icon('copy')}Copy the ask for your pricing chat</button>`;
+
+  $('#readIt', v).onclick = () => {
+    const text = $('#pasteBox', v).value;
+    if (!text.trim()) return toast('Paste the quote first');
+    let parsed;
+    try { parsed = parseImport(text); }
+    catch (e) { return toast(e.message || 'That could not be read'); }
+    parsed.newLines.forEach(addCostLine);
+    const q = Store.insert('quotes', parsed.data);
+    const m = quoteMoney(q);
+    toast(`${plural((q.items || []).length, 'line')} read${m.total != null ? ' — ' + fmtMoney(m.total) : ''}. Check it over.`);
+    go('#/quote/' + q.id);
+  };
+
+  $('#copyAsk', v).onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(IMPORT_PROMPT);
+      toast('Copied — paste it at the end of your pricing chat');
+    } catch (e) {
+      prompt('Copy this, and paste it at the end of your pricing chat:', IMPORT_PROMPT);
+    }
   };
 }
 
@@ -1408,6 +1640,17 @@ function sendToCosting(q) {
     created_at: new Date().toISOString()
   };
   db.jobs.push(job);
+  /* What it was priced on travels with the job, as a Costing comment —
+     so when the actuals land, the assumptions are right there beside them. */
+  if (q.basis) {
+    db.comments = db.comments || [];
+    db.comments.push({
+      id: uid(), job_id: job.id,
+      body: 'Priced on (from ' + quoteNo(q) + '): ' + q.basis,
+      author: whoami(), at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    });
+  }
   try {
     localStorage.setItem(COSTING_KEY, JSON.stringify(db));
   } catch (e) {
@@ -1508,7 +1751,7 @@ function exportQuotesCsv() {
   if (!DB.quotes.length) return toast('No quotes yet');
   const rows = [['Number', 'Job', 'Client', 'Site', 'Type', 'Status', 'Sent on', 'Valid until',
                  'Decided on', 'Total excl GST', 'Allowed cost', 'Margin', 'Margin %',
-                 'Their ref', 'Client order', 'Why lost']];
+                 'Their ref', 'Client order', 'Priced on', 'Why lost']];
   DB.quotes.slice().sort((a, b) => (a.number || 0) - (b.number || 0)).forEach(q => {
     const m = quoteMoney(q);
     rows.push([quoteNo(q), q.name, q.client, q.site, typeLabel(typeOf(q)), statusLabel(q.status),
@@ -1516,7 +1759,7 @@ function exportQuotesCsv() {
                m.total == null ? '' : m.total, m.allow == null ? '' : m.allow,
                m.margin == null ? '' : m.margin,
                m.marginPct == null ? '' : m.marginPct.toFixed(1),
-               q.reference || '', q.po_ref || '', q.outcome_note || '']);
+               q.reference || '', q.po_ref || '', q.basis || '', q.outcome_note || '']);
   });
   downloadCsv(`rck-quotes-${today()}.csv`, rows);
 }
@@ -1670,6 +1913,81 @@ function printQuote(q) {
     </div>`;
 
   printDoc(html, `${quoteNo(q)} · ${fmtDate(sent)}`);
+}
+
+/** The internal side of the same quote, on one page: the prices, the
+    allowances against them, the margin, and what it was priced on.
+    This is the sheet for the office and the director — it says INTERNAL
+    on it because everything the client's copy hides is here. */
+function printInternalSheet(q) {
+  const m = quoteMoney(q);
+  const items = (q.items || []).filter(it => (it.desc || '').trim() || itemAmount(it) != null);
+  const allowLines = allCostLines().filter(l => hasMoney((q.allowances || {})[l.key]));
+  const notes = commentsFor(q.id);
+  const vu = validUntil(q);
+  const tone = m.margin == null ? '' : m.margin >= 0 ? 'pos' : 'neg';
+
+  const html = `
+    ${docHead('Internal costing', q.name,
+      `${quoteNo(q)}${q.client ? ' · ' + q.client : ''} · NOT FOR THE CLIENT`,
+      `${fmtDate(new Date().toISOString())}<br>Prepared by ${esc(whoami())}`)}
+
+    ${factGrid([
+      ['Quote number', `<strong>${quoteNo(q)}</strong>`],
+      ['Status', esc(statusLabel(q.status)) + (isExpired(q) ? ' — expired' : '')],
+      q.client ? ['Client', esc(q.client)] : null,
+      q.site ? ['Site', esc(q.site)] : null,
+      ['Type of work', esc(typeLabel(typeOf(q)))],
+      q.sent_on ? ['Sent', fmtDate(q.sent_on)] : null,
+      vu ? ['Valid until', fmtDate(vu)] : null,
+      q.decided_on ? [q.status === 'accepted' ? 'Accepted' : 'Declined', fmtDate(q.decided_on)] : null
+    ])}
+
+    <h2>The price to the client</h2>
+    <table>
+      <thead><tr><th>Item</th><th class="r">Amount</th></tr></thead>
+      <tbody>
+        ${items.map(it => {
+          const a = itemAmount(it);
+          return `<tr><td>${esc(it.desc || '—')}${hasMoney(it.qty) && it.unit !== 'lump sum'
+            ? `<div class="sub">${fmtQty(it.qty)} ${esc(it.unit || '')} @ ${fmtMoney(it.rate, true)}</div>` : ''}</td>
+            <td class="r">${a == null ? '—' : fmtMoney(a, true)}</td></tr>`;
+        }).join('')}
+        <tr class="tot"><td>Quoted, excl GST</td><td class="r">${fmtMoney(m.total, true)}</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Allowed inside it</h2>
+    ${allowLines.length ? `
+    <table>
+      <thead><tr><th>Cost line</th><th class="r">Allowance</th></tr></thead>
+      <tbody>
+        ${allowLines.map(l => `<tr><td>${esc(l.label)}</td>
+          <td class="r">${fmtMoney(q.allowances[l.key], true)}</td></tr>`).join('')}
+        <tr class="tot"><td>Allowed cost</td><td class="r">${fmtMoney(m.allow, true)}</td></tr>
+      </tbody>
+    </table>` : '<p class="lede">No allowances have been entered for this quote.</p>'}
+
+    <div class="band">
+      <div><div class="l">Quoted</div><div class="n">${fmtMoney(m.total, true)}</div></div>
+      <div><div class="l">Allowed cost</div><div class="n">${fmtMoney(m.allow, true)}</div></div>
+      <div><div class="l">Margin</div><div class="n ${tone}">${fmtSigned(m.margin, true)}</div></div>
+      <div><div class="l">Margin %</div><div class="n ${tone}">${fmtPct(m.marginPct)}</div></div>
+    </div>
+
+    ${q.basis ? `<h2>What it was priced on</h2><p class="note">${esc(q.basis)}</p>` : ''}
+
+    ${notes.length ? `
+    <h2>Notes</h2>
+    ${notes.map(n => `<div class="entry"><div class="e-body">
+      <div class="e-note">${esc(n.text)}</div>
+      <div class="e-who">${esc(n.author || 'Unknown')} · ${fmtDate(n.created_at)}</div>
+    </div></div>`).join('')}` : ''}
+
+    <p class="lede">All figures exclude GST. Internal — the client's quote shows none of the
+      allowances, the margin or the pricing basis on this sheet.</p>`;
+
+  printDoc(html, `${quoteNo(q)} · Internal`);
 }
 
 /* ================================================================
