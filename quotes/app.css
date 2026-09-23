@@ -181,6 +181,7 @@ h2.sect .count { color: var(--ink-3); font-weight: 500; }
 .r-flag.orange { color: var(--orange); }
 .r-flag.red { color: var(--neg); }
 .r-flag.blue { color: var(--accent); }
+.r-flag.green { color: var(--pos); }
 .r-side { text-align: right; flex: none; }
 .r-money { font-weight: 590; font-variant-numeric: tabular-nums; font-size: 16px; }
 .r-side .pill { margin-top: 3px; }
@@ -202,7 +203,10 @@ h2.sect .count { color: var(--ink-3); font-weight: 500; }
 .tile {
   background: var(--card); border-radius: 14px; padding: 12px 14px 11px;
   box-shadow: var(--shadow);
+  border: 0; text-align: left; font: inherit; color: inherit; cursor: default;
 }
+button.tile { cursor: pointer; transition: transform .12s ease; }
+button.tile:active { transform: scale(.97); }
 .tile .t-label { font-size: 13px; font-weight: 570; color: var(--ink-2); }
 .tile .t-value {
   font-size: 26px; font-weight: 700; letter-spacing: -.01em;
@@ -338,6 +342,54 @@ input[type="search"]::placeholder { color: var(--ink-2); }
 .moneyrows .tot { font-weight: 700; }
 .moneyrows .tot .m-l, .moneyrows .tot .m-v { font-weight: 700; }
 .moneyrows .muted-v { color: var(--ink-3); }
+
+/* Hide the desktop spinner arrows — every number box here is money or a
+   quantity typed with the keypad, and the arrows only add clutter. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* ----------------------------------------------------- allowance editor */
+/* One line per allowance: the name and the figure, both editable in
+   place, and a × to take the line off this quote. Nothing opens a
+   dialog; nothing needs a second screen. */
+.al-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 8px 16px; position: relative; min-height: 48px;
+}
+.al-row + .al-row::before {
+  content: ""; position: absolute; left: 16px; right: 0; top: 0;
+  height: .5px; background: var(--sep);
+}
+.al-name {
+  flex: 1; min-width: 0; border: 0; background: none;
+  font-size: 16px; outline: none; padding: 6px 0;
+}
+.al-name::placeholder { color: var(--ink-3); }
+.al-amt { display: flex; align-items: baseline; gap: 3px; width: 122px; flex: none; }
+.al-amt em { font-style: normal; color: var(--ink-2); font-size: 15px; }
+.al-amt input {
+  width: 100%; border: 0; background: none; font-size: 16px;
+  text-align: right; outline: none; padding: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.xbtn {
+  border: 0; background: var(--fill); color: var(--ink-2); border-radius: 100px;
+  width: 26px; height: 26px; flex: none; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+}
+.xbtn svg { width: 11px; height: 11px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; }
+
+/* The lines waiting to be added, as one-tap chips. */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 2px 16px; }
+.chips .chiplabel { font-size: 13px; color: var(--ink-2); align-self: center; }
+.chip {
+  border: 0; background: var(--fill); color: var(--accent);
+  font-size: 14px; font-weight: 570; padding: 7px 13px;
+  border-radius: 100px; cursor: pointer;
+}
+.chip:active { opacity: .55; }
+.chip.new { color: var(--ink-2); }
 
 /* ---------------------------------------------------------- item editor */
 .item-card { position: relative; padding: 10px 16px 12px; }

@@ -78,6 +78,14 @@ installed app is not treated that way, which is why step 2 matters.
 - **Needs a look**: quotes that have expired unanswered, quotes about to expire, and
   quotes sent more than ten days ago with no answer — the ones worth a call, surfaced
   so nobody has to remember them.
+- **Coming up**: every quote with a *work likely to start* date still ahead, soonest
+  first — won work to crew for, and sent work that might land. The date goes on the
+  quote's details, comes in with a pasted quote, and travels to Costing with a win.
+- **Clients**: who the work comes from — per client, the value won, what's waiting
+  now, the win rate, the margin their won work carries (weighted by value, and only
+  from quotes with allowances entered), and roughly how long they take to answer.
+  Tap through for that client's own board and quotes. Tiles on the main board are
+  tappable too: the pipeline tile opens the sent list, the won tile the won list.
 - **Quoted against won**, month by month, for the last six months. Tap a month for
   the figures.
 - Every quote below that, filterable by status and searchable by name, client, site
@@ -133,9 +141,11 @@ Pages serves it from this repository alongside the other RCK apps; every push to
 - **A rate with no quantity is a lump sum** — the rate is the price. A line with no
   rate at all isn't priced yet, and the app never counts it as zero: the total is only
   ever what has a figure on it, and the quote page says how many lines are still bare.
-- **Cost lines aren't fixed.** Add one on the Allowances screen — accommodation, a
-  ferry crossing — and it is a line like any other from then on, in the CSV and in the
-  hand-over to Costing.
+- **Cost lines aren't fixed.** On the Allowances screen every line is a row — name
+  and figure both editable in place, a × to take it off. The standard lines wait as
+  one-tap chips underneath, and a new line — accommodation, a ferry crossing — is
+  typed straight into a row. Rename a line and the name follows it into the CSV and
+  the hand-over to Costing; a name nothing uses any more tidies itself away.
 - **Re-quoting**: **Copy as a new draft** takes everything — items, allowances, scope —
   into a fresh quote number.
 - **Deleting a quote** takes its notes with it, cannot be undone, and there is no copy
