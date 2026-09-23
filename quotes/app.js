@@ -23,7 +23,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const SITE = window.RCKQ_CONFIG || {};
 const GST = isFinite(Number(SITE.gst)) ? Number(SITE.gst) : 0.15;
 const DEFAULT_VALID_DAYS = Number(SITE.validDays) || 30;
@@ -104,8 +104,22 @@ function addCostLine(name) {
 function costLineUsed(key) {
   return DB.quotes.some(q => hasMoney((q.allowances || {})[key]));
 }
-function removeCostLine(key) {
-  DB.lines = (DB.lines || []).filter(l => l.key !== key);
+
+/** The existing line a typed name lands on — by key or by label, in any
+    spelling — so "tm", "Traffic management" and "traffic_management" are
+    one line, not three. Null means the name is new. */
+function resolveLineKey(name) {
+  const want = slug(name);
+  if (!want || want === 'other' && !String(name).trim()) return null;
+  const hit = allCostLines().find(l => l.key === want || slug(l.label) === want);
+  return hit ? hit.key : null;
+}
+
+/** Custom lines nobody uses any more go quietly. Renaming a line in the
+    allowance editor makes a fresh one under the new name; this is what
+    keeps the old name from haunting the chips forever. */
+function pruneCostLines() {
+  DB.lines = (DB.lines || []).filter(l => l && l.key && costLineUsed(l.key));
   saveData();
 }
 
@@ -543,6 +557,8 @@ const ROUTES = {
   'items':   renderItems,
   'costs':   renderCosts,
   'paste':   renderPaste,
+  'clients': renderClients,
+  'client':  renderClient,
   'settings': renderSettings
 };
 
@@ -714,6 +730,8 @@ function quoteRow(q) {
   else if (needsChase(q)) flag = `<div class="r-flag orange">Sent ${plural(daysWaiting(q), 'day')} ago — worth a call</div>`;
   else if (expiresSoon(q)) flag = `<div class="r-flag orange">Expires ${fmtShort(validUntil(q))}</div>`;
   else if (q.status === 'sent') flag = `<div class="r-flag blue">Sent ${fmtShort(q.sent_on)} · valid to ${fmtShort(validUntil(q))}</div>`;
+  else if (q.status === 'accepted' && q.start_date && q.start_date >= today())
+    flag = `<div class="r-flag green">Starts ${fmtShort(q.start_date)} · in ${plural(daysBetween(today(), q.start_date), 'day')}</div>`;
   return `
     <a class="row-item" href="#/quote/${q.id}">
       <div class="r-main">
@@ -740,6 +758,13 @@ function renderBoard(v) {
   const attention = DB.quotes.filter(q => isExpired(q) || needsChase(q) || expiresSoon(q))
     .sort((a, b) => (isExpired(b) - isExpired(a)) || (needsChase(b) - needsChase(a)) ||
       String(a.sent_on || '').localeCompare(String(b.sent_on || '')));
+
+  /* The work on the horizon: everything not lost with a start date still
+     ahead, soonest first — won work to crew for, sent work that might land. */
+  const comingUp = DB.quotes
+    .filter(q => q.start_date && q.status !== 'declined' && q.start_date >= today())
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+    .slice(0, 6);
 
   const filters = [['all', 'All'], ['draft', 'Draft'], ['sent', 'Sent'],
                    ['accepted', 'Won'], ['declined', 'Lost']];
@@ -769,26 +794,26 @@ function renderBoard(v) {
 
     ${hasAny ? `
     <div class="tiles">
-      <div class="tile">
+      <button class="tile" data-filter="sent">
         <div class="t-label">Waiting on clients</div>
         <div class="t-value">${fmtCompact(st.pipeline)}</div>
         <div class="t-sub">${plural(st.sent.length, 'quote')} sent, unanswered</div>
-      </div>
-      <div class="tile">
+      </button>
+      <button class="tile" data-filter="accepted">
         <div class="t-label">Won — ${MONTHS[new Date().getMonth()]}</div>
         <div class="t-value ${st.wonMonth.length ? 'pos' : ''}">${fmtCompact(st.wonMonthTotal)}</div>
         <div class="t-sub">${plural(st.wonMonth.length, 'quote')} accepted</div>
-      </div>
-      <div class="tile">
+      </button>
+      <button class="tile" data-go="#/clients">
         <div class="t-label">Win rate — 12 months</div>
         <div class="t-value">${st.winRate == null ? '—' : Math.round(st.winRate) + '%'}</div>
         <div class="t-sub">${st.decided.length ? `${st.won} of ${plural(st.decided.length, 'decided quote')}` : 'Nothing decided yet'}</div>
-      </div>
-      <div class="tile">
+      </button>
+      <button class="tile" data-filter="sent">
         <div class="t-label">Margin priced in</div>
         <div class="t-value ${st.pipeMargin == null ? '' : st.pipeMargin >= 0 ? 'pos' : 'neg'}">${st.pipeMargin == null ? '—' : fmtPct(st.pipeMargin, 0)}</div>
         <div class="t-sub">on what's out right now</div>
-      </div>
+      </button>
     </div>` : ''}
 
     ${backupNag}
@@ -796,6 +821,34 @@ function renderBoard(v) {
     ${attention.length ? `
     <h2 class="sect">Needs a look <span class="count">· ${attention.length}</span></h2>
     <div class="card">${attention.map(quoteRow).join('')}</div>` : ''}
+
+    ${comingUp.length ? `
+    <h2 class="sect">Coming up <span class="count">· ${comingUp.length}</span></h2>
+    <div class="card">${comingUp.map(q => `
+      <a class="row-item" href="#/quote/${q.id}">
+        <div class="r-main">
+          <div class="r-title">${esc(q.name || 'Untitled quote')}</div>
+          <div class="r-sub">${esc(q.client || 'No client named')} · ${quoteNo(q)}</div>
+          <div class="r-flag ${q.status === 'accepted' ? 'green' : 'blue'}">Starts ${fmtShort(q.start_date)} · in ${plural(daysBetween(today(), q.start_date), 'day')}${q.status !== 'accepted' ? ' — if it lands' : ''}</div>
+        </div>
+        <div class="r-side">
+          <div class="r-money">${(() => { const mm = quoteMoney(q); return mm.total != null ? fmtMoney(mm.total) : '—'; })()}</div>
+          <span class="pill ${statusTone(q.status)}">${statusLabel(q.status)}</span>
+        </div>
+        ${CHEV}
+      </a>`).join('')}</div>` : ''}
+
+    ${hasAny ? `
+    <h2 class="sect">By client</h2>
+    <div class="card">
+      <a class="row-item" href="#/clients">
+        <div class="r-main">
+          <div class="r-title">Clients</div>
+          <div class="r-sub">Who the work comes from — win rate and margin by client</div>
+        </div>
+        ${CHEV}
+      </a>
+    </div>` : ''}
 
     ${hasAny && months.some(m => m.sent || m.won) ? `
     <h2 class="sect">The last six months</h2>
@@ -826,6 +879,14 @@ function renderBoard(v) {
     <a class="linkline" href="#/paste">Paste a quote from your pricing chat</a>`;
 
   $$('#seg button', v).forEach(b => b.onclick = () => { boardFilter = b.dataset.f; render(); });
+  /* A tile is the question; tapping it opens the list that answers it. */
+  $$('.tile[data-filter]', v).forEach(t => t.onclick = () => {
+    boardFilter = t.dataset.filter;
+    render();
+    const seg = $('#seg', view);
+    if (seg) seg.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  $$('.tile[data-go]', v).forEach(t => t.onclick = () => go(t.dataset.go));
   const q = $('#q', v);
   if (q) {
     q.oninput = () => {
@@ -894,6 +955,10 @@ function renderDetails(v, args) {
         <div class="field"><span>days from the day it is sent</span>
           <div class="muted small" style="padding-top:3px">The expiry works itself out.</div></div>`}
       </div>
+      <label class="field"><span>Work likely to start <span class="muted">(optional)</span></span>
+        <input type="date" id="workstart" value="${esc(q.start_date || '')}"></label>
+      <div class="hintline">Won or not, the board's <b>Coming up</b> list runs off this date —
+        it is how next month's workload is seen before it lands.</div>
     </div>
 
     <button class="btn primary" id="save">${editing ? 'Save details' : 'Create the quote'}</button>
@@ -929,7 +994,8 @@ function renderDetails(v, args) {
       work_type: typeSel.value,
       reference: $('#ref', v).value.trim(),
       description: $('#desc', v).value.trim(),
-      valid_days: validDays == null ? DEFAULT_VALID_DAYS : Math.max(1, Math.round(validDays))
+      valid_days: validDays == null ? DEFAULT_VALID_DAYS : Math.max(1, Math.round(validDays)),
+      start_date: $('#workstart', v).value || null
     };
     const sentEl = $('#senton', v);
     if (sentEl) data.sent_on = sentEl.value || q.sent_on;
@@ -1050,10 +1116,15 @@ function renderQuote(v, args) {
     <div class="card">
       <div class="kv">
         <div><div class="k">Number</div><div class="v"><b>${quoteNo(q)}</b></div></div>
-        <div><div class="k">Client</div><div class="v">${esc(q.client || '—')}</div></div>
+        <div><div class="k">Client</div><div class="v">${q.client
+          ? `<a href="#/client/${encodeURIComponent(q.client.trim())}" style="color:var(--accent);text-decoration:none">${esc(q.client)}</a>`
+          : '—'}</div></div>
         ${q.contact ? `<div><div class="k">Contact</div><div class="v">${esc(q.contact)}</div></div>` : ''}
         ${q.site ? `<div><div class="k">Site</div><div class="v">${esc(q.site)}</div></div>` : ''}
         <div><div class="k">Work</div><div class="v">${esc(typeLabel(typeOf(q)))}</div></div>
+        ${q.start_date ? `<div><div class="k">Likely start</div><div class="v">${fmtDate(q.start_date)}${
+          q.status !== 'declined' && q.start_date >= today()
+            ? ` <span class="muted">· in ${plural(daysBetween(today(), q.start_date), 'day')}</span>` : ''}</div></div>` : ''}
         ${q.reference ? `<div><div class="k">Their ref</div><div class="v">${esc(q.reference)}</div></div>` : ''}
         ${q.sent_on ? `<div><div class="k">Sent</div><div class="v">${fmtDate(q.sent_on)}</div></div>` : ''}
         ${vu ? `<div><div class="k">Valid to</div><div class="v">${fmtDate(vu)}${expired ? ' <span class="neg">— expired</span>' : ''}</div></div>` : ''}
@@ -1143,6 +1214,7 @@ function renderQuote(v, args) {
       name: q.name, client: q.client, contact: q.contact, site: q.site,
       work_type: q.work_type, reference: q.reference, description: q.description,
       valid_days: q.valid_days, client_note: q.client_note, basis: q.basis,
+      start_date: q.start_date,
       items: (q.items || []).map(it => Object.assign({}, it, { id: uid() })),
       allowances: Object.assign({}, q.allowances),
       status: 'draft', created_by: whoami()
@@ -1275,6 +1347,11 @@ function renderItems(v, args) {
 /* ================================================================
    Screen — the allowances. What the quoted price is allowed to cost,
    against the same lines RCK Costing uses. Internal only.
+
+   One row per line: the name and the figure, both editable in place.
+   The standard lines wait as one-tap chips underneath rather than as
+   seven empty boxes, and a new line is typed straight into a row — no
+   dialogs, no second screen, no scrolling past what isn't used.
    ================================================================ */
 function renderCosts(v, args) {
   const q = quoteById(args[0]);
@@ -1282,25 +1359,31 @@ function renderCosts(v, args) {
   setNav({ back: '#/quote/' + q.id, backLabel: quoteNo(q), title: 'Allowances' });
   const m = quoteMoney(q);
 
-  const lineInput = (l) => `
-    <label class="field"><span>${esc(l.label)} <span class="muted">— ${esc(l.hint || '')}</span></span>
-      <span class="moneybox"><em>$</em>
-        <input type="number" inputmode="decimal" step="any" data-line="${l.key}"
-               value="${esc(hasMoney((q.allowances || {})[l.key]) ? q.allowances[l.key] : '')}" placeholder="—">
-      </span>
-      ${!costLineUsed(l.key) && !COST_LINES.some(b => b.key === l.key)
-        ? `<button class="linkline red" style="text-align:left;padding:2px 0 0;font-size:13px" data-drop="${l.key}">Remove this line</button>` : ''}
-    </label>`;
+  /* The rows to open with: every line that has a figure on this quote —
+     or, on a quote with none yet, the three lines almost every job
+     starts with, empty and ready. An empty row saves as nothing. */
+  let startRows = allCostLines()
+    .filter(l => hasMoney((q.allowances || {})[l.key]))
+    .map(l => ({ label: l.label, amount: q.allowances[l.key] }));
+  if (!startRows.length)
+    startRows = COST_LINES.slice(0, 3).map(l => ({ label: l.label, amount: null }));
+
+  const rowHtml = (r) => `
+    <div class="al-row">
+      <input type="text" class="al-name" value="${esc(r.label || '')}" placeholder="Name the line">
+      <span class="al-amt"><em>$</em>
+        <input type="number" class="al-val" inputmode="decimal" step="any"
+               value="${esc(hasMoney(r.amount) ? r.amount : '')}" placeholder="—"></span>
+      <button class="xbtn" aria-label="Remove line"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+    </div>`;
 
   v.innerHTML = `
     <h1 class="large-title">Allowances</h1>
-    <p class="page-sub">What the quoted price is allowed to cost us, line by line.
-      Internal only — the client never sees these. An empty box means
-      <em>not worked out yet</em>, never zero.</p>
-    <div class="form" id="lines">
-      ${allCostLines().map(lineInput).join('')}
-    </div>
-    <button class="btn" id="addLine">${icon('plus')}Add a cost line</button>
+    <p class="page-sub">What the quoted price is allowed to cost us. Internal only —
+      the client never sees these. An empty figure means <em>not worked out yet</em>, never zero.</p>
+
+    <div class="card" id="alRows">${startRows.map(rowHtml).join('')}</div>
+    <div class="chips" id="alChips"></div>
 
     <div class="form">
       <label class="field"><span>What it was priced on <span class="muted">— internal</span></span>
@@ -1310,17 +1393,30 @@ function renderCosts(v, args) {
     <div class="card pad" id="liveMargin"></div>
     <button class="btn primary" id="save">Save the allowances</button>`;
 
-  const readForm = () => {
-    const map = {};
-    $$('#lines input[data-line]', v).forEach(i => {
-      const val = readMoney(i.value);
-      if (val != null) map[i.dataset.line] = val;
-    });
-    return map;
+  const rowsWrap = $('#alRows', v);
+
+  const readRows = () => $$('.al-row', v).map(r => ({
+    label: $('.al-name', r).value.trim(),
+    amount: readMoney($('.al-val', r).value)
+  }));
+
+  /* The chips are every known line not already a row, plus the way to a
+     brand-new one. They redraw as names are typed, so adding "Cartage"
+     by hand takes its chip away. */
+  const refreshChips = () => {
+    const taken = new Set(readRows().map(r => slug(r.label)).filter(s => s && s !== 'other'));
+    $$('.al-row .al-name', v).forEach(i => { if (i.value.trim()) taken.add(slug(i.value)); });
+    const waiting = allCostLines().filter(l => !taken.has(l.key) && !taken.has(slug(l.label)));
+    $('#alChips', v).innerHTML =
+      `<span class="chiplabel">Add:</span>` +
+      waiting.map(l => `<button class="chip" data-label="${esc(l.label)}">${esc(l.label)}</button>`).join('') +
+      `<button class="chip new" data-new>＋ New line…</button>`;
+    $$('#alChips .chip', v).forEach(c => c.onclick = () => addRow(c.dataset.label || '', !c.dataset.label));
   };
 
-  const refresh = () => {
-    const alw = sumAllowances(readForm());
+  const refreshMargin = () => {
+    let alw = null;
+    readRows().forEach(r => { if (r.amount != null) alw = (alw || 0) + r.amount; });
     const margin = m.total != null && alw != null ? m.total - alw : null;
     const pct = margin != null && m.total ? margin / m.total * 100 : null;
     $('#liveMargin', v).innerHTML = `
@@ -1331,28 +1427,46 @@ function renderCosts(v, args) {
           <div class="m-v ${toneOf(margin)}">${fmtSigned(margin, true)}${pct != null ? ` · ${fmtPct(pct)}` : ''}</div></div>
       </div>`;
   };
-  $$('#lines input', v).forEach(i => i.oninput = refresh);
-  refresh();
 
-  $$('[data-drop]', v).forEach(b => b.onclick = () => {
-    removeCostLine(b.dataset.drop);
-    render();
-  });
-
-  $('#addLine', v).onclick = () => {
-    const name = (prompt('Name the cost line — e.g. "Accommodation"') || '').trim();
-    if (!name) return;
-    Store.patch('quotes', q.id, { allowances: readForm(), basis: $('#basis', v).value.trim() });
-    const key = addCostLine(name);
-    render();
-    setTimeout(() => {
-      const el = $(`#lines input[data-line="${key}"]`, view);
-      if (el) { el.focus(); el.scrollIntoView({ block: 'center' }); }
-    }, 60);
+  const wireRow = (row) => {
+    $('.al-val', row).oninput = refreshMargin;
+    $('.al-name', row).onchange = refreshChips;
+    $('.xbtn', row).onclick = () => {
+      const named = $('.al-name', row).value.trim();
+      const val = readMoney($('.al-val', row).value);
+      if (val != null && !confirm(`Take ${named || 'this line'} off this quote?`)) return;
+      row.remove();
+      refreshChips(); refreshMargin();
+    };
   };
 
+  const addRow = (label, focusName) => {
+    rowsWrap.insertAdjacentHTML('beforeend', rowHtml({ label, amount: null }));
+    const row = rowsWrap.lastElementChild;
+    wireRow(row);
+    refreshChips();
+    const target = focusName ? $('.al-name', row) : $('.al-val', row);
+    target.focus();
+    row.scrollIntoView({ block: 'center' });
+  };
+
+  $$('.al-row', v).forEach(wireRow);
+  refreshChips();
+  refreshMargin();
+
   $('#save', v).onclick = () => {
-    Store.patch('quotes', q.id, { allowances: readForm(), basis: $('#basis', v).value.trim() });
+    /* Rows become the map: each name lands on its existing line in any
+       spelling, or becomes a new line; two rows under one name add up;
+       an empty or unpriced row simply doesn't save. */
+    const map = {};
+    readRows().forEach(r => {
+      if (!r.label || r.amount == null) return;
+      const key = resolveLineKey(r.label) || addCostLine(r.label);
+      if (!key) return;
+      map[key] = (map[key] || 0) + r.amount;
+    });
+    Store.patch('quotes', q.id, { allowances: map, basis: $('#basis', v).value.trim() });
+    pruneCostLines();
     toast('Allowances saved');
     go('#/quote/' + q.id);
   };
@@ -1375,7 +1489,7 @@ function renderCosts(v, args) {
 const IMPORT_PROMPT =
 `Turn the quote above into an import block for my RCK Quotes app. Reply with ONLY a JSON code block in exactly this shape:
 
-{"name":"what the job is","client":"","contact":"","site":"","work_type":"e.g. mill & pave","reference":"their RFQ/tender number","description":"scope of work in the client's language","valid_days":30,"client_note":"","items":[{"desc":"","qty":null,"unit":"m²","rate":null}],"allowances":{"labour":null,"plant":null,"materials":null,"subbies":null,"tm":null,"cartage":null,"other":null},"pricing_basis":"what it was priced on — the rates, quantities and assumptions behind the price, supplier quotes relied on, anything a variation claim would need (internal, never shown to the client)"}
+{"name":"what the job is","client":"","contact":"","site":"","work_type":"e.g. mill & pave","reference":"their RFQ/tender number","description":"scope of work in the client's language","valid_days":30,"start_date":"YYYY-MM-DD or null — when the work would likely start on site","client_note":"","items":[{"desc":"","qty":null,"unit":"m²","rate":null}],"allowances":{"labour":null,"plant":null,"materials":null,"subbies":null,"tm":null,"cartage":null,"other":null},"pricing_basis":"what it was priced on — the rates, quantities and assumptions behind the price, supplier quotes relied on, anything a variation claim would need (internal, never shown to the client)"}
 
 Rules: every figure excludes GST. Use null for anything not known — never 0. A rate with qty null is a lump sum. unit is one of: lump sum, m², m, m³, t, hr, day, each. allowances are my INTERNAL cost allowances (labour, plant, materials, subcontractors, traffic management, cartage) — leave out any line the quote doesn't say; add extra lines by name if the quote has them.`;
 
@@ -1475,6 +1589,8 @@ function parseImport(text) {
     if (wt) data.work_type = matchType(wt);
     const vd = readNum(pickKey(obj, ['valid_days', 'validity', 'valid_for']));
     if (vd != null && vd > 0) data.valid_days = Math.round(vd);
+    const sd = String(pickKey(obj, ['start_date', 'likely_start', 'expected_start', 'starts', 'start']) || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(sd)) data.start_date = sd;
 
     const rows = pickKey(obj, ['items', 'lines', 'line_items', 'pricing', 'prices']);
     (Array.isArray(rows) ? rows : []).forEach(r => {
@@ -1490,10 +1606,8 @@ function parseImport(text) {
         /* Land on an existing line whether the chat said "tm", "Traffic
            management" or "subbies" — by key or by label — before a new
            line is invented for it. */
-        const want = slug(raw);
-        const hit = allCostLines().find(l => l.key === want || slug(l.label) === want) ||
-                    (want === 'subcontractors' ? allCostLines().find(l => l.key === 'subbies') : null);
-        const key = hit ? hit.key : want;
+        const hit = resolveLineKey(raw);
+        const key = hit || slug(raw);
         if (!hit) newLines.push(String(raw).trim());
         data.allowances[key] = val;
       });
@@ -1574,6 +1688,140 @@ function renderPaste(v) {
 }
 
 /* ================================================================
+   Screens — the clients. Who the work comes from, what each one is
+   worth, how often they say yes, the margin their work carries, and
+   how long they take to answer. Every figure is worked out from the
+   quotes; nothing here is entered.
+   ================================================================ */
+function clientStats() {
+  const map = {};
+  DB.quotes.forEach(q => {
+    const name = (q.client || '').trim() || 'No client named';
+    const k = name.toLowerCase();
+    const c = map[k] || (map[k] = {
+      name, n: 0, draft: 0,
+      sent: 0, sentVal: 0,
+      won: 0, wonVal: 0, wonMargin: 0, wonMarginBase: 0,
+      lost: 0, lostVal: 0,
+      answerDays: [], last: ''
+    });
+    const m = quoteMoney(q);
+    c.n++;
+    if (q.status === 'draft') c.draft++;
+    if (q.status === 'sent') { c.sent++; if (m.total != null) c.sentVal += m.total; }
+    if (q.status === 'accepted') {
+      c.won++;
+      if (m.total != null) c.wonVal += m.total;
+      if (m.total != null && m.margin != null) { c.wonMargin += m.margin; c.wonMarginBase += m.total; }
+    }
+    if (q.status === 'declined') { c.lost++; if (m.total != null) c.lostVal += m.total; }
+    if ((q.status === 'accepted' || q.status === 'declined') && q.sent_on && q.decided_on) {
+      const d = daysBetween(q.sent_on, q.decided_on);
+      if (d != null && d >= 0) c.answerDays.push(d);
+    }
+    const t = q.updated_at || q.created_at || '';
+    if (t > c.last) c.last = t;
+  });
+  return Object.values(map).map(c => Object.assign(c, {
+    winRate: (c.won + c.lost) ? c.won / (c.won + c.lost) * 100 : null,
+    /* Margin weighted by value, not averaged by quote — one big thin job
+       should read as what it is. Only quotes with allowances count. */
+    marginPct: c.wonMarginBase ? c.wonMargin / c.wonMarginBase * 100 : null,
+    answerAvg: c.answerDays.length
+      ? Math.round(c.answerDays.reduce((a, b) => a + b, 0) / c.answerDays.length) : null
+  })).sort((a, b) => (b.wonVal + b.sentVal + b.lostVal) - (a.wonVal + a.sentVal + a.lostVal));
+}
+
+function quotesForClient(name) {
+  const want = String(name || '').trim().toLowerCase();
+  return DB.quotes.filter(q =>
+    ((q.client || '').trim() || 'No client named').toLowerCase() === want);
+}
+
+function renderClients(v) {
+  setNav({ back: true, backLabel: 'Quotes', title: 'Clients' });
+  const clients = clientStats();
+  v.innerHTML = `
+    <h1 class="large-title">Clients</h1>
+    <p class="page-sub">Who the work comes from, and what it makes. Biggest book first.</p>
+    ${clients.length ? `<div class="card">${clients.map(c => `
+      <a class="row-item" href="#/client/${encodeURIComponent(c.name)}">
+        <div class="r-main">
+          <div class="r-title">${esc(c.name)}</div>
+          <div class="r-sub">${plural(c.n, 'quote')}${c.won ? ` · won ${fmtCompact(c.wonVal)}` : ''}${c.sent ? ` · waiting ${fmtCompact(c.sentVal)}` : ''}</div>
+          ${c.winRate != null || c.marginPct != null ? `
+          <div class="r-flag ${c.marginPct != null ? (c.marginPct >= 0 ? 'green' : 'red') : 'blue'}">${[
+            c.winRate != null ? `wins ${Math.round(c.winRate)}%` : null,
+            c.marginPct != null ? `margin ${fmtPct(c.marginPct)}` : null,
+            c.answerAvg != null ? `answers in ~${plural(c.answerAvg, 'day')}` : null
+          ].filter(Boolean).join(' · ')}</div>` : ''}
+        </div>
+        ${CHEV}
+      </a>`).join('')}</div>`
+      : `<div class="card"><div class="empty"><b>No clients yet</b>Clients appear here as quotes name them.</div></div>`}`;
+}
+
+function renderClient(v, args) {
+  const name = decodeURIComponent(args[0] || '');
+  const list = quotesForClient(name);
+  if (!list.length) return notFound(v, 'Client');
+  const c = clientStats().find(x => x.name.toLowerCase() === name.trim().toLowerCase());
+
+  setNav({ back: '#/clients', backLabel: 'Clients', title: c.name });
+
+  const coming = list
+    .filter(q => q.start_date && q.status !== 'declined' && q.start_date >= today())
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const rows = list.slice().sort((a, b) => statusRank(a) - statusRank(b) ||
+    String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+
+  v.innerHTML = `
+    <h1 class="large-title">${esc(c.name)}</h1>
+    <p class="page-sub">${plural(c.n, 'quote')} on the book${c.answerAvg != null ? ` · answers in about ${plural(c.answerAvg, 'day')}` : ''}</p>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="t-label">Won</div>
+        <div class="t-value ${c.won ? 'pos' : ''}">${c.won ? fmtCompact(c.wonVal) : '—'}</div>
+        <div class="t-sub">${c.won ? plural(c.won, 'quote') : 'nothing yet'}</div>
+      </div>
+      <div class="tile">
+        <div class="t-label">Waiting now</div>
+        <div class="t-value">${c.sent ? fmtCompact(c.sentVal) : '—'}</div>
+        <div class="t-sub">${c.sent ? plural(c.sent, 'quote') + ' unanswered' : 'nothing out'}</div>
+      </div>
+      <div class="tile">
+        <div class="t-label">Win rate</div>
+        <div class="t-value">${c.winRate == null ? '—' : Math.round(c.winRate) + '%'}</div>
+        <div class="t-sub">${(c.won + c.lost) ? `${c.won} of ${plural(c.won + c.lost, 'decided quote')}` : 'nothing decided'}</div>
+      </div>
+      <div class="tile">
+        <div class="t-label">Margin on won work</div>
+        <div class="t-value ${c.marginPct == null ? '' : c.marginPct >= 0 ? 'pos' : 'neg'}">${c.marginPct == null ? '—' : fmtPct(c.marginPct)}</div>
+        <div class="t-sub">${c.marginPct != null ? fmtCompact(c.wonMargin) + ' priced in'
+          : c.won ? 'needs allowances entered' : 'no won work yet'}</div>
+      </div>
+    </div>
+
+    ${c.lost ? `<p class="muted small" style="margin:2px 4px 14px">Lost ${plural(c.lost, 'quote')} worth ${fmtMoney(c.lostVal)} — the notes on each say why.</p>` : ''}
+
+    ${coming.length ? `
+    <h2 class="sect">Coming up</h2>
+    <div class="card">${coming.map(q => `
+      <a class="row-item" href="#/quote/${q.id}">
+        <div class="r-main">
+          <div class="r-title">${esc(q.name)}</div>
+          <div class="r-flag ${q.status === 'accepted' ? 'green' : 'blue'}">Starts ${fmtShort(q.start_date)} · in ${plural(daysBetween(today(), q.start_date), 'day')}${q.status !== 'accepted' ? ' — if it lands' : ''}</div>
+        </div>
+        <div class="r-side"><span class="pill ${statusTone(q.status)}">${statusLabel(q.status)}</span></div>
+        ${CHEV}
+      </a>`).join('')}</div>` : ''}
+
+    <h2 class="sect">Their quotes</h2>
+    <div class="card">${rows.map(quoteRow).join('')}</div>`;
+}
+
+/* ================================================================
    Handing a won quote to RCK Costing.
 
    Both apps live on the same phone under the same address, so they
@@ -1631,7 +1879,7 @@ function sendToCosting(q) {
     reference: q.po_ref || q.reference || '',
     description: q.description || '',
     status: 'quoted',
-    start_date: null,
+    start_date: q.start_date || null,
     end_date: null,
     contract_value: m.total,
     expected_costs: expected,
@@ -1750,12 +1998,12 @@ function downloadCsv(filename, rows) {
 function exportQuotesCsv() {
   if (!DB.quotes.length) return toast('No quotes yet');
   const rows = [['Number', 'Job', 'Client', 'Site', 'Type', 'Status', 'Sent on', 'Valid until',
-                 'Decided on', 'Total excl GST', 'Allowed cost', 'Margin', 'Margin %',
+                 'Decided on', 'Likely start', 'Total excl GST', 'Allowed cost', 'Margin', 'Margin %',
                  'Their ref', 'Client order', 'Priced on', 'Why lost']];
   DB.quotes.slice().sort((a, b) => (a.number || 0) - (b.number || 0)).forEach(q => {
     const m = quoteMoney(q);
     rows.push([quoteNo(q), q.name, q.client, q.site, typeLabel(typeOf(q)), statusLabel(q.status),
-               q.sent_on || '', validUntil(q) || '', q.decided_on || '',
+               q.sent_on || '', validUntil(q) || '', q.decided_on || '', q.start_date || '',
                m.total == null ? '' : m.total, m.allow == null ? '' : m.allow,
                m.margin == null ? '' : m.margin,
                m.marginPct == null ? '' : m.marginPct.toFixed(1),
@@ -1938,6 +2186,7 @@ function printInternalSheet(q) {
       q.client ? ['Client', esc(q.client)] : null,
       q.site ? ['Site', esc(q.site)] : null,
       ['Type of work', esc(typeLabel(typeOf(q)))],
+      q.start_date ? ['Likely start', fmtDate(q.start_date)] : null,
       q.sent_on ? ['Sent', fmtDate(q.sent_on)] : null,
       vu ? ['Valid until', fmtDate(vu)] : null,
       q.decided_on ? [q.status === 'accepted' ? 'Accepted' : 'Declined', fmtDate(q.decided_on)] : null
