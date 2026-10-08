@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.7.2';
+const VERSION = '2.8.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -481,13 +481,33 @@ function loadCache() {
     }
   } catch (e) {}
 }
+let warnedFull = false;
 function saveCache() {
   try {
     localStorage.setItem(cacheKey(), JSON.stringify(DB));
   } catch (e) {
-    // Storage full — most likely photos held on the phone waiting for signal.
-    toast('Device storage is full. Get some signal so the photos can send.');
+    // A phone keeps a few megabytes for a site, and the diary no longer fits.
+    // Almost always that is photos still sitting inside their records (see
+    // healPhotos, which moves them on). Keep everything else, so the app
+    // still opens with no signal; a photo left out reads "on the server"
+    // until the next pull brings the record back whole.
+    try {
+      localStorage.setItem(cacheKey(), JSON.stringify(slimCopy()));
+    } catch (e2) {
+      if (!warnedFull) toast('This phone cannot hold the whole diary. Keep it on signal and it will sort itself out.');
+      warnedFull = true;
+    }
   }
+}
+/** The cache without the photos that are still inside their records. */
+function slimCopy() {
+  const slimFile = f => inlineUrl(f.url) ? { name: f.name, type: f.type, size: f.size, url: '', offloaded: true } : f;
+  return Object.assign({}, DB, {
+    diary_entries: DB.diary_entries.map(e => Array.isArray(e.files) && e.files.some(f => inlineUrl(f.url))
+      ? Object.assign({}, e, { files: e.files.map(slimFile) }) : e),
+    project_docs: DB.project_docs.map(d => inlineUrl(d.file_url) ? Object.assign({}, d, { file_url: '', offloaded: true }) : d),
+    crew_people: DB.crew_people.map(r => inlineUrl(r.photo_url) ? Object.assign({}, r, { photo_url: '', offloaded: true }) : r)
+  });
 }
 
 function upsert(table, row) {
@@ -665,6 +685,74 @@ function fileToDataUrl(file) {
     r.onerror = reject;
     r.readAsDataURL(file);
   });
+}
+
+/* ------------- photos that never left the phone ---------------------
+   A photo taken with no signal rides along inside its record as a data URL
+   (see Store.upload). That keeps it safe, but nothing ever moved it on: the
+   record went to the database photo and all the next time the phone had
+   signal, and from then on every phone pulled it down and kept it. A few
+   hundred kilobytes a photo, and the few megabytes a phone holds for a site
+   are gone — "storage is full" on a phone that never took one. Any connected
+   phone now sends such photos to file storage, a few at a time, and points
+   the record at them. ---------------------------------------------------- */
+function inlineUrl(u) { return typeof u === 'string' && u.startsWith('data:'); }
+
+/** How many photos are still inside their records, across everything. */
+function inlineCount() {
+  let n = 0;
+  DB.diary_entries.forEach(e => (Array.isArray(e.files) ? e.files : []).forEach(f => { if (inlineUrl(f.url)) n++; }));
+  DB.project_docs.forEach(d => { if (inlineUrl(d.file_url)) n++; });
+  DB.crew_people.forEach(r => { if (inlineUrl(r.photo_url)) n++; });
+  return n;
+}
+
+/** One inline file to storage. Null when storage would not take it. */
+async function sendInline(f) {
+  const blob = await (await fetch(f.url)).blob();
+  const file = new File([blob], f.name || 'photo.jpg', { type: f.type || blob.type || 'application/octet-stream' });
+  const up = await Store.upload(file);
+  return up.local ? null : up;
+}
+
+let healing = false;
+async function healPhotos() {
+  if (!connected() || healing) return;
+  healing = true;
+  let budget = 4;   // a refresh every twenty seconds; a photo each is a round trip
+  try {
+    for (const e of DB.diary_entries) {
+      if (budget <= 0) return;
+      const files = Array.isArray(e.files) ? e.files : [];
+      if (!files.some(f => inlineUrl(f.url))) continue;
+      const next = [];
+      let changed = false;
+      for (const f of files) {
+        if (!inlineUrl(f.url) || budget <= 0) { next.push(f); continue; }
+        budget--;
+        const up = await sendInline(f);
+        if (up) { next.push({ name: f.name || up.name, type: up.type, size: up.size, url: up.url }); changed = true; }
+        else next.push(f);
+      }
+      if (changed) await Store.patch('diary_entries', e.id, { files: next });
+    }
+    for (const d of DB.project_docs) {
+      if (budget <= 0) return;
+      if (!inlineUrl(d.file_url)) continue;
+      budget--;
+      const up = await sendInline({ url: d.file_url, name: d.file_name, type: d.file_type });
+      if (up) await Store.patch('project_docs', d.id, { file_url: up.url, file_size: up.size });
+    }
+    for (const r of DB.crew_people) {
+      if (budget <= 0) return;
+      if (!inlineUrl(r.photo_url)) continue;
+      budget--;
+      const up = await sendInline({ url: r.photo_url, name: r.photo_name || 'face.jpg', type: 'image/jpeg' });
+      if (up) await Store.patch('crew_people', r.id, { photo_url: up.url });
+    }
+  } finally {
+    healing = false;
+  }
 }
 
 /* ------------- outbox: writes made with no signal, replayed later ---- */
@@ -1893,7 +1981,7 @@ function crewItem(it, i) {
 
   const e = it.e;
   const files = Array.isArray(e.files) ? e.files : [];
-  const photos = files.filter(f => /^image\//.test(f.type || ''));
+  const photos = files.filter(f => /^image\//.test(f.type || '') && f.url);
   const flag = e.kind === 'issue' || e.kind === 'delay';
   return `
     <div class="tl-e status-${entryTone(e)}${flag ? ' flag' : ''}${entryMarked(e) ? ' mark' : ''}"
@@ -2608,9 +2696,10 @@ function renderUpload(view) {
     coloured for what happened, and the note beside it. */
 function diaryItem(e, i) {
   const files = Array.isArray(e.files) ? e.files : [];
-  const photos = files.filter(f => /^image\//.test(f.type || ''));
-  const others = files.filter(f => !/^image\//.test(f.type || ''));
+  const photos = files.filter(f => /^image\//.test(f.type || '') && f.url);
+  const others = files.filter(f => !/^image\//.test(f.type || '') && f.url);
   const pending = files.some(f => f.pending);
+  const offloaded = files.some(f => f.offloaded);
   const flag = e.kind === 'issue' || e.kind === 'delay';
   return `
     <div class="tl-e status-${entryTone(e)}${flag ? ' flag' : ''}${entryMarked(e) ? ' mark' : ''}"
@@ -2624,7 +2713,7 @@ function diaryItem(e, i) {
           `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt=""></a>`).join('')}</div>` : ''}
         ${others.map(f => `<a class="attach" href="${esc(f.url)}" target="_blank" rel="noopener">${icon('clip')}${esc(f.name || 'Attachment')}</a>`).join('')}
         <div class="tl-who">${esc(e.author || 'Unknown')}${e.role && e.role !== 'supervisor' ? ' · ' + esc(roleLabel(e.role)) : ''}${
-          pending ? ' · photos waiting for signal' : ''}</div>
+          pending ? ' · photos waiting for signal' : offloaded ? ' · photos on the server' : ''}</div>
       </div>
     </div>`;
 }
@@ -2822,7 +2911,16 @@ function renderEntry(view) {
     this.textContent = 'Saving…';
     try {
       if (editing) {
-        const uploads = (editing.files || []).slice();
+        let uploads = (editing.files || []).slice();
+        if (uploads.some(f => f.offloaded)) {
+          // This phone's copy came from a trimmed cache (see saveCache): the
+          // photos are only on the server. Fetch the real list before
+          // writing one back, or they would be gone for everyone.
+          let fresh = null;
+          try { if (connected()) fresh = await rest(`diary_entries?id=eq.${encodeURIComponent(editing.id)}&select=files`, { headers: restHeaders() }); } catch (e) {}
+          if (!fresh || !fresh[0]) throw new Error('the photos on this entry are still on the server. Get signal and try again');
+          uploads = (fresh[0].files || []).slice();
+        }
         for (const f of files) uploads.push(await Store.upload(f));
         await Store.patch('diary_entries', editing.id, {
           kind, label, body, entry_date: date, at: stamp(date, time), files: uploads
@@ -3788,7 +3886,7 @@ function clip(text, max) {
 function photoAppendix(p, days) {
   const shots = [];
   days.forEach((day, i) => entriesFor(p.id, day).forEach(e => (e.files || []).forEach(f => {
-    if (/^image\//.test(f.type || '')) shots.push({ f, e, day, n: i + 1 });
+    if (/^image\//.test(f.type || '') && f.url) shots.push({ f, e, day, n: i + 1 });
   })));
   return photoGrid(shots, { over: `over ${days.length} day${days.length > 1 ? 's' : ''}` });
 }
@@ -3861,7 +3959,7 @@ function printDayReport(p, day) {
   const list = entriesFor(p.id, day);
   const issues = list.filter(e => e.kind === 'issue' || e.kind === 'delay');
   const shots = [];
-  list.forEach(e => (e.files || []).forEach(f => { if (/^image\//.test(f.type || '')) shots.push({ f, e, job: p }); }));
+  list.forEach(e => (e.files || []).forEach(f => { if (/^image\//.test(f.type || '') && f.url) shots.push({ f, e, job: p }); }));
   const who = Array.from(new Set(list.map(e => (e.author || '').trim()).filter(Boolean)));
   const sep = '<span class="sep">|</span>';
 
@@ -3911,7 +4009,7 @@ function printPersonDay(person, day) {
   const shots = [];
   items.forEach(it => {
     if (it.type !== 'entry') return;
-    (it.e.files || []).forEach(f => { if (/^image\//.test(f.type || '')) shots.push({ f, e: it.e, job: it.job }); });
+    (it.e.files || []).forEach(f => { if (/^image\//.test(f.type || '') && f.url) shots.push({ f, e: it.e, job: it.job }); });
   });
   const photo = personPhoto(person.name);
   const multi = jobs.length > 1 || person.own > 0;
@@ -4455,6 +4553,7 @@ function renderSetup(view) {
         <tr><th>Diary entries</th><td>${DB.diary_entries.length}</td></tr>
         <tr><th>Cost lines</th><td>${DB.job_costs.length}</td></tr>
         <tr><th>People with a photo</th><td>${DB.crew_people.filter(x => x.photo_url).length}</td></tr>
+        ${inlineCount() ? `<tr><th>Photos still to file</th><td>${inlineCount()} — sending to storage, a few at a time</td></tr>` : ''}
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
         <tr><th>Version</th><td>${VERSION}${
           updateReady ? ' — <strong>a newer one is installing, the app will pick it up on its own</strong>' : ''}</td></tr>
@@ -4653,6 +4752,7 @@ async function refresh() {
     await Store.pull();
     syncState = 'ok';
     if (keyDead) { keyDead = false; render(); }
+    healPhotos().catch(() => {});
   } catch (e) {
     syncState = 'bad';
     const dead = /\b401\b|invalid api key|jwt/i.test(e.message || '');
