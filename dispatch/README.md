@@ -260,6 +260,12 @@ Workshop in the same repository and GitHub Pages serves it from
   anything you'd mind an RCK phone seeing into the app, and don't publish the link.
 - **Practice mode** in Settings lets someone try the whole app without touching the
   shared data. Nothing entered in practice mode is visible to anyone else.
+- **Photos taken with no signal catch up on their own.** A photo taken on site with no
+  signal is kept inside its diary entry until it can go anywhere, so nothing is lost. Once any
+  phone is back on signal it sends those photos to file storage, a few at a time, and points
+  the entry at them; Settings shows **Photos still to file** while that is going on. Until
+  it is done a phone with a lot of them may not be able to hold the whole diary — it keeps
+  everything but those photos, which read "photos on the server" until the next refresh.
 - **Two ways to get rid of a job, and they are not the same.** **Archive** takes it off the
   board and out of the profit and loss while keeping every record — that is the one for a job
   that was cancelled, and it can be undone. **Delete** destroys the job with its diary, its
