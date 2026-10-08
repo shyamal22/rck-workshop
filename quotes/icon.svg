@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RCK Quotes">
+  <rect width="512" height="512" rx="112" fill="#14171a"/>
+  <rect x="118" y="150" width="276" height="64" rx="26" fill="#3f464e"/>
+  <rect x="118" y="254" width="200" height="64" rx="26" fill="#3f464e"/>
+  <rect x="118" y="358" width="140" height="64" rx="26" fill="#0a84ff"/>
+</svg>

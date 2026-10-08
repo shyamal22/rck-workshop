@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="robots" content="noindex, nofollow">
+<title>RCK Quotes</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css?v=1.2.0">
+</head>
+<body>
+
+<header id="topbar">
+  <button id="backBtn" class="nav-btn back" hidden aria-label="Back">
+    <svg viewBox="0 0 24 24"><path d="M14.5 19l-7-7 7-7"/></svg><span id="backLabel">Back</span>
+  </button>
+  <button id="gearBtn" class="nav-btn icon" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.2a7.6 7.6 0 0 0 0-2.4l2-1.5-2-3.4-2.3.9a7.6 7.6 0 0 0-2.1-1.2L14.6 3h-4l-.4 2.6a7.6 7.6 0 0 0-2.1 1.2l-2.3-.9-2 3.4 2 1.5a7.6 7.6 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7.6 7.6 0 0 0 2.1 1.2l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 2.1-1.2l2.3.9 2-3.4z"/></svg>
+  </button>
+  <div id="navTitle" class="nav-title"></div>
+  <button id="addBtn" class="nav-btn icon accent" hidden aria-label="New quote">
+    <svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+  </button>
+</header>
+
+<main id="view"></main>
+
+<div id="printArea" aria-hidden="true"></div>
+<div id="toast" hidden></div>
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<!-- The ?v= must be bumped with VERSION in app.js. It is what makes a
+     deploy reach a phone: these URLs have never been cached before, so
+     no stale copy of the app can be served in their place. -->
+<script src="config.js?v=1.2.0"></script>
+<script src="app.js?v=1.2.0"></script>
+</body>
+</html>

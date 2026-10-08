@@ -1,0 +1,609 @@
+/* =====================================================================
+   RCK Quotes — the styling.
+
+   The screen side is drawn in Apple's design language, because the app
+   lives on an iPhone home screen and should feel native to it: the system
+   type stack, grouped inset cards on the system grouped background, iOS
+   system colours, hairline separators, a large title that shrinks into
+   the bar as the page scrolls, and light/dark decided by the phone.
+
+   The printed quote at the bottom of this file is deliberately NOT iOS:
+   it is the RCK letterhead, shared with the costing sheets, so every
+   piece of paper the company sends reads as one company.
+   ===================================================================== */
+
+:root {
+  /* iOS system palette — light. */
+  --bg:      #f2f2f7;                    /* systemGroupedBackground */
+  --card:    #ffffff;                    /* secondarySystemGroupedBackground */
+  --ink:     #000000;                    /* label */
+  --ink-2:   rgba(60,60,67,.62);         /* secondaryLabel */
+  --ink-3:   rgba(60,60,67,.32);         /* tertiaryLabel */
+  --sep:     rgba(60,60,67,.29);         /* separator */
+  --fill:    rgba(120,120,128,.12);      /* quaternary fill — inputs, tracks */
+  --fill-2:  rgba(120,120,128,.20);
+  --accent:  #007aff;                    /* systemBlue */
+  --green:   #34c759;
+  --red:     #ff3b30;
+  --orange:  #ff9500;
+  --grey:    #8e8e93;
+  --bar-dim: #aeaeb2;                    /* the de-emphasis bar in the chart */
+  --tint-blue:   rgba(0,122,255,.13);
+  --tint-green:  rgba(52,199,89,.15);
+  --tint-red:    rgba(255,59,48,.13);
+  --tint-orange: rgba(255,149,0,.16);
+  --tint-grey:   rgba(120,120,128,.14);
+  --pos:     #248a3d;                    /* money made — darker for text */
+  --neg:     #d70015;                    /* money lost */
+  --bar-bg:  rgba(242,242,247,.82);
+  --shadow:  0 1px 1px rgba(0,0,0,.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:      #000000;
+    --card:    #1c1c1e;
+    --ink:     #ffffff;
+    --ink-2:   rgba(235,235,245,.62);
+    --ink-3:   rgba(235,235,245,.32);
+    --sep:     rgba(84,84,88,.62);
+    --fill:    rgba(120,120,128,.20);
+    --fill-2:  rgba(120,120,128,.30);
+    --accent:  #0a84ff;
+    --green:   #30d158;
+    --red:     #ff453a;
+    --orange:  #ff9f0a;
+    --grey:    #98989f;
+    --bar-dim: #636366;
+    --tint-blue:   rgba(10,132,255,.22);
+    --tint-green:  rgba(48,209,88,.22);
+    --tint-red:    rgba(255,69,58,.22);
+    --tint-orange: rgba(255,159,10,.24);
+    --tint-grey:   rgba(120,120,128,.26);
+    --pos:     #30d158;
+    --neg:     #ff453a;
+    --bar-bg:  rgba(0,0,0,.78);
+    --shadow:  none;
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* Our own display rules would otherwise beat the browser's [hidden]. */
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+  overscroll-behavior-y: none;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* ------------------------------------------------------------ top bar */
+/* Transparent over the page; gains its blur and hairline only once
+   content has scrolled behind it, exactly as a UINavigationBar does. */
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+  display: flex; align-items: center;
+  height: calc(50px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 6px 0;
+  background: transparent;
+}
+#topbar.scrolled {
+  background: var(--bar-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: 0 .5px 0 var(--sep);
+}
+.nav-title {
+  position: absolute; left: 25%; right: 25%;
+  text-align: center; font-weight: 600; font-size: 17px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transition: opacity .18s;
+  pointer-events: none;
+  top: calc(env(safe-area-inset-top) + 13px);
+}
+#topbar.scrolled .nav-title, #topbar.subpage .nav-title { opacity: 1; }
+
+.nav-btn {
+  border: 0; background: none; color: var(--accent);
+  display: flex; align-items: center; gap: 2px;
+  min-height: 44px; padding: 0 10px; cursor: pointer;
+  font-size: 17px;
+}
+.nav-btn svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nav-btn.back { margin-right: auto; padding-left: 4px; }
+.nav-btn.back svg { width: 26px; height: 26px; stroke-width: 2.4; margin-right: -3px; }
+.nav-btn.icon { margin-left: auto; }
+#gearBtn { margin-left: 0; margin-right: auto; }
+#backBtn:not([hidden]) ~ #gearBtn { display: none; }
+.nav-btn:active { opacity: .4; }
+
+/* ------------------------------------------------------------- layout */
+#view {
+  max-width: 640px; margin: 0 auto;
+  padding: calc(58px + env(safe-area-inset-top)) 16px 12px;
+}
+
+/* The large title, in the content so it scrolls away under the bar. */
+.large-title {
+  font-size: 34px; font-weight: 700; letter-spacing: .01em;
+  margin: 0 4px 2px; line-height: 1.15;
+}
+.page-sub { margin: 0 4px 14px; color: var(--ink-2); font-size: 15px; }
+
+h2.sect {
+  font-size: 13px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--ink-2);
+  margin: 24px 16px 7px;
+}
+h2.sect:first-of-type { margin-top: 18px; }
+h2.sect .count { color: var(--ink-3); font-weight: 500; }
+
+/* -------------------------------------------------------- inset cards */
+.card {
+  background: var(--card); border-radius: 14px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px; overflow: hidden;
+}
+.card.pad { padding: 14px 16px; }
+
+/* Rows inside a card — iOS grouped-list rows with inset hairlines. */
+.row-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px; min-height: 44px;
+  position: relative; text-decoration: none; color: inherit;
+  background: none; border: 0; width: 100%; text-align: left; cursor: pointer;
+}
+.row-item + .row-item::before,
+.row-item + .row-plain::before, .row-plain + .row-item::before,
+.row-plain + .row-plain::before {
+  content: ""; position: absolute; left: 16px; right: 0; top: 0;
+  height: .5px; background: var(--sep);
+}
+.row-item:active { background: var(--fill); }
+.row-plain { position: relative; padding: 11px 16px; }
+
+.chev { margin-left: auto; flex: none; color: var(--ink-3); width: 8px; height: 14px; }
+.chev svg { width: 8px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+.r-main { min-width: 0; flex: 1; }
+.r-title { font-weight: 590; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-sub { color: var(--ink-2); font-size: 14px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-flag { font-size: 13px; margin-top: 2px; font-weight: 570; }
+.r-flag.orange { color: var(--orange); }
+.r-flag.red { color: var(--neg); }
+.r-flag.blue { color: var(--accent); }
+.r-flag.green { color: var(--pos); }
+.r-side { text-align: right; flex: none; }
+.r-money { font-weight: 590; font-variant-numeric: tabular-nums; font-size: 16px; }
+.r-side .pill { margin-top: 3px; }
+
+/* --------------------------------------------------------------- pills */
+.pill {
+  display: inline-flex; align-items: center;
+  font-size: 12px; font-weight: 640; letter-spacing: .02em;
+  padding: 2.5px 8px; border-radius: 100px;
+}
+.pill.grey   { background: var(--tint-grey);   color: var(--grey); }
+.pill.blue   { background: var(--tint-blue);   color: var(--accent); }
+.pill.green  { background: var(--tint-green);  color: var(--pos); }
+.pill.red    { background: var(--tint-red);    color: var(--neg); }
+.pill.orange { background: var(--tint-orange); color: var(--orange); }
+
+/* ----------------------------------------------------------- stat tiles */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
+.tile {
+  background: var(--card); border-radius: 14px; padding: 12px 14px 11px;
+  box-shadow: var(--shadow);
+  border: 0; text-align: left; font: inherit; color: inherit; cursor: default;
+}
+button.tile { cursor: pointer; transition: transform .12s ease; }
+button.tile:active { transform: scale(.97); }
+.tile .t-label { font-size: 13px; font-weight: 570; color: var(--ink-2); }
+.tile .t-value {
+  font-size: 26px; font-weight: 700; letter-spacing: -.01em;
+  margin-top: 2px; line-height: 1.1; white-space: nowrap;
+}
+.tile .t-value.pos { color: var(--pos); }
+.tile .t-value.neg { color: var(--neg); }
+.tile .t-sub { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+
+/* ------------------------------------------------------ segmented control */
+.seg {
+  display: flex; background: var(--fill); border-radius: 9px;
+  padding: 2px; margin: 2px 0 12px;
+}
+.seg button {
+  flex: 1; border: 0; background: none; border-radius: 7px;
+  padding: 5px 0 6px; font-size: 13px; font-weight: 570;
+  color: var(--ink); cursor: pointer; white-space: nowrap;
+}
+.seg button.on {
+  background: var(--card);
+  box-shadow: 0 1px 4px rgba(0,0,0,.12), 0 0 1px rgba(0,0,0,.08);
+  font-weight: 640;
+}
+
+/* --------------------------------------------------------------- search */
+.searchwrap { position: relative; margin-bottom: 12px; }
+.searchwrap svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; fill: none; stroke: var(--ink-2); stroke-width: 2;
+  stroke-linecap: round; pointer-events: none;
+}
+input[type="search"] {
+  width: 100%; border: 0; background: var(--fill);
+  border-radius: 10px; padding: 8px 12px 8px 32px;
+  font-size: 17px; -webkit-appearance: none; appearance: none; outline: none;
+}
+input[type="search"]::placeholder { color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- forms */
+/* A form is a grouped card of rows: label over value, hairlines between. */
+.form { background: var(--card); border-radius: 14px; margin-bottom: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.field { display: block; padding: 9px 16px 10px; position: relative; }
+.field + .field::before, .field + .frow::before, .frow + .field::before {
+  content: ""; position: absolute; left: 16px; right: 0; top: 0; height: .5px; background: var(--sep);
+}
+.field > span {
+  display: block; font-size: 12.5px; font-weight: 570;
+  color: var(--ink-2); margin-bottom: 1px;
+}
+.field input[type="text"], .field input[type="date"], .field input[type="number"],
+.field input[type="email"], .field select, .field textarea {
+  width: 100%; border: 0; background: none; padding: 2px 0 1px;
+  font-size: 17px; outline: none; -webkit-appearance: none; appearance: none;
+  border-radius: 0;
+}
+.field input[type="date"] { min-height: 28px; }
+.field textarea { resize: vertical; min-height: 64px; line-height: 1.4; }
+.field select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16'><path d='M2 6.2 6 2.4l4 3.8M2 9.8l4 3.8 4-3.8' fill='none' stroke='%238e8e93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 2px center;
+  padding-right: 22px;
+}
+.frow { display: flex; position: relative; }
+.frow .field { flex: 1; }
+.frow .field + .field::before { left: 0; top: 10px; bottom: 10px; height: auto; width: .5px; }
+
+/* Money boxes keep their $ so a rate can't be read as a quantity. */
+.moneybox { display: flex; align-items: baseline; gap: 4px; }
+.moneybox em { font-style: normal; color: var(--ink-2); font-size: 17px; }
+.moneybox input { flex: 1; }
+
+.hintline { padding: 8px 16px 10px; font-size: 13px; color: var(--ink-2); position: relative; }
+.hintline::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: .5px; background: var(--sep); }
+
+/* -------------------------------------------------------------- buttons */
+.btn {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; border: 0; cursor: pointer; text-decoration: none;
+  background: var(--card); color: var(--accent);
+  font-size: 17px; font-weight: 590;
+  min-height: 50px; border-radius: 14px; margin-bottom: 12px;
+  box-shadow: var(--shadow);
+  transition: transform .12s ease, opacity .12s ease;
+}
+.btn:active { transform: scale(.98); opacity: .75; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.green { background: var(--green); color: #fff; }
+.btn.tinted { background: var(--tint-blue); }
+.btn.danger { color: var(--red); }
+.btn.small { min-height: 40px; font-size: 15px; border-radius: 11px; width: auto; padding: 0 16px; display: inline-flex; }
+.btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn-pair { display: flex; gap: 12px; }
+.btn-pair .btn { flex: 1; }
+
+.linkline {
+  display: block; text-align: center; color: var(--accent);
+  font-size: 15px; text-decoration: none; padding: 4px 0 14px;
+  background: none; border: 0; width: 100%; cursor: pointer;
+}
+.linkline.red { color: var(--red); }
+
+/* -------------------------------------------------------- money summary */
+.hero { padding: 16px; text-align: center; }
+.hero .h-label { font-size: 13px; font-weight: 570; color: var(--ink-2); }
+.hero .h-value { font-size: 40px; font-weight: 700; letter-spacing: -.02em; line-height: 1.05; margin-top: 2px; }
+.hero .h-gst { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+.hero .pill { margin-bottom: 10px; }
+
+.split3 { display: flex; position: relative; text-align: center; }
+.split3::before { content: ""; position: absolute; left: 16px; right: 16px; top: 0; height: .5px; background: var(--sep); }
+.split3 > div { flex: 1; padding: 10px 4px 13px; }
+.split3 .s-l { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+.split3 .s-v { font-size: 17px; font-weight: 640; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.split3 .s-v.pos { color: var(--pos); }
+.split3 .s-v.neg { color: var(--neg); }
+.internal-note { font-size: 11.5px; color: var(--ink-3); text-align: center; padding: 0 16px 10px; }
+
+/* ------------------------------------------------------------ key/value */
+.kv { padding: 4px 0; }
+.kv > div { display: flex; padding: 8px 16px; position: relative; gap: 16px; }
+.kv > div + div::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: .5px; background: var(--sep); }
+.kv .k { color: var(--ink-2); font-size: 15px; flex: none; width: 108px; }
+.kv .v { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------ line lists */
+.moneyrows { padding: 2px 0; }
+.moneyrows > div { display: flex; align-items: baseline; gap: 12px; padding: 8.5px 16px; position: relative; }
+.moneyrows > div + div::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: .5px; background: var(--sep); }
+.moneyrows .m-l { flex: 1; min-width: 0; font-size: 15.5px; }
+.moneyrows .m-d { font-size: 13px; color: var(--ink-2); }
+.moneyrows .m-v { font-variant-numeric: tabular-nums; font-weight: 570; font-size: 15.5px; white-space: nowrap; }
+.moneyrows .tot { font-weight: 700; }
+.moneyrows .tot .m-l, .moneyrows .tot .m-v { font-weight: 700; }
+.moneyrows .muted-v { color: var(--ink-3); }
+
+/* Hide the desktop spinner arrows — every number box here is money or a
+   quantity typed with the keypad, and the arrows only add clutter. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* ----------------------------------------------------- allowance editor */
+/* One line per allowance: the name and the figure, both editable in
+   place, and a × to take the line off this quote. Nothing opens a
+   dialog; nothing needs a second screen. */
+.al-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 8px 16px; position: relative; min-height: 48px;
+}
+.al-row + .al-row::before {
+  content: ""; position: absolute; left: 16px; right: 0; top: 0;
+  height: .5px; background: var(--sep);
+}
+.al-name {
+  flex: 1; min-width: 0; border: 0; background: none;
+  font-size: 16px; outline: none; padding: 6px 0;
+}
+.al-name::placeholder { color: var(--ink-3); }
+.al-amt { display: flex; align-items: baseline; gap: 3px; width: 122px; flex: none; }
+.al-amt em { font-style: normal; color: var(--ink-2); font-size: 15px; }
+.al-amt input {
+  width: 100%; border: 0; background: none; font-size: 16px;
+  text-align: right; outline: none; padding: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.xbtn {
+  border: 0; background: var(--fill); color: var(--ink-2); border-radius: 100px;
+  width: 26px; height: 26px; flex: none; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+}
+.xbtn svg { width: 11px; height: 11px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; }
+
+/* The lines waiting to be added, as one-tap chips. */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 2px 16px; }
+.chips .chiplabel { font-size: 13px; color: var(--ink-2); align-self: center; }
+.chip {
+  border: 0; background: var(--fill); color: var(--accent);
+  font-size: 14px; font-weight: 570; padding: 7px 13px;
+  border-radius: 100px; cursor: pointer;
+}
+.chip:active { opacity: .55; }
+.chip.new { color: var(--ink-2); }
+
+/* ---------------------------------------------------------- item editor */
+.item-card { position: relative; padding: 10px 16px 12px; }
+.item-card + .item-card::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: .5px; background: var(--sep); }
+.item-card .i-top { display: flex; gap: 8px; align-items: center; }
+.item-card .i-top input { flex: 1; border: 0; background: none; font-size: 17px; outline: none; padding: 4px 0; }
+.item-card .i-x {
+  border: 0; background: var(--fill); color: var(--ink-2); border-radius: 100px;
+  width: 24px; height: 24px; flex: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.item-card .i-x svg { width: 11px; height: 11px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; }
+.item-card .i-grid { display: flex; gap: 10px; margin-top: 6px; align-items: baseline; }
+.item-card .i-grid label { flex: 1; }
+.item-card .i-grid label span { display: block; font-size: 11px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
+.item-card .i-grid input, .item-card .i-grid select {
+  width: 100%; border: 0; border-bottom: 1px solid var(--sep); background: none;
+  padding: 3px 0; font-size: 16px; outline: none; border-radius: 0;
+  -webkit-appearance: none; appearance: none;
+}
+.item-card .i-amt { text-align: right; font-variant-numeric: tabular-nums; font-weight: 640; font-size: 15px; margin-top: 8px; color: var(--ink-2); }
+.item-card .i-amt b { color: var(--ink); }
+
+/* ---------------------------------------------------------------- chart */
+.chartcard { padding: 14px 16px 10px; }
+.chartcard .c-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.chartcard .c-title { font-size: 15px; font-weight: 640; }
+.chartcard .legend { margin-left: auto; display: flex; gap: 12px; font-size: 12px; color: var(--ink-2); }
+.chartcard .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 4px; }
+.chartcard svg { display: block; width: 100%; height: auto; }
+.chartcard .c-readout { font-size: 12.5px; color: var(--ink-2); text-align: center; min-height: 17px; margin-top: 4px; }
+.chartcard .bar-hit { cursor: pointer; }
+
+/* ---------------------------------------------------------------- toast */
+#toast {
+  position: fixed; left: 50%; bottom: calc(34px + env(safe-area-inset-bottom));
+  transform: translateX(-50%); z-index: 60;
+  background: rgba(28,28,30,.94); color: #fff;
+  font-size: 15px; font-weight: 570;
+  padding: 11px 20px; border-radius: 100px; max-width: 86vw; text-align: center;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25);
+}
+@media (prefers-color-scheme: dark) {
+  #toast { background: rgba(242,242,247,.96); color: #000; }
+}
+
+/* -------------------------------------------------------------- welcome */
+.welcome { text-align: center; padding-top: 8vh; }
+.welcome .w-icon { width: 84px; height: 84px; border-radius: 19px; margin: 0 auto 18px; display: block; }
+.welcome h1 { font-size: 28px; margin: 0 0 6px; }
+.welcome p { color: var(--ink-2); margin: 0 auto 22px; max-width: 30em; font-size: 15px; }
+.welcome .form { text-align: left; }
+
+/* -------------------------------------------------------------- oddments */
+.muted { color: var(--ink-2); }
+.tiny { font-size: 12.5px; }
+.small { font-size: 14px; }
+.center { text-align: center; }
+.mt { margin-top: 12px; }
+.mb0 { margin-bottom: 0; }
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+.empty {
+  text-align: center; color: var(--ink-2); font-size: 15px;
+  padding: 36px 24px; line-height: 1.5;
+}
+.empty b { display: block; font-size: 17px; color: var(--ink); margin-bottom: 4px; }
+
+.aboutver { text-align: center; color: var(--ink-3); font-size: 12.5px; padding: 8px 0 20px; }
+
+/* =====================================================================
+   The printed quote — RCK letterhead, shared with the costing sheets.
+   A4, and meant to come off the printer as one page.
+   ===================================================================== */
+#printArea { display: none; }
+
+@page { margin: 11mm 13mm 11mm; }
+
+@media print {
+  body { background: #fff; padding: 0; }
+  #topbar, #view, #toast { display: none !important; }
+  #printArea { display: block !important; }
+}
+
+.doc {
+  --d-ink:    #1b1e22;   /* asphalt — headings and body */
+  --d-ink-2:  #4c525a;   /* secondary text */
+  --d-ink-3:  #858c95;   /* labels, captions */
+  --d-accent: #c8971b;   /* safety yellow, deepened so it prints true */
+  --d-line:   #d9d5cd;   /* warm rule — never black */
+  --d-green:  #2f6b46;
+  --d-red:    #9e3226;
+}
+
+#printArea, .doc {
+  color: var(--d-ink, #1b1e22);
+  font-size: 9.5pt;
+  line-height: 1.34;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The sheet is a table so the brand bar in its thead repeats on every
+   printed page — the only reliable way a browser will do that. */
+.doc .sheet { width: 100%; border-collapse: collapse; border: 0; }
+.doc .sheet > thead > tr > td,
+.doc .sheet > tbody > tr > td { border: 0; padding: 0; }
+
+.doc .brandbar {
+  display: flex; align-items: baseline; gap: 3mm;
+  border-bottom: .7pt solid var(--d-line);
+  padding-bottom: 1.4mm; margin-bottom: 4mm;
+  font-size: 7.5pt; color: var(--d-ink-3);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.doc .brandbar b { color: var(--d-ink); font-weight: 700; letter-spacing: .1em; }
+.doc .brandbar .right { margin-left: auto; text-transform: none; letter-spacing: .02em; }
+
+.doc .doc-head { margin-bottom: 2.5mm; }
+.doc .doc-head .top { display: flex; align-items: flex-start; gap: 4mm; }
+.doc .doc-head .mark { width: 9mm; height: 9mm; flex: none; }
+.doc .doc-head .org { font-size: 12.5pt; font-weight: 700; letter-spacing: .01em; line-height: 1.05; }
+.doc .doc-head .trade {
+  font-size: 7.5pt; color: var(--d-ink-2); letter-spacing: .13em;
+  text-transform: uppercase; margin-top: .6mm;
+}
+.doc .doc-head .contact { font-size: 7.5pt; color: var(--d-ink-3); margin-top: .9mm; }
+.doc .doc-head .meta { margin-left: auto; text-align: right; }
+.doc .doc-head .kind {
+  font-size: 8.5pt; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--d-accent); font-weight: 700;
+}
+.doc h1 { font-size: 13.5pt; font-weight: 700; letter-spacing: -.012em; margin: 2mm 0 0; line-height: 1.1; }
+.doc .doc-head .sub { font-size: 9pt; color: var(--d-ink-2); margin-top: .8mm; }
+.doc .doc-head .when { font-size: 7.5pt; color: var(--d-ink-3); margin-top: .7mm; }
+.doc .doc-head .rule { height: 1.1mm; background: var(--d-accent); margin-top: 2mm; border-radius: .55mm; }
+
+.doc h2 {
+  font-size: 9pt; font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--d-ink-3);
+  margin: 3mm 0 1.2mm; padding-bottom: .9mm; line-height: 1.05;
+  border-bottom: .7pt solid var(--d-line);
+  break-after: avoid; page-break-after: avoid;
+}
+
+.doc table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 2mm; }
+.doc th, .doc td {
+  border: 0; border-bottom: .6pt solid var(--d-line);
+  padding: .9mm 2.4mm .9mm 0; text-align: left; vertical-align: top;
+}
+.doc th {
+  background: none; color: var(--d-ink-3);
+  font-size: 7.5pt; text-transform: uppercase; letter-spacing: .09em; font-weight: 700;
+  border-bottom: .7pt solid var(--d-ink-3); padding-bottom: 1.2mm;
+}
+.doc thead { display: table-header-group; }
+.doc table:not(.sheet) tbody tr { break-inside: avoid; page-break-inside: avoid; }
+.doc td.r, .doc th.r { text-align: right; }
+.doc tr.tot td { border-top: .7pt solid var(--d-ink-3); border-bottom: 0; font-weight: 700; }
+.doc .sub { font-size: 7.5pt; color: var(--d-ink-3); font-weight: 400; }
+
+.doc .pos { color: var(--d-green); font-weight: 650; }
+.doc .neg { color: var(--d-red); font-weight: 650; }
+.doc .band .n.pos { color: var(--d-green); }
+.doc .band .n.neg { color: var(--d-red); }
+
+.doc .entry {
+  display: flex; gap: 4mm; align-items: flex-start;
+  padding: 1.6mm 0; border-bottom: .5pt solid var(--d-line);
+  break-inside: avoid; page-break-inside: avoid;
+}
+.doc .entry:last-child { border-bottom: 0; }
+.doc .entry .e-body { flex: 1; min-width: 0; }
+.doc .entry .e-note { font-size: 9pt; white-space: pre-wrap; }
+.doc .entry .e-who { font-size: 8pt; color: var(--d-ink-3); margin-top: 1mm; }
+
+.doc .kv { width: 100%; padding: 0; }
+.doc .kv td { border: 0; padding: .8mm 0; }
+.doc .kv.two td { width: auto; padding-right: 3mm; }
+.doc .kv.two td:nth-child(1), .doc .kv.two td:nth-child(3) {
+  width: 30mm; color: var(--d-ink-3); font-size: 8pt;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.doc .kv.two td:nth-child(2), .doc .kv.two td:nth-child(4) { width: 62mm; }
+
+/* The money band: subtotal, GST, and the figure the client says yes to. */
+.doc .band {
+  display: flex; margin: 4mm 0 2mm;
+  border: .8pt solid var(--d-line); border-radius: 1.4mm;
+  overflow: hidden; break-inside: avoid; page-break-inside: avoid;
+}
+.doc .band > div { flex: 1; padding: 2.6mm 3.2mm; border-left: .6pt solid var(--d-line); }
+.doc .band > div:first-child { border-left: 0; }
+.doc .band .l {
+  font-size: 7pt; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .11em; color: var(--d-ink-3);
+}
+.doc .band .n {
+  font-size: 14pt; font-weight: 700; line-height: 1.05;
+  letter-spacing: -.025em; margin-top: 1.2mm; white-space: nowrap;
+}
+.doc .band .grand { background: #f6efdc; }
+.doc .band .grand .l { color: #7c5e13; }
+
+.doc .note { white-space: pre-wrap; font-size: 9pt; color: var(--d-ink-2); margin: 1.5mm 0 0; }
+.doc .lede { font-size: 8pt; color: var(--d-ink-3); margin: 0 0 2mm; }
+.doc ul.terms { margin: 1mm 0 2mm; padding-left: 4.5mm; font-size: 8pt; color: var(--d-ink-2); }
+.doc ul.terms li { margin-bottom: .7mm; }
+
+/* Acceptance block — a line each for the name, the signature, the date
+   and the order number, so a printed yes can come straight back. */
+.doc .accept { display: flex; gap: 6mm; margin-top: 5mm; break-inside: avoid; page-break-inside: avoid; }
+.doc .accept > div { flex: 1; }
+.doc .accept .line { border-bottom: .7pt solid var(--d-ink-3); height: 8mm; }
+.doc .accept .cap {
+  font-size: 7pt; color: var(--d-ink-3); text-transform: uppercase;
+  letter-spacing: .09em; margin-top: 1mm;
+}
