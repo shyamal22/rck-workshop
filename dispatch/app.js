@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.8.0';
+const VERSION = '2.9.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -468,26 +468,85 @@ const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], c
 
 function cacheKey() { return 'rckd.cache.' + (S.localMode ? 'local' : 'remote'); }
 
-function loadCache() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(cacheKey()) || 'null');
-    if (raw) {
-      DB.projects = raw.projects || [];
-      DB.project_docs = raw.project_docs || [];
-      DB.diary_entries = raw.diary_entries || [];
-      DB.job_costs = raw.job_costs || [];
-      DB.crew_people = raw.crew_people || [];
-      DB.localSeq = raw.localSeq || 0;
+/* Where the phone's copy lives. localStorage gives a site a few megabytes
+   and throws the moment they are spent — and a night's photos taken with no
+   signal spend them. The queue of unsent work used to be written there, so
+   the write that was meant to keep a diary entry safe was the one that
+   failed, and the entry was gone at the next refresh. IndexedDB holds
+   hundreds of megabytes. Everything of size — the copy of the diary and the
+   queue — now goes there; localStorage keeps only the settings. A browser
+   with no IndexedDB (some private windows) falls back to the old place. */
+const KV = {
+  db: null,
+  ok: false,
+  open() {
+    return new Promise(resolve => {
+      try {
+        const req = indexedDB.open('rckd', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('kv');
+        req.onsuccess = () => { KV.db = req.result; KV.ok = true; resolve(true); };
+        req.onerror = () => resolve(false);
+        req.onblocked = () => resolve(false);
+      } catch (e) { resolve(false); }
+    });
+  },
+  run(mode, fn) {
+    return new Promise((resolve, reject) => {
+      if (!KV.db) return reject(new Error('no store'));
+      let tx;
+      try { tx = KV.db.transaction('kv', mode); } catch (e) { return reject(e); }
+      const req = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => resolve(req ? req.result : undefined);
+      tx.onerror = () => reject(tx.error || new Error('store'));
+      tx.onabort = () => reject(tx.error || new Error('store'));
+    });
+  },
+  get(key) { return KV.run('readonly', s => s.get(key)); },
+  set(key, value) { return KV.run('readwrite', s => s.put(value, key)); },
+  del(key) { return KV.run('readwrite', s => s.delete(key)); }
+};
+
+function takeCache(raw) {
+  DB.projects = raw.projects || [];
+  DB.project_docs = raw.project_docs || [];
+  DB.diary_entries = raw.diary_entries || [];
+  DB.job_costs = raw.job_costs || [];
+  DB.crew_people = raw.crew_people || [];
+  DB.localSeq = raw.localSeq || 0;
+}
+async function loadCache() {
+  let raw = null;
+  if (KV.ok) { try { raw = await KV.get(cacheKey()); } catch (e) {} }
+  if (!raw) {
+    // the old place, from a version before the move: read it, and move it
+    try { raw = JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) {}
+    if (raw && KV.ok) {
+      try { await KV.set(cacheKey(), raw); localStorage.removeItem(cacheKey()); } catch (e) {}
     }
-  } catch (e) {}
+  }
+  if (raw) takeCache(raw); else takeCache({});
 }
 let warnedFull = false;
+let cacheTimer = null;
 function saveCache() {
+  if (!KV.ok) return saveCacheLocal();
+  // Writes come in bursts (a pull touches five tables); one write a moment
+  // later carries them all. The copy is taken when the write starts.
+  if (cacheTimer) return;
+  cacheTimer = setTimeout(writeCache, 250);
+}
+function writeCache() {
+  cacheTimer = null;
+  if (!KV.ok) return saveCacheLocal();
+  KV.set(cacheKey(), DB)
+    .then(() => { try { localStorage.removeItem(cacheKey()); } catch (e) {} })
+    .catch(saveCacheLocal);
+}
+function saveCacheLocal() {
   try {
     localStorage.setItem(cacheKey(), JSON.stringify(DB));
   } catch (e) {
-    // A phone keeps a few megabytes for a site, and the diary no longer fits.
-    // Almost always that is photos still sitting inside their records (see
+    // No room. Almost always photos still sitting inside their records (see
     // healPhotos, which moves them on). Keep everything else, so the app
     // still opens with no signal; a photo left out reads "on the server"
     // until the next pull brings the record back whole.
@@ -757,10 +816,44 @@ async function healPhotos() {
 
 /* ------------- outbox: writes made with no signal, replayed later ---- */
 const Outbox = {
-  all() {
-    try { return JSON.parse(localStorage.getItem('rckd.outbox') || '[]'); } catch (e) { return []; }
+  list: [],
+
+  /* Read once at boot. Anything still in localStorage from an earlier
+     version is folded in and moved across. */
+  async load() {
+    let stored = null;
+    if (KV.ok) { try { stored = await KV.get('outbox'); } catch (e) {} }
+    let old = [];
+    try { old = JSON.parse(localStorage.getItem('rckd.outbox') || '[]'); } catch (e) {}
+    const have = new Set((stored || []).map(op => op.opId));
+    const merged = (stored || []).concat(old.filter(op => !have.has(op.opId)), Outbox.list.filter(op => !have.has(op.opId)));
+    Outbox.list = merged;
+    if (old.length) {
+      if (!KV.ok) return;
+      try { await KV.set('outbox', Outbox.list); localStorage.removeItem('rckd.outbox'); } catch (e) {}
+    }
   },
-  save(list) { localStorage.setItem('rckd.outbox', JSON.stringify(list)); },
+  all() { return Outbox.list.slice(); },
+  save(list) {
+    Outbox.list = list.slice();
+    if (KV.ok) KV.set('outbox', Outbox.list).catch(Outbox.saveLocal);
+    else Outbox.saveLocal();
+  },
+  /* The old place, for a browser with no IndexedDB. If it is full, the copy
+     of the diary is the thing to give up: it comes back from the server. */
+  saveLocal() {
+    try {
+      localStorage.setItem('rckd.outbox', JSON.stringify(Outbox.list));
+    } catch (e) {
+      try {
+        localStorage.removeItem(cacheKey());
+        localStorage.setItem('rckd.outbox', JSON.stringify(Outbox.list));
+      } catch (e2) {
+        if (!warnedFull) toast('This phone is out of room. Keep the app open and get signal so your work can send.');
+        warnedFull = true;
+      }
+    }
+  },
   add(op) {
     const list = Outbox.all();
     list.push(Object.assign({ opId: uid() }, op));
@@ -776,8 +869,10 @@ const Outbox = {
     try { return JSON.parse(localStorage.getItem('rckd.outbox.problem') || 'null'); } catch (e) { return null; }
   },
   setProblem(p) {
-    if (p) localStorage.setItem('rckd.outbox.problem', JSON.stringify(p));
-    else localStorage.removeItem('rckd.outbox.problem');
+    try {
+      if (p) localStorage.setItem('rckd.outbox.problem', JSON.stringify(p));
+      else localStorage.removeItem('rckd.outbox.problem');
+    } catch (e) {}
   },
 
   /* One queued write, sent as the database expects it. */
@@ -1510,7 +1605,7 @@ function renderJoin(view) {
     }
 
     Settings.write({ supabaseUrl: url.replace(/\/+$/, ''), supabaseKey: key, name, role, localMode: false });
-    loadCache();
+    await loadCache();
     await refresh();
     toast('Connected — you\'re all set');
     go('#/');
@@ -4557,6 +4652,7 @@ function renderSetup(view) {
         <tr><th>Waiting to send</th><td>${Outbox.count()}</td></tr>
         <tr><th>Version</th><td>${VERSION}${
           updateReady ? ' — <strong>a newer one is installing, the app will pick it up on its own</strong>' : ''}</td></tr>
+        <tr><th>Room on this phone</th><td id="spaceUsed">${KV.ok ? 'checking…' : 'small — this browser has no IndexedDB'}</td></tr>
       </table>
       <div class="btn-row mt">
         <button class="btn sm" id="refresh">Refresh now</button>
@@ -4614,7 +4710,7 @@ function renderSetup(view) {
       supabaseKey: $('#sKey', view).value.trim(),
       localMode: false
     });
-    loadCache();
+    await loadCache();
     await refresh();
     toast('Connected');
     go('#/');
@@ -4646,7 +4742,7 @@ function renderSetup(view) {
 
   $('#saveMode', view).onclick = async () => {
     Settings.write({ localMode: $('#sLocal', view).value === '1' });
-    loadCache();
+    await loadCache();
     await refresh();
     render();
   };
@@ -4683,6 +4779,14 @@ function renderSetup(view) {
   const b2 = $('#backupAll', view); if (b2) b2.onclick = downloadBackup;
 
   $('#refresh', view).onclick = async () => { await refresh(); toast('Up to date'); render(); };
+  if (KV.ok && navigator.storage && navigator.storage.estimate) {
+    navigator.storage.estimate().then(est => {
+      const el = $('#spaceUsed', view);
+      if (!el) return;
+      const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB';
+      el.textContent = est.quota ? `${mb(est.usage || 0)} used of ${mb(est.quota)} available` : 'plenty';
+    }).catch(() => {});
+  }
 
   /* The lever for when a phone is stuck on an old build: throw away the
      cached app shell, drop the worker holding it, and come back for a fresh
@@ -4705,7 +4809,7 @@ function renderSetup(view) {
     location.replace(location.pathname + '?fresh=' + Date.now() + location.hash);
   };
 
-  $('#clear', view).onclick = () => {
+  $('#clear', view).onclick = async () => {
     const waiting = Outbox.count();
     if (waiting) {
       // This is the one button that can destroy work. Make it take a backup first.
@@ -4719,6 +4823,8 @@ function renderSetup(view) {
     localStorage.removeItem(cacheKey());
     localStorage.removeItem('rckd.outbox');
     localStorage.removeItem('rckd.outbox.problem');
+    Outbox.list = [];
+    if (KV.ok) { try { await KV.del(cacheKey()); await KV.del('outbox'); } catch (e) {} }
     DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = []; DB.crew_people = [];
     refresh().then(render);
   };
@@ -4839,7 +4945,13 @@ function watchForUpdate(reg) {
 }
 
 (async function boot() {
-  loadCache();
+  await KV.open();
+  await Outbox.load();
+  await loadCache();
+  // Ask the browser not to throw the copy away when the phone gets tight.
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
+  // A write still waiting its moment goes now rather than never.
+  document.addEventListener('visibilitychange', () => { if (document.hidden && cacheTimer) { clearTimeout(cacheTimer); writeCache(); } });
   paintSync();
   render();
   await refresh();
