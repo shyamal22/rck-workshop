@@ -266,6 +266,12 @@ Workshop in the same repository and GitHub Pages serves it from
   the entry at them; Settings shows **Photos still to file** while that is going on. Until
   it is done a phone with a lot of them may not be able to hold the whole diary — it keeps
   everything but those photos, which read "photos on the server" until the next refresh.
+- **Supabase hands back a thousand rows at a time.** Whatever limit a request asks for, the
+  API answers with at most its *Max rows* setting (1,000 unless you change it) and says
+  nothing about the rest. The app reads the total off each answer and pages until it has
+  everything, so a diary of several thousand entries comes down whole. Before this, past a
+  thousand entries the oldest thousand came back and a fresh entry vanished at the next
+  refresh — written, shown, then gone.
 - **The phone's copy lives in IndexedDB.** A site gets a few megabytes of localStorage and
   the browser throws the moment they are spent; the queue of unsent work used to be kept
   there, so on a full phone the write meant to keep a diary entry safe was the one that

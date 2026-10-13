@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.9.0';
+const VERSION = '2.9.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -590,7 +590,7 @@ function restHeaders(extra) {
     Authorization: 'Bearer ' + S.supabaseKey
   }, extra || {});
 }
-async function rest(path, opts) {
+async function restRes(path, opts) {
   const base = S.supabaseUrl.replace(/\/+$/, '');
   const res = await fetch(`${base}/rest/v1/${path}`, opts);
   if (!res.ok) {
@@ -598,9 +598,41 @@ async function rest(path, opts) {
     try { detail = (await res.json()).message || ''; } catch (e) {}
     throw new Error(`${res.status} ${detail || res.statusText}`);
   }
+  return res;
+}
+async function rest(path, opts) {
+  const res = await restRes(path, opts);
   if (res.status === 204) return null;
   const text = await res.text();
   return text ? JSON.parse(text) : null;
+}
+
+/* Everything in a table. Supabase answers at most a thousand rows to one
+   request, whatever limit is asked for (its "Max rows" setting), and says
+   nothing about the rest. Past a thousand diary entries the oldest thousand
+   came back and the newest were missing, so an entry written a moment ago
+   was dropped at the next refresh: written, shown, then gone. So: pages,
+   with the total read off the answer, until everything is in. */
+const PAGE = 1000;
+async function restAll(table, order) {
+  const rows = [];
+  let total = null;
+  let firstId = null;
+  for (;;) {
+    const res = await restRes(`${table}?select=*&order=${order}&offset=${rows.length}&limit=${PAGE}`,
+      { headers: restHeaders({ Prefer: 'count=exact' }) });
+    const page = (await res.json()) || [];
+    const m = /\/(\d+)\s*$/.exec(res.headers.get('content-range') || '');
+    if (m) total = +m[1];
+    if (!page.length) break;                       // nothing more, whatever was said
+    if (page[0].id === firstId) break;             // the same page again: offset ignored
+    firstId = page[0].id;
+    rows.push(...page);
+    // Without a total, a short page proves nothing: the cap may be lower
+    // than a page. Keep asking until a page comes back empty.
+    if (total != null && rows.length >= total) break;
+  }
+  return rows;
 }
 
 /* ================================================================
@@ -639,14 +671,15 @@ function reconcile(table, fromServer) {
 const Store = {
   async pull() {
     if (!connected()) return;
+    // Each order ends on id so the pages cut cleanly between equal values.
     const [projects, docs, entries, costs, people] = await Promise.all([
-      rest('projects?select=*&order=number.desc&limit=3000', { headers: restHeaders() }),
-      rest('project_docs?select=*&order=uploaded_at.asc&limit=8000', { headers: restHeaders() }),
-      rest('diary_entries?select=*&order=at.asc&limit=20000', { headers: restHeaders() }),
-      rest('job_costs?select=*&order=sort.asc&limit=20000', { headers: restHeaders() }),
+      restAll('projects', 'number.desc,id.asc'),
+      restAll('project_docs', 'uploaded_at.asc,id.asc'),
+      restAll('diary_entries', 'at.asc,id.asc'),
+      restAll('job_costs', 'sort.asc,id.asc'),
       // A table the app can run without: an older database has no crew_people
       // yet, and a missing photo is not a reason to fail the whole refresh.
-      rest('crew_people?select=*&limit=2000', { headers: restHeaders() }).catch(() => null)
+      restAll('crew_people', 'name_key.asc,id.asc').catch(() => null)
     ]);
     DB.projects = reconcile('projects', projects || []);
     DB.project_docs = reconcile('project_docs', docs || []);
