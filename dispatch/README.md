@@ -266,6 +266,13 @@ Workshop in the same repository and GitHub Pages serves it from
   the entry at them; Settings shows **Photos still to file** while that is going on. Until
   it is done a phone with a lot of them may not be able to hold the whole diary — it keeps
   everything but those photos, which read "photos on the server" until the next refresh.
+- **The phone's copy lives in IndexedDB.** A site gets a few megabytes of localStorage and
+  the browser throws the moment they are spent; the queue of unsent work used to be kept
+  there, so on a full phone the write meant to keep a diary entry safe was the one that
+  failed, and the entry was gone at the next refresh. The copy of the diary and the queue
+  now go to IndexedDB, which holds hundreds of megabytes; localStorage keeps only the
+  settings. Settings shows **Room on this phone**. A browser with no IndexedDB (some private
+  windows) falls back to the old place, giving up the copy of the diary before the queue.
 - **Two ways to get rid of a job, and they are not the same.** **Archive** takes it off the
   board and out of the profit and loss while keeping every record — that is the one for a job
   that was cancelled, and it can be undone. **Delete** destroys the job with its diary, its
