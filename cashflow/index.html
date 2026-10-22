@@ -189,13 +189,13 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
       <div class="field"><label>Minimum available cash (warning line)</label><input class="money" data-k="settings.buffer" data-num inputmode="decimal"></div>
     </div>
     <div class="group">
-      <h4>Jax Hire Limited</h4>
+      <h4>Jack’s Hire Limited</h4>
       <div class="field"><label>Current account balance</label><input class="money" data-k="jhl.bank" data-num inputmode="decimal"></div>
       <div class="field"><label>Overdraft limit (0 if none)</label><input class="money" data-k="jhl.overdraft" data-num inputmode="decimal"></div>
       <p class="hint">Available cash = balance + overdraft limit</p>
     </div>
     <div class="group">
-      <h4>Jax Bobcats Limited</h4>
+      <h4>Jack’s Bobcats Limited</h4>
       <div class="field"><label>Current account balance</label><input class="money" data-k="jbl.bank" data-num inputmode="decimal"></div>
       <div class="field"><label>Asset finance facility limit</label><input class="money" data-k="jbl.limit" data-num inputmode="decimal"></div>
       <div class="field"><label>Amount drawn (currently owing)</label><input class="money" data-k="jbl.drawn" data-num inputmode="decimal"></div>
@@ -210,13 +210,13 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
       <button class="btn" id="addOut">+ Bill</button>
       <button class="btn" id="sortTx">Sort by date</button>
     </div>
-    <p class="hint" style="margin:0 0 8px">Use "Repeats" for wages, leases and loan repayments. A Jax Hire bill with the type "Equipment lease to Jax Bobcats" is also counted as Jax Bobcats income. A Jax Bobcats "Facility drawdown" uses up the facility.</p>
+    <p class="hint" style="margin:0 0 8px">Use "Repeats" for wages, leases and loan repayments. A Jack’s Hire bill with the type "Equipment lease to Jack’s Bobcats" is also counted as Jack’s Bobcats income. A Jack’s Bobcats "Facility drawdown" uses up the facility.</p>
     <div class="scroll"><table class="tx" id="txTable"></table></div>
   </div>
 
   <div class="fg" style="grid-template-columns:1fr 1fr">
     <div class="group">
-      <h4>Fleet (Jax Bobcats assets)</h4>
+      <h4>Fleet (Jack’s Bobcats assets)</h4>
       <div class="toolbar"><button class="btn" id="addAsset">+ Asset</button></div>
       <table class="tx" id="assetTable"></table>
     </div>
@@ -237,10 +237,10 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
 (() => {
 const KEY = 'rck-cashflow-v1';
 const IN_CATS = ['Accounts receivable (debtors)','Hire revenue (cash sales)','Intercompany lease income','Facility drawdown','GST refund','Other income'];
-const OUT_CATS = ['Wages & PAYE','Accounts payable (creditors)','Equipment lease to Jax Bobcats','Asset finance repayment','GST / IRD','Rent','Fuel & maintenance','Insurance','Other expense'];
-const LEASE = 'Equipment lease to Jax Bobcats', LEASE_IN = 'Intercompany lease income', DRAW = 'Facility drawdown';
+const OUT_CATS = ['Wages & PAYE','Accounts payable (creditors)','Equipment lease to Jack’s Bobcats','Asset finance repayment','GST / IRD','Rent','Fuel & maintenance','Insurance','Other expense'];
+const LEASE = 'Equipment lease to Jack’s Bobcats', LEASE_IN = 'Intercompany lease income', DRAW = 'Facility drawdown';
 const RECUR = {once:'One-off',weekly:'Weekly',fortnightly:'Fortnightly',monthly:'Monthly',quarterly:'Quarterly'};
-const ENT = {JHL:'Jax Hire', JBL:'Jax Bobcats', GRP:'Group'};
+const ENT = {JHL:'Jack’s Hire', JBL:'Jack’s Bobcats', GRP:'Group'};
 const COL = {JHL:'#007aff', JBL:'#ff9500', GRP:'#5856d6'};
 const METRICS = {avail:'Available cash', bank:'Bank balance', flow:'Cash in & out', fac:'Facility'};
 const FIN_ROWS = [['revenue','Revenue'],['cos','Cost of sales'],['opex','Operating expenses'],['curAssets','Current assets'],['totAssets','Total assets'],['curLiab','Current liabilities'],['totLiab','Total liabilities']];
@@ -249,6 +249,7 @@ const today = () => iso(new Date());
 const blank = () => ({ settings:{asOf:today(), weeks:13, buffer:0}, jhl:{bank:0, overdraft:0}, jbl:{bank:0, limit:0, drawn:0}, assets:[], fin:{period:'', JHL:{}, JBL:{}}, tx:[] });
 let S; try { S = JSON.parse(localStorage.getItem(KEY)) || blank(); } catch(e){ S = blank(); }
 S = Object.assign(blank(), S);
+(S.tx||[]).forEach(t=>{ if(t.category) t.category=t.category.replace('Jax ','Jack’s '); });
 let view = {ent:'JHL', metric:'avail'};
 try { Object.assign(view, JSON.parse(localStorage.getItem(KEY+'-ui'))||{}); } catch(e){}
 if(!ENT[view.ent]) view.ent='JHL'; if(!METRICS[view.metric]) view.metric='avail';
@@ -431,7 +432,7 @@ const CAPS = {
   avail:'Cash in the bank plus undrawn funding (overdraft or facility).',
   bank:'Projected bank balance from the bills and income entered.',
   flow:'Weekly cash coming in (green) and going out (red).',
-  fac:'Jax Bobcats asset finance: drawn vs still available.'
+  fac:'Jack’s Bobcats asset finance: drawn vs still available.'
 };
 function seg(id, opts, cur, on){ const el=document.getElementById(id);
   el.innerHTML=Object.entries(opts).map(([k,l])=>`<button class="${k===cur?'on':''}" data-k="${k}">${l}</button>`).join('');
@@ -440,7 +441,7 @@ function seg(id, opts, cur, on){ const el=document.getElementById(id);
 function render(){
   save();
   const F=forecast(), x=F.E[view.ent], buf=n(S.settings.buffer);
-  document.getElementById('sub').textContent=`Jax Hire Limited (RCK) · Jax Bobcats Limited · ${fmtDY(F.start)} · NZD`;
+  document.getElementById('sub').textContent=`Jack’s Hire Limited (RCK) · Jack’s Bobcats Limited · ${fmtDY(F.start)} · NZD`;
   seg('segEnt',ENT,view.ent,k=>{view.ent=k;saveView();render();});
   seg('segMetric',METRICS,view.metric,k=>{view.metric=k;saveView();render();});
 
@@ -459,7 +460,7 @@ function render(){
   else st=['good',`Healthy for the next ${F.W} weeks · lowest ${moneyC(x.min)}${x.minI>0?' on '+dayOf(x.minI):''}`];
   document.getElementById('status').innerHTML=`<span class="status ${st[0]}"><span class="d"></span>${esc(st[1])}</span>`;
 
-  document.getElementById('chartTitle').textContent = view.metric==='fac' ? 'Asset finance facility · Jax Bobcats' : `${METRICS[view.metric]} · ${ENT[view.ent]}`;
+  document.getElementById('chartTitle').textContent = view.metric==='fac' ? 'Asset finance facility · Jack’s Bobcats' : `${METRICS[view.metric]} · ${ENT[view.ent]}`;
   document.getElementById('chartCap').textContent=CAPS[view.metric];
   if(view.metric==='avail') lineChart(F,'avail'); else if(view.metric==='bank') lineChart(F,'bank'); else if(view.metric==='flow') flowChart(F); else facChart();
 
@@ -472,7 +473,7 @@ function render(){
   document.getElementById('tiles').innerHTML =
      tile('Lowest available', money(x.min), x.minI>0?'on '+fmtDY(addDays(F.start,x.minI-1)):'today', x.min<0||(buf&&x.min<buf))
     +tile(`In ${F.W} weeks`, money(endV), (endV-av>=0?'▲ ':'▼ ')+money(Math.abs(endV-av))+' vs today', endV<0)
-    +tile('Facility available', money(head), n(S.jbl.limit)?`${pct(n(S.jbl.drawn)/n(S.jbl.limit))} of ${moneyC(n(S.jbl.limit))} drawn`:'Jax Bobcats', head<0)
+    +tile('Facility available', money(head), n(S.jbl.limit)?`${pct(n(S.jbl.drawn)/n(S.jbl.limit))} of ${moneyC(n(S.jbl.limit))} drawn`:'Jack’s Bobcats', head<0)
     +tile('Net assets', naV===null?'–':money(naV), naV===null?'Add in Edit data':(view.ent==='GRP'?'Both companies':ENT[view.ent])+(fleet?` · fleet ${moneyC(fleet)}`:''), naV!==null&&naV<0);
 
   renderDetails(F);
@@ -492,7 +493,7 @@ function renderDetails(F){
   const R=g('revenue'),C=g('cos'),O=g('opex'),CA=g('curAssets'),TA=g('totAssets'),CL=g('curLiab'),TL=g('totLiab');
   const line=(l,fn,fmt=money,cls='')=>`<tr class="${cls}"><td>${l}</td>${['JHL','JBL','G'].map(k=>{const y=fn(k);return `<td class="${typeof y==='number'&&y<0?'neg':''}">${fmt(y)}</td>`;}).join('')}</tr>`;
   const ratio=y=>isFinite(y)&&y?y.toFixed(2)+'×':'–';
-  document.getElementById('tFin').innerHTML=`<thead><tr><th></th><th>Jax Hire</th><th>Jax Bobcats</th><th>Group*</th></tr></thead><tbody>
+  document.getElementById('tFin').innerHTML=`<thead><tr><th></th><th>Jack’s Hire</th><th>Jack’s Bobcats</th><th>Group*</th></tr></thead><tbody>
     ${line('Revenue',k=>v(R,k))}
     ${line('Net profit',k=>v(R,k)-v(C,k)-v(O,k),money,'strong')}
     ${line('Net margin',k=>v(R,k)?(v(R,k)-v(C,k)-v(O,k))/v(R,k):NaN,pct)}
@@ -542,7 +543,7 @@ function renderAssets(){
 }
 function renderFinForm(){
   const tb=document.getElementById('finTable'); S.fin.JHL=S.fin.JHL||{}; S.fin.JBL=S.fin.JBL||{};
-  tb.innerHTML=`<thead><tr><th></th><th>Jax Hire</th><th>Jax Bobcats</th></tr></thead><tbody>${FIN_ROWS.map(([k,l])=>`<tr><td style="font-size:13px;color:var(--text-2);white-space:nowrap">${l}</td>${['JHL','JBL'].map(e=>`<td><input class="money" data-e="${e}" data-f="${k}" value="${S.fin[e][k]?esc(S.fin[e][k]):''}" placeholder="0" inputmode="decimal"></td>`).join('')}</tr>`).join('')}</tbody>`;
+  tb.innerHTML=`<thead><tr><th></th><th>Jack’s Hire</th><th>Jack’s Bobcats</th></tr></thead><tbody>${FIN_ROWS.map(([k,l])=>`<tr><td style="font-size:13px;color:var(--text-2);white-space:nowrap">${l}</td>${['JHL','JBL'].map(e=>`<td><input class="money" data-e="${e}" data-f="${k}" value="${S.fin[e][k]?esc(S.fin[e][k]):''}" placeholder="0" inputmode="decimal"></td>`).join('')}</tr>`).join('')}</tbody>`;
   tb.querySelectorAll('input').forEach(el=>el.oninput=()=>{ S.fin[el.dataset.e][el.dataset.f]=el.value; soon(); });
 }
 function renderEdit(){ bindStatic(); renderTx(); renderAssets(); renderFinForm(); }
