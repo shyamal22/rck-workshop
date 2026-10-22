@@ -6,11 +6,11 @@
 <title>RCK Cash Position</title>
 <style>
 :root{
-  color-scheme: light;
-  --text:#1c1c1e; --text-2:#6e6e73; --muted:#a1a1a6; --line:rgba(60,60,67,.12);
-  --blue:#007aff; --orange:#ff9500; --indigo:#5856d6; --green:#34c759; --red:#ff3b30;
-  --glass:rgba(255,255,255,.58); --glass-strong:rgba(255,255,255,.78); --glass-border:rgba(255,255,255,.75);
-  --shadow:0 10px 40px rgba(30,40,80,.10), 0 1px 2px rgba(30,40,80,.06);
+  color-scheme: dark;
+  --text:#f3f5f2; --text-2:#a9b5ad; --muted:#7d8a82; --line:rgba(255,255,255,.08);
+  --green:#2fbf71; --green-deep:#0f5132; --gold:#d9b44a; --gold-soft:rgba(217,180,74,.16); --red:#ff6b5e;
+  --glass:rgba(255,255,255,.055); --glass-strong:rgba(255,255,255,.10); --glass-border:rgba(255,255,255,.10);
+  --shadow:0 18px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
 }
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -18,40 +18,45 @@ body{
   min-height:100vh;color:var(--text);
   font:15px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",system-ui,"Segoe UI",Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;
-  background:#eef1f7;
+  background:#0a120e;
   background-image:
-    radial-gradient(900px 600px at 8% -10%, rgba(0,122,255,.22), transparent 60%),
-    radial-gradient(800px 600px at 105% 10%, rgba(255,149,0,.18), transparent 60%),
-    radial-gradient(900px 700px at 50% 120%, rgba(88,86,214,.18), transparent 60%);
+    radial-gradient(900px 620px at 0% -10%, rgba(47,191,113,.22), transparent 60%),
+    radial-gradient(800px 600px at 105% 0%, rgba(217,180,74,.16), transparent 60%),
+    radial-gradient(1000px 700px at 50% 120%, rgba(15,81,50,.45), transparent 65%);
   background-attachment:fixed;
 }
 .num{font-variant-numeric:tabular-nums}
-.glass{background:var(--glass);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid var(--glass-border);box-shadow:var(--shadow);border-radius:28px}
+.glass{background:var(--glass);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:1px solid var(--glass-border);box-shadow:var(--shadow);border-radius:28px}
 .wrap{max-width:1080px;margin:0 auto;padding:22px 20px 60px}
 
 .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;letter-spacing:.5px;color:#0a120e;background:linear-gradient(145deg,#f0d27a,#c79b2c);box-shadow:0 4px 14px rgba(217,180,74,.35)}
 .bar h1{font-size:24px;font-weight:700;letter-spacing:-.5px;margin:0}
 .bar .sub{font-size:13px;color:var(--text-2)}
 .pills{display:flex;gap:8px;flex-wrap:wrap}
-.pill{font:inherit;font-size:14px;font-weight:600;border:1px solid var(--glass-border);background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:var(--text);padding:8px 16px;border-radius:999px;cursor:pointer;box-shadow:0 2px 10px rgba(30,40,80,.06)}
+.pill{font:inherit;font-size:14px;font-weight:600;border:1px solid var(--glass-border);background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:var(--text);padding:8px 16px;border-radius:999px;cursor:pointer}
 .pill:hover{background:var(--glass-strong)}
-.pill.blue{background:var(--blue);color:#fff;border-color:var(--blue)}
+.pill.gold{background:linear-gradient(145deg,#f0d27a,#c99d2e);color:#14100a;border-color:transparent;box-shadow:0 4px 14px rgba(217,180,74,.3)}
 
-.seg{display:inline-flex;background:rgba(118,118,128,.12);border-radius:12px;padding:3px;gap:2px;flex-wrap:wrap}
-.seg button{font:inherit;font-size:14px;font-weight:600;border:0;background:transparent;color:var(--text);padding:7px 16px;border-radius:9px;cursor:pointer;transition:background .2s, box-shadow .2s}
-.seg button.on{background:#fff;box-shadow:0 3px 8px rgba(0,0,0,.12),0 1px 1px rgba(0,0,0,.04)}
+.seg{display:inline-flex;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{font:inherit;font-size:14px;font-weight:600;border:0;background:transparent;color:var(--text-2);padding:7px 16px;border-radius:9px;cursor:pointer;transition:background .2s,color .2s}
+.seg button:hover{color:var(--text)}
+.seg button.on{background:rgba(255,255,255,.14);color:var(--text);box-shadow:0 3px 10px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.12)}
 
-.hero{padding:26px 30px 24px}
+.hero{padding:26px 30px 24px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;background:linear-gradient(120deg,rgba(47,191,113,.10),transparent 45%,rgba(217,180,74,.08));pointer-events:none}
+.hero > *{position:relative}
 .hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.eyebrow{font-size:15px;font-weight:600;color:var(--text-2)}
+.eyebrow{font-size:13px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:1.2px}
 .big{font-size:68px;font-weight:700;letter-spacing:-2.5px;line-height:1.05;margin:12px 0 6px}
 .big.neg{color:var(--red)}
 .hero .how{font-size:15px;color:var(--text-2)}
 .status{display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:8px 14px;border-radius:999px;font-size:14px;font-weight:600}
 .status .d{width:9px;height:9px;border-radius:50%}
-.status.good{background:rgba(52,199,89,.14);color:#1b7a35}.status.good .d{background:var(--green)}
-.status.warn{background:rgba(255,149,0,.16);color:#9a5b00}.status.warn .d{background:var(--orange)}
-.status.crit{background:rgba(255,59,48,.13);color:#b4231b}.status.crit .d{background:var(--red)}
+.status.good{background:rgba(47,191,113,.15);color:#6fe0a3}.status.good .d{background:var(--green);box-shadow:0 0 10px var(--green)}
+.status.warn{background:var(--gold-soft);color:#f0d27a}.status.warn .d{background:var(--gold);box-shadow:0 0 10px var(--gold)}
+.status.crit{background:rgba(255,107,94,.15);color:#ff9c92}.status.crit .d{background:var(--red);box-shadow:0 0 10px var(--red)}
 
 .chart-card{margin-top:16px;padding:20px 22px 14px}
 .chart-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
@@ -84,38 +89,42 @@ body.show-details #details{display:block}
 table{border-collapse:collapse;width:100%}
 .t td,.t th{padding:9px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-size:13.5px}
 .t th{font-size:12.5px;color:var(--text-2);font-weight:600}
-.t td:first-child,.t th:first-child{text-align:left;position:sticky;left:0;background:rgba(250,250,252,.95);z-index:1}
-.t tr.strong td{font-weight:650}
+.t td:first-child,.t th:first-child{text-align:left;position:sticky;left:0;background:#121d17;z-index:1}
+.t tr.strong td{font-weight:650;color:var(--gold)}
 .t tr:last-child td{border-bottom:0}
 .neg{color:var(--red)}
 .scroll{overflow-x:auto}
 
 #tip{position:fixed;pointer-events:none;z-index:60;display:none;padding:10px 14px;border-radius:16px;font-size:13px;min-width:150px;
-  background:rgba(255,255,255,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.9);box-shadow:0 8px 30px rgba(0,0,0,.14)}
+  background:rgba(22,32,27,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px rgba(0,0,0,.5)}
 #tip .t{font-size:12px;color:var(--text-2);font-weight:600}
 #tip .v{font-size:19px;font-weight:700;letter-spacing:-.3px}
 #tip .r{display:flex;justify-content:space-between;gap:14px;margin-top:2px}
 #tip .r span{color:var(--text-2)}
 
-#sheetBg{position:fixed;inset:0;background:rgba(0,0,0,.18);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:40;display:none}
+#sheetBg{position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:40;display:none}
 #sheet{position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);visibility:hidden;transition:transform .35s cubic-bezier(.2,.8,.2,1),visibility 0s .35s;width:min(1180px,100%);max-height:88vh;overflow:auto;z-index:50;
-  background:rgba(246,246,250,.9);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border-radius:28px 28px 0 0;box-shadow:0 -10px 50px rgba(0,0,0,.18);padding:10px 22px 30px}
+  background:rgba(16,24,20,.94);backdrop-filter:blur(40px) saturate(160%);-webkit-backdrop-filter:blur(40px) saturate(160%);border:1px solid rgba(255,255,255,.08);border-bottom:0;border-radius:28px 28px 0 0;box-shadow:0 -10px 60px rgba(0,0,0,.6);padding:10px 22px 30px}
 body.editing #sheet{transform:translate(-50%,0);visibility:visible;transition:transform .35s cubic-bezier(.2,.8,.2,1)} body.editing #sheetBg{display:block}
-.grab{width:40px;height:5px;border-radius:3px;background:rgba(60,60,67,.3);margin:4px auto 10px}
-.sheet-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:-10px;padding:8px 0 10px;background:rgba(246,246,250,.95);z-index:3}
+.grab{width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,.25);margin:4px auto 10px}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:-10px;padding:8px 0 10px;background:rgba(16,24,20,.97);z-index:3}
 .sheet-head h2{margin:0;font-size:20px;letter-spacing:-.3px}
-.group{background:#fff;border-radius:18px;padding:14px 16px;margin-top:14px}
-.group h4{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-2);font-weight:600}
+.group{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:14px 16px;margin-top:14px}
+.group h4{margin:0 0 10px;font-size:12.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--gold);font-weight:700}
 .fg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
 .field label{font-size:12.5px;color:var(--text-2)}
-input,select{font:inherit;font-size:14px;padding:8px 10px;border:1px solid rgba(60,60,67,.16);border-radius:10px;background:#fff;color:var(--text);width:100%;min-width:0}
-input:focus,select:focus{outline:3px solid rgba(0,122,255,.25);border-color:var(--blue)}
-input.money{text-align:right;font-variant-numeric:tabular-nums}
+input,select{font:inherit;font-size:14px;padding:8px 10px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(0,0,0,.25);color:var(--text);width:100%;min-width:0}
+select option{background:#16201b;color:var(--text)}
+input:disabled{opacity:.4}
+input:focus,select:focus{outline:3px solid rgba(217,180,74,.3);border-color:var(--gold)}
+input.money{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+input::placeholder{color:var(--muted)}
 .hint{font-size:12.5px;color:var(--text-2);margin:4px 0 0}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-.btn{font:inherit;font-size:13.5px;font-weight:600;border:0;background:rgba(0,122,255,.1);color:var(--blue);padding:7px 14px;border-radius:999px;cursor:pointer}
-.btn.red{background:rgba(255,59,48,.1);color:var(--red)}
+.btn{font:inherit;font-size:13.5px;font-weight:600;border:1px solid rgba(47,191,113,.3);background:rgba(47,191,113,.12);color:#6fe0a3;padding:7px 14px;border-radius:999px;cursor:pointer}
+.btn:hover{background:rgba(47,191,113,.2)}
+.btn.red{background:rgba(255,107,94,.1);border-color:rgba(255,107,94,.3);color:#ff9c92}
 .btn.x{padding:4px 9px;font-size:12px}
 .tx td{padding:4px 3px;vertical-align:middle}
 .tx th{font-size:12px;color:var(--text-2);text-align:left;font-weight:600;padding:6px 3px}
@@ -127,8 +136,8 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
 @media (max-width:900px){.tiles{grid-template-columns:1fr 1fr}.fg{grid-template-columns:1fr!important}.big{font-size:50px}}
 @media (max-width:560px){.wrap{padding:16px 16px 40px}.hero{padding:20px}.big{font-size:42px}.seg button{padding:6px 10px;font-size:13px}}
 @media print{
-  body{background:#fff}.pills,.details-toggle,#sheet,#sheetBg{display:none!important}
-  .glass{box-shadow:none;border:1px solid #ddd;backdrop-filter:none}
+  .pills,.details-toggle,#sheet,#sheetBg{display:none!important}
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   #details{display:block}
 }
 </style>
@@ -136,12 +145,12 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
 <body>
 <div class="wrap">
   <div class="bar">
-    <div><h1>Cash Position</h1><div class="sub" id="sub"></div></div>
+    <div class="brand"><div class="logo">RCK</div><div><h1>Cash Position</h1><div class="sub" id="sub"></div></div></div>
     <div class="pills">
       <button class="pill" id="bExport" title="Save your data to a file">Export</button>
       <button class="pill" id="bImport" title="Load data from a file">Import</button>
       <button class="pill" onclick="window.print()">Print</button>
-      <button class="pill blue" id="bEdit" title="Shortcut: E">Edit data</button>
+      <button class="pill gold" id="bEdit" title="Shortcut: E">Edit data</button>
       <input type="file" id="fImport" accept=".json,application/json" hidden>
     </div>
   </div>
@@ -169,7 +178,6 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
   <button class="pill details-toggle" id="bDetails">Show details</button>
   <section id="details">
     <div class="glass dcard"><h3>Weekly cash flow</h3><div class="scroll"><table class="t num" id="tWeeks"></table></div></div>
-    <div class="glass dcard"><h3>Financial position <span class="hint" id="finPeriod" style="font-weight:400"></span></h3><div class="scroll"><table class="t num" id="tFin"></table></div></div>
   </section>
 </div>
 <div id="tip"></div>
@@ -177,7 +185,7 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
 <div id="sheetBg"></div>
 <section id="sheet" aria-label="Edit data">
   <div class="grab"></div>
-  <div class="sheet-head"><h2>Edit data</h2><button class="pill blue" id="bDone">Done</button></div>
+  <div class="sheet-head"><h2>Edit data</h2><button class="pill gold" id="bDone">Done</button></div>
   <p class="hint">The dashboard updates as you type, and your data is saved in this browser automatically. Use Export to keep a copy.</p>
 
   <div class="fg">
@@ -186,19 +194,19 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
       <div class="field"><label>Start date (date of your bank balances)</label><input type="date" data-k="settings.asOf"></div>
       <div class="field"><label>Forecast length</label>
         <select data-k="settings.weeks" data-num><option value="8">8 weeks</option><option value="13">13 weeks (bank standard)</option><option value="26">26 weeks</option><option value="52">52 weeks</option></select></div>
-      <div class="field"><label>Minimum available cash (warning line)</label><input class="money" data-k="settings.buffer" data-num inputmode="decimal"></div>
+      <div class="field"><label>Minimum available cash (warning line)</label><input class="money" data-k="settings.buffer" data-num inputmode="decimal" placeholder="$0"></div>
     </div>
     <div class="group">
       <h4>Jack’s Hire Limited</h4>
-      <div class="field"><label>Current account balance</label><input class="money" data-k="jhl.bank" data-num inputmode="decimal"></div>
-      <div class="field"><label>Overdraft limit (0 if none)</label><input class="money" data-k="jhl.overdraft" data-num inputmode="decimal"></div>
+      <div class="field"><label>Current account balance</label><input class="money" data-k="jhl.bank" data-num inputmode="decimal" placeholder="$0"></div>
+      <div class="field"><label>Overdraft limit (0 if none)</label><input class="money" data-k="jhl.overdraft" data-num inputmode="decimal" placeholder="$0"></div>
       <p class="hint">Available cash = balance + overdraft limit</p>
     </div>
     <div class="group">
       <h4>Jack’s Bobcats Limited</h4>
-      <div class="field"><label>Current account balance</label><input class="money" data-k="jbl.bank" data-num inputmode="decimal"></div>
-      <div class="field"><label>Asset finance facility limit</label><input class="money" data-k="jbl.limit" data-num inputmode="decimal"></div>
-      <div class="field"><label>Amount drawn (currently owing)</label><input class="money" data-k="jbl.drawn" data-num inputmode="decimal"></div>
+      <div class="field"><label>Current account balance</label><input class="money" data-k="jbl.bank" data-num inputmode="decimal" placeholder="$0"></div>
+      <div class="field"><label>Asset finance facility limit</label><input class="money" data-k="jbl.limit" data-num inputmode="decimal" placeholder="$0"></div>
+      <div class="field"><label>Amount drawn (currently owing)</label><input class="money" data-k="jbl.drawn" data-num inputmode="decimal" placeholder="$0"></div>
       <p class="hint">Available cash = balance + undrawn facility</p>
     </div>
   </div>
@@ -214,16 +222,11 @@ input.money{text-align:right;font-variant-numeric:tabular-nums}
     <div class="scroll"><table class="tx" id="txTable"></table></div>
   </div>
 
-  <div class="fg" style="grid-template-columns:1fr 1fr">
-    <div class="group">
+  <div class="fg" style="grid-template-columns:minmax(0,1fr)">
+    <div class="group" style="max-width:620px">
       <h4>Fleet (Jack’s Bobcats assets)</h4>
       <div class="toolbar"><button class="btn" id="addAsset">+ Asset</button></div>
       <table class="tx" id="assetTable"></table>
-    </div>
-    <div class="group">
-      <h4>Profit &amp; loss and balance sheet</h4>
-      <div class="field"><label>Period (e.g. "YTD to 30 Sep 2026")</label><input data-k="fin.period"></div>
-      <table class="tx" id="finTable"></table>
     </div>
   </div>
 
@@ -241,12 +244,11 @@ const OUT_CATS = ['Wages & PAYE','Accounts payable (creditors)','Equipment lease
 const LEASE = 'Equipment lease to Jack’s Bobcats', LEASE_IN = 'Intercompany lease income', DRAW = 'Facility drawdown';
 const RECUR = {once:'One-off',weekly:'Weekly',fortnightly:'Fortnightly',monthly:'Monthly',quarterly:'Quarterly'};
 const ENT = {JHL:'Jack’s Hire', JBL:'Jack’s Bobcats', GRP:'Group'};
-const COL = {JHL:'#007aff', JBL:'#ff9500', GRP:'#5856d6'};
+const COL = {JHL:'#2fbf71', JBL:'#d9b44a', GRP:'#5ec8e5'};
 const METRICS = {avail:'Available cash', bank:'Bank balance', flow:'Cash in & out', fac:'Facility'};
-const FIN_ROWS = [['revenue','Revenue'],['cos','Cost of sales'],['opex','Operating expenses'],['curAssets','Current assets'],['totAssets','Total assets'],['curLiab','Current liabilities'],['totLiab','Total liabilities']];
 
 const today = () => iso(new Date());
-const blank = () => ({ settings:{asOf:today(), weeks:13, buffer:0}, jhl:{bank:0, overdraft:0}, jbl:{bank:0, limit:0, drawn:0}, assets:[], fin:{period:'', JHL:{}, JBL:{}}, tx:[] });
+const blank = () => ({ settings:{asOf:today(), weeks:13, buffer:0}, jhl:{bank:0, overdraft:0}, jbl:{bank:0, limit:0, drawn:0}, assets:[], tx:[] });
 let S; try { S = JSON.parse(localStorage.getItem(KEY)) || blank(); } catch(e){ S = blank(); }
 S = Object.assign(blank(), S);
 (S.tx||[]).forEach(t=>{ if(t.category) t.category=t.category.replace('Jax ','Jack’s '); });
@@ -274,6 +276,15 @@ function moneyC(v){ const a=Math.abs(v); let s;
   else if(a>=1e3) s='$'+(a/1e3).toFixed(a>=1e5?0:1).replace(/\.0$/,'')+'k';
   else s='$'+Math.round(a);
   return v<-0.5 ? '−'+s : s; }
+// "$1,234,567.89" as you type; n() strips it back to a number
+function fmtMoneyStr(raw){ raw=String(raw??''); const neg=/^\s*[-−]/.test(raw); const c=raw.replace(/[^0-9.]/g,''); if(!c) return neg?'-':'';
+  let [i,d]=c.split('.'); i=(i||'0').replace(/^0+(?=\d)/,'').replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  return (neg?'-':'')+'$'+i+(d!==undefined?'.'+d.replace(/\./g,'').slice(0,2):''); }
+const moneyVal = v => (v===''||v==null||n(v)===0&&!/[1-9]/.test(String(v))) ? '' : fmtMoneyStr(v);
+document.addEventListener('input',e=>{ const el=e.target; if(!el.matches||!el.matches('input.money')) return;
+  const before=el.value.slice(0,el.selectionStart).replace(/[^0-9.]/g,'').length;
+  el.value=fmtMoneyStr(el.value); let k=0,p=0; while(p<el.value.length&&k<before){ if(/[0-9.]/.test(el.value[p])) k++; p++; }
+  if(!before) p=el.value.indexOf('$')+1; el.setSelectionRange(p,p); },true);
 const pct = v => isFinite(v) ? Math.round(v*100)+'%' : '–';
 
 /* ---------- forecast engine ---------- */
@@ -343,9 +354,9 @@ function monotone(P){
   for(let i=0;i<k-1;i++){ const dx=(P[i+1][0]-P[i][0])/3; s+=`C${P[i][0]+dx},${P[i][1]+m[i]*dx} ${P[i+1][0]-dx},${P[i+1][1]-m[i+1]*dx} ${P[i+1][0]},${P[i+1][1]}`; }
   return s;
 }
-const gridAndAxis=(ticks,Y,m,iw,w)=>ticks.map(t=>`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(t)}" y2="${Y(t)}" stroke="${t===0?'rgba(60,60,67,.28)':'rgba(60,60,67,.08)'}"/><text x="${w-4}" y="${Y(t)+4}" text-anchor="end" font-size="12" fill="#a1a1a6">${moneyC(t)}</text>`).join('');
+const gridAndAxis=(ticks,Y,m,iw,w)=>ticks.map(t=>`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(t)}" y2="${Y(t)}" stroke="${t===0?'rgba(255,255,255,.25)':'rgba(255,255,255,.06)'}"/><text x="${w-4}" y="${Y(t)+4}" text-anchor="end" font-size="12" fill="#7d8a82">${moneyC(t)}</text>`).join('');
 function pill(x,y,text,w){ const tw=text.length*7.3+22; const bx=Math.max(4,Math.min(w-tw-4,x-tw/2));
-  return `<rect x="${bx}" y="${y}" width="${tw}" height="26" rx="13" fill="#fff" style="filter:drop-shadow(0 2px 6px rgba(0,0,0,.13))"/><text x="${bx+tw/2}" y="${y+17}" text-anchor="middle" font-size="12.5" font-weight="650" fill="#1c1c1e">${text}</text>`; }
+  return `<rect x="${bx}" y="${y}" width="${tw}" height="26" rx="13" fill="#1b2721" stroke="rgba(255,255,255,.12)" style="filter:drop-shadow(0 4px 10px rgba(0,0,0,.4))"/><text x="${bx+tw/2}" y="${y+17}" text-anchor="middle" font-size="12.5" font-weight="650" fill="#f3f5f2">${text}</text>`; }
 
 /* ---------- line chart (available / bank) ---------- */
 function lineChart(F, key){
@@ -359,15 +370,15 @@ function lineChart(F, key){
   const base=Y(Math.max(y0,0));
   let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="gf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".30"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>`;
   s+=gridAndAxis(ticks,Y,m,iw,w);
-  const nl=Math.min(6,F.W); for(let j=0;j<=nl;j++){ const i=Math.round(F.days*j/nl); s+=`<text x="${X(i)}" y="${h-8}" text-anchor="${j===0?'start':j===nl?'end':'middle'}" font-size="12" fill="#a1a1a6">${j===0?'Today':fmtD(addDays(F.start,i))}</text>`; }
-  if(buf) s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="#ff3b30" stroke-opacity=".7" stroke-dasharray="6 6" stroke-width="1.5"/><text x="${m.l+4}" y="${Y(buf)-7}" font-size="12" font-weight="600" fill="#ff3b30">Minimum ${moneyC(buf)}</text>`;
+  const nl=Math.min(6,F.W); for(let j=0;j<=nl;j++){ const i=Math.round(F.days*j/nl); s+=`<text x="${X(i)}" y="${h-8}" text-anchor="${j===0?'start':j===nl?'end':'middle'}" font-size="12" fill="#7d8a82">${j===0?'Today':fmtD(addDays(F.start,i))}</text>`; }
+  if(buf) s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="#ff6b5e" stroke-opacity=".7" stroke-dasharray="6 6" stroke-width="1.5"/><text x="${m.l+4}" y="${Y(buf)-7}" font-size="12" font-weight="600" fill="#ff6b5e">Minimum ${moneyC(buf)}</text>`;
   s+=`<path d="${line}L${X(F.days)},${base}L${X(0)},${base}Z" fill="url(#gf)"/>`;
   s+=`<path d="${line}" fill="none" stroke="${col}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
   const mi = key==='avail' ? x.minI : vals.indexOf(Math.min(...vals));
   if(mi>0 && vals[mi]<vals[0]-0.5){ const lx=X(mi), ly=Y(vals[mi]);
-    s+=`<circle cx="${lx}" cy="${ly}" r="6" fill="#fff" stroke="${col}" stroke-width="3"/>`+pill(lx, Math.min(ly+12,h-m.b-28), `Low ${moneyC(vals[mi])}`, w); }
+    s+=`<circle cx="${lx}" cy="${ly}" r="6" fill="#0a120e" stroke="${col}" stroke-width="3"/>`+pill(lx, Math.min(ly+12,h-m.b-28), `Low ${moneyC(vals[mi])}`, w); }
   s+=`<circle cx="${X(F.days)}" cy="${Y(vals[vals.length-1])}" r="5" fill="${col}"/>`;
-  s+=`<line id="xh" x1="0" x2="0" y1="${m.t}" y2="${m.t+ih}" stroke="rgba(60,60,67,.3)" visibility="hidden"/><circle id="xd" r="7" fill="${col}" stroke="#fff" stroke-width="3" visibility="hidden"/>`;
+  s+=`<line id="xh" x1="0" x2="0" y1="${m.t}" y2="${m.t+ih}" stroke="rgba(255,255,255,.3)" visibility="hidden"/><circle id="xd" r="7" fill="${col}" stroke="#0a120e" stroke-width="3" visibility="hidden"/>`;
   s+=`<rect id="hit" x="${m.l}" y="0" width="${iw}" height="${h}" fill="transparent"/></svg>`;
   el.innerHTML=s;
   const hit=el.querySelector('#hit'), xh=el.querySelector('#xh'), xd=el.querySelector('#xd');
@@ -389,9 +400,9 @@ function flowChart(F){
   let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`+gridAndAxis(ticks,Y,m,iw,w);
   const every=Math.ceil(F.W/7);
   x.wk.forEach((v,i)=>{ const cx=m.l+bw*i+bw/2, bx=cx-bar/2, r=bar/2;
-    if(v.inn){ const hh=Math.max(2,Y(0)-Y(v.inn)-2); s+=`<rect x="${bx}" y="${Y(0)-2-hh}" width="${bar}" height="${hh}" rx="${Math.min(r,hh/2)}" fill="#34c759"/>`; }
-    if(v.out){ const hh=Math.max(2,Y(-v.out)-Y(0)-2); s+=`<rect x="${bx}" y="${Y(0)+2}" width="${bar}" height="${hh}" rx="${Math.min(r,hh/2)}" fill="#ff3b30" fill-opacity=".85"/>`; }
-    if(i%every===0) s+=`<text x="${cx}" y="${h-8}" text-anchor="middle" font-size="12" fill="#a1a1a6">${fmtD(addDays(F.start,i*7))}</text>`;
+    if(v.inn){ const hh=Math.max(2,Y(0)-Y(v.inn)-2); s+=`<rect x="${bx}" y="${Y(0)-2-hh}" width="${bar}" height="${hh}" rx="${Math.min(r,hh/2)}" fill="#2fbf71"/>`; }
+    if(v.out){ const hh=Math.max(2,Y(-v.out)-Y(0)-2); s+=`<rect x="${bx}" y="${Y(0)+2}" width="${bar}" height="${hh}" rx="${Math.min(r,hh/2)}" fill="#ff6b5e" fill-opacity=".85"/>`; }
+    if(i%every===0) s+=`<text x="${cx}" y="${h-8}" text-anchor="middle" font-size="12" fill="#7d8a82">${fmtD(addDays(F.start,i*7))}</text>`;
     s+=`<rect class="hb" data-i="${i}" x="${m.l+bw*i}" y="0" width="${bw}" height="${h}" fill="transparent"/>`; });
   el.innerHTML=s+'</svg>';
   el.querySelectorAll('.hb').forEach(r=>{ r.onmousemove=e=>{ const i=+r.dataset.i, v=x.wk[i];
@@ -410,13 +421,13 @@ function facChart(){
     <div style="text-align:center">
       <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
         <g transform="translate(${size/2},${size/2}) rotate(-90)">
-          <circle r="${R}" fill="none" stroke="rgba(255,149,0,.16)" stroke-width="${sw}"/>
-          <circle r="${R}" fill="none" stroke="#ff9500" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${C*u} ${C}"/>
+          <circle r="${R}" fill="none" stroke="rgba(217,180,74,.16)" stroke-width="${sw}"/>
+          <circle r="${R}" fill="none" stroke="#d9b44a" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${C*u} ${C}"/>
         </g>
-        <text x="50%" y="${size/2-4}" text-anchor="middle" font-size="30" font-weight="700" fill="#1c1c1e" letter-spacing="-1">${moneyC(head)}</text>
-        <text x="50%" y="${size/2+20}" text-anchor="middle" font-size="13" fill="#6e6e73">available to draw</text>
+        <text x="50%" y="${size/2-4}" text-anchor="middle" font-size="30" font-weight="700" fill="#f3f5f2" letter-spacing="-1">${moneyC(head)}</text>
+        <text x="50%" y="${size/2+20}" text-anchor="middle" font-size="13" fill="#a9b5ad">available to draw</text>
       </svg>
-      <div><span class="key"><i style="background:#ff9500"></i>Drawn ${pct(u)}</span><span class="key"><i style="background:rgba(255,149,0,.25)"></i>Available ${pct(1-u)}</span></div>
+      <div><span class="key"><i style="background:#d9b44a"></i>Drawn ${pct(u)}</span><span class="key"><i style="background:rgba(217,180,74,.25)"></i>Available ${pct(1-u)}</span></div>
     </div>
     <ul class="num">
       <li><span>Facility limit</span><b>${money(lim)}</b></li>
@@ -466,15 +477,13 @@ function render(){
 
   const endV=x.avail[x.avail.length-1];
   const fleet=S.assets.reduce((a,y)=>a+n(y.value),0);
-  const hasFin=e=>n((S.fin[e]||{}).totAssets)||n((S.fin[e]||{}).totLiab);
-  const na=e=>n((S.fin[e]||{}).totAssets)-n((S.fin[e]||{}).totLiab);
-  const naV = view.ent==='GRP' ? (hasFin('JHL')||hasFin('JBL') ? na('JHL')+na('JBL') : null) : (hasFin(view.ent)?na(view.ent):null);
+  const eq=fleet-n(S.jbl.drawn);
   const tile=(l,v,f,bad)=>`<div class="glass tile"><div class="l">${l}</div><div class="v num ${bad?'neg':''}">${v}</div><div class="f">${f}</div></div>`;
   document.getElementById('tiles').innerHTML =
      tile('Lowest available', money(x.min), x.minI>0?'on '+fmtDY(addDays(F.start,x.minI-1)):'today', x.min<0||(buf&&x.min<buf))
     +tile(`In ${F.W} weeks`, money(endV), (endV-av>=0?'▲ ':'▼ ')+money(Math.abs(endV-av))+' vs today', endV<0)
     +tile('Facility available', money(head), n(S.jbl.limit)?`${pct(n(S.jbl.drawn)/n(S.jbl.limit))} of ${moneyC(n(S.jbl.limit))} drawn`:'Jack’s Bobcats', head<0)
-    +tile('Net assets', naV===null?'–':money(naV), naV===null?'Add in Edit data':(view.ent==='GRP'?'Both companies':ENT[view.ent])+(fleet?` · fleet ${moneyC(fleet)}`:''), naV!==null&&naV<0);
+    +tile('Equity in fleet', fleet?money(eq):'–', fleet?`fleet ${moneyC(fleet)} less ${moneyC(n(S.jbl.drawn))} owed`:'Add assets in Edit data', fleet&&eq<0);
 
   renderDetails(F);
 }
@@ -488,25 +497,13 @@ function renderDetails(F){
     <tr><td>Net</td>${x.wk.map(w=>c(w.inn-w.out)).join('')}</tr>
     <tr><td>Bank balance</td>${x.wk.map(w=>c(w.close)).join('')}</tr>
     <tr class="strong"><td>Available cash</td>${x.wk.map((_,i)=>c(x.avail[(i+1)*7])).join('')}</tr></tbody>`;
-  const f=S.fin; document.getElementById('finPeriod').textContent=f.period?'· '+f.period:'';
-  const g=k=>({JHL:n(f.JHL?.[k]),JBL:n(f.JBL?.[k])}); const v=(o,cc)=>cc==='G'?o.JHL+o.JBL:o[cc];
-  const R=g('revenue'),C=g('cos'),O=g('opex'),CA=g('curAssets'),TA=g('totAssets'),CL=g('curLiab'),TL=g('totLiab');
-  const line=(l,fn,fmt=money,cls='')=>`<tr class="${cls}"><td>${l}</td>${['JHL','JBL','G'].map(k=>{const y=fn(k);return `<td class="${typeof y==='number'&&y<0?'neg':''}">${fmt(y)}</td>`;}).join('')}</tr>`;
-  const ratio=y=>isFinite(y)&&y?y.toFixed(2)+'×':'–';
-  document.getElementById('tFin').innerHTML=`<thead><tr><th></th><th>Jack’s Hire</th><th>Jack’s Bobcats</th><th>Group*</th></tr></thead><tbody>
-    ${line('Revenue',k=>v(R,k))}
-    ${line('Net profit',k=>v(R,k)-v(C,k)-v(O,k),money,'strong')}
-    ${line('Net margin',k=>v(R,k)?(v(R,k)-v(C,k)-v(O,k))/v(R,k):NaN,pct)}
-    ${line('Net assets',k=>v(TA,k)-v(TL,k),money,'strong')}
-    ${line('Current ratio',k=>v(CL,k)?v(CA,k)/v(CL,k):NaN,ratio)}</tbody>`;
-  if(!document.getElementById('finNote')) document.getElementById('tFin').insertAdjacentHTML('afterend','<p class="hint" id="finNote">* Group is a simple sum of the two companies (intercompany lease not eliminated).</p>');
 }
 
 /* ---------- edit sheet ---------- */
 let rT; const soon=()=>{ clearTimeout(rT); rT=setTimeout(render,120); };
 const getP=p=>p.split('.').reduce((o,k)=>o?.[k],S);
 const setP=(p,v)=>{ const ks=p.split('.'); let o=S; ks.slice(0,-1).forEach(k=>{o[k]=o[k]||{};o=o[k];}); o[ks[ks.length-1]]=v; };
-function bindStatic(){ document.querySelectorAll('#sheet [data-k]').forEach(el=>{ const v=getP(el.dataset.k); el.value=v??'';
+function bindStatic(){ document.querySelectorAll('#sheet [data-k]').forEach(el=>{ const v=getP(el.dataset.k); el.value=el.classList.contains('money')?moneyVal(v):(v??'');
   el.oninput=()=>{ setP(el.dataset.k, el.hasAttribute('data-num')?n(el.value):el.value); soon(); }; }); }
 function txRow(t){
   const cats=t.kind==='in'?IN_CATS:OUT_CATS;
@@ -516,7 +513,7 @@ function txRow(t){
     <td><select data-f="kind" style="width:94px"><option value="in" ${t.kind==='in'?'selected':''}>Income</option><option value="out" ${t.kind==='out'?'selected':''}>Bill</option></select></td>
     <td><select data-f="category" style="min-width:190px">${cats.map(c=>`<option ${t.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></td>
     <td><input data-f="desc" value="${esc(t.desc)}" placeholder="Description" style="min-width:160px"></td>
-    <td><input class="money" data-f="amount" value="${t.amount?esc(t.amount):''}" placeholder="0" inputmode="decimal" style="width:110px"></td>
+    <td><input class="money" data-f="amount" value="${esc(moneyVal(t.amount))}" placeholder="$0" inputmode="decimal" style="width:110px"></td>
     <td><select data-f="recur" style="width:118px">${Object.entries(RECUR).map(([k,l])=>`<option value="${k}" ${t.recur===k?'selected':''}>${l}</option>`).join('')}</select></td>
     <td><input type="date" data-f="until" value="${esc(t.until||'')}" title="Optional: stop repeating after this date" style="width:140px" ${t.recur==='once'?'disabled':''}></td>
     <td><button class="btn red x" data-del>✕</button></td></tr>`;
@@ -536,24 +533,18 @@ function addTx(kind){ const t={id:uid(),date:S.settings.asOf||today(),entity:'JH
   S.tx.push(t); renderTx(); render(); const a=document.querySelector('#txTable tr[data-id="'+t.id+'"] [data-f=amount]'); a&&a.focus(); }
 function renderAssets(){
   const tb=document.getElementById('assetTable');
-  tb.innerHTML=`<thead><tr><th>Asset</th><th>Current value</th><th></th></tr></thead><tbody>${S.assets.map(a=>`<tr data-id="${a.id}"><td><input data-f="name" value="${esc(a.name)}" placeholder="e.g. Bobcat S650"></td><td><input class="money" data-f="value" value="${a.value?esc(a.value):''}" placeholder="0" inputmode="decimal"></td><td><button class="btn red x" data-del>✕</button></td></tr>`).join('')||'<tr><td colspan="3" class="empty">No assets yet</td></tr>'}</tbody>`;
+  tb.innerHTML=`<thead><tr><th>Asset</th><th>Current value</th><th></th></tr></thead><tbody>${S.assets.map(a=>`<tr data-id="${a.id}"><td><input data-f="name" value="${esc(a.name)}" placeholder="e.g. Bobcat S650"></td><td><input class="money" data-f="value" value="${esc(moneyVal(a.value))}" placeholder="$0" inputmode="decimal"></td><td><button class="btn red x" data-del>✕</button></td></tr>`).join('')||'<tr><td colspan="3" class="empty">No assets yet</td></tr>'}</tbody>`;
   tb.querySelectorAll('tr[data-id]').forEach(tr=>{ const a=S.assets.find(y=>y.id===tr.dataset.id);
     tr.querySelectorAll('[data-f]').forEach(el=>el.oninput=()=>{ a[el.dataset.f]=el.value; soon(); });
     tr.querySelector('[data-del]').onclick=()=>{ S.assets=S.assets.filter(y=>y!==a); renderAssets(); render(); }; });
 }
-function renderFinForm(){
-  const tb=document.getElementById('finTable'); S.fin.JHL=S.fin.JHL||{}; S.fin.JBL=S.fin.JBL||{};
-  tb.innerHTML=`<thead><tr><th></th><th>Jack’s Hire</th><th>Jack’s Bobcats</th></tr></thead><tbody>${FIN_ROWS.map(([k,l])=>`<tr><td style="font-size:13px;color:var(--text-2);white-space:nowrap">${l}</td>${['JHL','JBL'].map(e=>`<td><input class="money" data-e="${e}" data-f="${k}" value="${S.fin[e][k]?esc(S.fin[e][k]):''}" placeholder="0" inputmode="decimal"></td>`).join('')}</tr>`).join('')}</tbody>`;
-  tb.querySelectorAll('input').forEach(el=>el.oninput=()=>{ S.fin[el.dataset.e][el.dataset.f]=el.value; soon(); });
-}
-function renderEdit(){ bindStatic(); renderTx(); renderAssets(); renderFinForm(); }
+function renderEdit(){ bindStatic(); renderTx(); renderAssets(); }
 
 function sample(){
   const d0=parse(today()); const D=k=>iso(addDays(d0,k));
   return { settings:{asOf:iso(d0),weeks:13,buffer:150000},
     jhl:{bank:185000,overdraft:100000}, jbl:{bank:42000,limit:2500000,drawn:1680000},
     assets:[{id:uid(),name:'Bobcat compact track loaders (x6)',value:720000},{id:uid(),name:'Excavators 1.7t–8t (x5)',value:610000},{id:uid(),name:'Trucks & trailers (x4)',value:420000},{id:uid(),name:'Attachments & ancillary',value:310000}],
-    fin:{period:'Example: YTD to 30 Sep 2026',JHL:{revenue:2150000,cos:1180000,opex:690000,curAssets:520000,totAssets:640000,curLiab:410000,totLiab:470000},JBL:{revenue:780000,cos:0,opex:520000,curAssets:90000,totAssets:2150000,curLiab:260000,totLiab:1720000}},
     tx:[
       {id:uid(),date:D(3),entity:'JHL',kind:'out',category:'Wages & PAYE',desc:'Fortnightly payroll',amount:'68000',recur:'fortnightly',until:''},
       {id:uid(),date:D(1),entity:'JHL',kind:'in',category:'Accounts receivable (debtors)',desc:'Debtor receipts',amount:'72000',recur:'weekly',until:''},
