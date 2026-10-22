@@ -193,7 +193,7 @@ input::placeholder{color:var(--muted)}
       <h4>Settings</h4>
       <div class="field"><label>Start date (date of your bank balances)</label><input type="date" data-k="settings.asOf"></div>
       <div class="field"><label>Forecast length</label>
-        <select data-k="settings.weeks" data-num><option value="8">8 weeks</option><option value="13">13 weeks (bank standard)</option><option value="26">26 weeks</option><option value="52">52 weeks</option></select></div>
+        <select data-k="settings.weeks" data-num><option value="8">8 weeks</option><option value="11">11 weeks</option><option value="13">13 weeks (bank standard)</option><option value="26">26 weeks</option><option value="52">52 weeks</option></select></div>
       <div class="field"><label>Minimum available cash (warning line)</label><input class="money" data-k="settings.buffer" data-num inputmode="decimal" placeholder="$0"></div>
     </div>
     <div class="group">
@@ -482,8 +482,8 @@ function render(){
   document.getElementById('tiles').innerHTML =
      tile('Lowest available', money(x.min), x.minI>0?'on '+fmtDY(addDays(F.start,x.minI-1)):'today', x.min<0||(buf&&x.min<buf))
     +tile(`In ${F.W} weeks`, money(endV), (endV-av>=0?'▲ ':'▼ ')+money(Math.abs(endV-av))+' vs today', endV<0)
-    +tile('Facility available', money(head), n(S.jbl.limit)?`${pct(n(S.jbl.drawn)/n(S.jbl.limit))} of ${moneyC(n(S.jbl.limit))} drawn`:'Jack’s Bobcats', head<0)
-    +tile('Equity in fleet', fleet?money(eq):'–', fleet?`fleet ${moneyC(fleet)} less ${moneyC(n(S.jbl.drawn))} owed`:'Add assets in Edit data', fleet&&eq<0);
+    +tile('Facility available', n(S.jbl.limit)?money(head):'–', n(S.jbl.limit)?`${pct(n(S.jbl.drawn)/n(S.jbl.limit))} of ${moneyC(n(S.jbl.limit))} drawn`:'Add facility in Edit data', head<0)
+    +tile('Equity in fleet', fleet&&n(S.jbl.limit)?money(eq):'–', !fleet?'Add assets in Edit data':!n(S.jbl.limit)?`fleet ${moneyC(fleet)} · add facility to show equity`:`fleet ${moneyC(fleet)} less ${moneyC(n(S.jbl.drawn))} owed`, fleet&&eq<0);
 
   renderDetails(F);
 }
