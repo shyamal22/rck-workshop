@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en-NZ">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RCK Cash Flow</title>
+<style>
+:root{
+  color-scheme: light;
+  --page:#f4f3f0; --surface:#fcfcfb; --surface-2:#f0efec; --border:#e2e1dc; --grid:#e9e8e3;
+  --text:#0b0b0b; --text-2:#52514e; --muted:#8a8984;
+  --jhl:#2a78d6; --jbl:#eb6834; --in:#1baf7a; --out:#e34948;
+  --good:#0ca30c; --good-text:#006300; --warn:#fab219; --warn-text:#8a5a00; --crit:#d03b3b;
+  --navy:#0f2742; --accent:#2a78d6;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--page);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+header.top{background:var(--navy);color:#fff;padding:14px 24px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+header.top h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+header.top .sub{font-size:12.5px;color:#b9c6d6}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button,.btn{font:inherit;font-size:13px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:7px 12px;border-radius:8px;cursor:pointer}
+button:hover{border-color:#c9c8c2}
+header.top button{background:transparent;color:#fff;border-color:#3b5170}
+header.top button:hover{background:#1b3657}
+header.top button.primary{background:var(--accent);border-color:var(--accent)}
+button.danger{color:var(--crit)}
+button.small{padding:3px 8px;font-size:12px}
+main{max-width:1320px;margin:0 auto;padding:20px 24px 48px}
+.sect-title{display:flex;align-items:baseline;gap:10px;margin:22px 0 10px}
+.sect-title h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-2);margin:0;font-weight:650}
+.sect-title .dot{width:10px;height:10px;border-radius:3px;display:inline-block;align-self:center}
+.sect-title .note{font-size:12.5px;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.kpi .lbl{font-size:12.5px;color:var(--text-2)}
+.kpi .val{font-size:26px;font-weight:650;margin-top:2px;letter-spacing:-.3px}
+.kpi .foot{font-size:12px;color:var(--muted);margin-top:2px}
+.neg{color:var(--crit)}
+.meter{height:8px;background:var(--surface-2);border-radius:4px;margin-top:8px;overflow:hidden}
+.meter > span{display:block;height:100%;border-radius:4px}
+.callout{display:flex;gap:10px;align-items:flex-start;border-radius:10px;padding:10px 14px;margin-top:12px;font-size:13.5px;border:1px solid}
+.callout.good{background:#eef8ee;border-color:#bfe3bf;color:var(--good-text)}
+.callout.warn{background:#fff6e2;border-color:#f3d48b;color:var(--warn-text)}
+.callout.crit{background:#fdeeee;border-color:#f1c0c0;color:#9d2222}
+.callout .ic{font-weight:800;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:#fff;flex:none;margin-top:1px}
+.good .ic{background:var(--good)} .warn .ic{background:#c98500} .crit .ic{background:var(--crit)}
+.grid2{display:grid;grid-template-columns:3fr 2fr;gap:12px}
+.grid2e{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.chart-card h3{font-size:14.5px;margin:0;font-weight:650}
+.chart-card .cap{font-size:12.5px;color:var(--text-2);margin:2px 0 8px}
+.chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--text-2)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
+.legend i.line{height:3px;border-radius:2px;vertical-align:3px;width:16px}
+.legend i.dash{height:0;border-top:2px dashed var(--crit);border-radius:0;vertical-align:3px;width:16px}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:5px 10px;font-size:12.5px;background:var(--surface)}
+.seg button.on{background:var(--navy);color:#fff}
+svg text{font-family:inherit}
+.chart{width:100%;position:relative}
+#tip{position:fixed;pointer-events:none;background:#fff;border:1px solid var(--border);box-shadow:0 6px 20px rgba(0,0,0,.12);border-radius:8px;padding:8px 10px;font-size:12.5px;z-index:50;display:none;min-width:160px}
+#tip .t{font-weight:650;margin-bottom:4px}
+#tip .r{display:flex;justify-content:space-between;gap:14px}
+#tip .r span:first-child{color:var(--text-2)}
+#tip i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
+table{border-collapse:collapse;width:100%}
+.fin th,.fin td{padding:7px 10px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+.fin th:first-child,.fin td:first-child{text-align:left}
+.fin thead th{font-size:12px;color:var(--text-2);font-weight:600;border-bottom:1px solid var(--border)}
+.fin tr.total td{font-weight:650;border-top:1px solid var(--border)}
+.fin tr.sub td{color:var(--text-2);font-size:12.5px}
+.fin tr.hdr td{font-weight:650;background:var(--surface-2);font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-2)}
+.scroll{overflow-x:auto}
+.cfs td,.cfs th{font-size:12.5px;padding:6px 8px}
+.cfs td:first-child,.cfs th:first-child{position:sticky;left:0;background:var(--surface);z-index:1;min-width:190px}
+.cfs tr.hdr td:first-child{background:var(--surface-2)}
+.empty{color:var(--muted);font-size:13px;padding:30px 0;text-align:center}
+
+/* ---------- Edit panel ---------- */
+#edit{display:none;margin-top:28px;border-top:3px solid var(--accent);padding-top:6px}
+body.editing #edit{display:block}
+.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.field{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}
+.field label{font-size:12px;color:var(--text-2)}
+input,select{font:inherit;font-size:13.5px;padding:6px 8px;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--text);width:100%;min-width:0}
+input:focus,select:focus{outline:2px solid #9ec5f4;border-color:var(--accent)}
+input.money{text-align:right;font-variant-numeric:tabular-nums}
+.card h4{margin:0 0 10px;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.hint{font-size:12px;color:var(--muted);margin:4px 0 0}
+.tx td{padding:4px 4px;border-bottom:1px solid var(--grid);vertical-align:middle}
+.tx th{font-size:12px;color:var(--text-2);text-align:left;font-weight:600;padding:6px 4px;border-bottom:1px solid var(--border)}
+.tx input,.tx select{padding:5px 6px;font-size:13px}
+.tx tr.in td:first-child{box-shadow:inset 3px 0 0 var(--in)}
+.tx tr.out td:first-child{box-shadow:inset 3px 0 0 var(--out)}
+.fintbl td{padding:3px 4px}.fintbl th{font-size:12px;color:var(--text-2);font-weight:600;text-align:left;padding:4px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+
+@media (max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.grid2,.grid2e{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr 1fr}}
+@media (max-width:640px){main{padding:14px 16px 40px}header.top{padding:12px 16px}.kpis{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.kpi .val{font-size:21px}}
+@media print{
+  body{background:#fff} header.top .btns,#edit,.seg{display:none!important}
+  header.top{background:#fff;color:#000;border-bottom:2px solid #000} header.top .sub{color:#333}
+  .card{break-inside:avoid} main{max-width:none;padding:10px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1 id="hTitle">Jax Hire Limited (RCK) &amp; Jax Bobcats Limited: Cash Flow &amp; Funding</h1>
+    <div class="sub" id="hSub"></div>
+  </div>
+  <div class="btns">
+    <button class="primary" id="bEdit" title="Shortcut: E">Edit data</button>
+    <button id="bExport">Export data</button>
+    <button id="bImport">Import data</button>
+    <button onclick="window.print()">Print / PDF</button>
+    <input type="file" id="fImport" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<main>
+  <!-- ===== JAX HIRE ===== -->
+  <div class="sect-title"><span class="dot" style="background:var(--jhl)"></span><h2 id="tJhl">Jax Hire Limited: operating cash</h2><span class="note" id="horizonNote"></span></div>
+  <div class="kpis" id="kJhl"></div>
+  <div id="callout"></div>
+
+  <div class="sect-title"><h2>Cash flow forecast</h2></div>
+  <div class="card chart-card">
+    <div class="chart-head">
+      <div><h3>Projected bank balance (daily)</h3><div class="cap">Opening balance plus every receipt, minus every payment, by date. Includes recurring items.</div></div>
+      <div class="legend" id="legBal"></div>
+    </div>
+    <div class="chart" id="cBal"></div>
+  </div>
+
+  <div class="grid2" style="margin-top:12px">
+    <div class="card chart-card">
+      <div class="chart-head">
+        <div><h3>Weekly receipts vs payments</h3><div class="cap">Bars above the line are cash in; bars below are cash out.</div></div>
+        <div class="seg" data-ent="flow"></div>
+      </div>
+      <div class="legend" style="margin-bottom:4px"><span><i style="background:var(--in)"></i>Receipts</span><span><i style="background:var(--out)"></i>Payments</span><span><i class="line" style="background:var(--text)"></i>Net cash flow</span></div>
+      <div class="chart" id="cFlow"></div>
+    </div>
+    <div class="card chart-card">
+      <div class="chart-head">
+        <div><h3>Where the cash goes</h3><div class="cap" id="capCat">Total payments by type over the forecast period.</div></div>
+      </div>
+      <div class="chart" id="cCat"></div>
+    </div>
+  </div>
+
+  <!-- ===== JAX BOBCATS ===== -->
+  <div class="sect-title"><span class="dot" style="background:var(--jbl)"></span><h2 id="tJbl">Jax Bobcats Limited: asset finance &amp; fleet</h2><span class="note">Owns the fleet and leases it to Jax Hire</span></div>
+  <div class="kpis" id="kJbl"></div>
+  <div class="grid2e" style="margin-top:12px">
+    <div class="card chart-card">
+      <h3>Asset finance facility</h3>
+      <div class="cap">How much of the facility has been drawn, and how much is still available.</div>
+      <div class="chart" id="cFac"></div>
+    </div>
+    <div class="card chart-card">
+      <h3>Fleet value vs finance owed</h3>
+      <div class="cap">The gap between the two is the equity cushion that secures the facility.</div>
+      <div class="chart" id="cEq"></div>
+    </div>
+  </div>
+
+  <!-- ===== FINANCIAL POSITION ===== -->
+  <div class="sect-title"><h2>Financial position</h2><span class="note" id="finPeriod"></span></div>
+  <div class="card scroll"><table class="fin num" id="tFin"></table></div>
+
+  <!-- ===== 13-WEEK STATEMENT ===== -->
+  <div class="sect-title"><h2>Cash flow statement (weekly)</h2><span class="note">The standard format banks use for a 13-week cash flow</span></div>
+  <div class="card">
+    <div class="toolbar"><div class="seg" data-ent="cfs"></div></div>
+    <div class="scroll"><table class="fin cfs num" id="tCfs"></table></div>
+  </div>
+
+  <!-- ===================== EDIT PANEL ===================== -->
+  <section id="edit">
+    <div class="sect-title"><h2>Edit data</h2><span class="note">The dashboard updates as you type. Your data is saved in this browser automatically. Use Export data to keep a copy or move it to another computer.</span></div>
+
+    <div class="form-grid">
+      <div class="card">
+        <h4>Settings</h4>
+        <div class="field"><label>Forecast start date (today / bank balance date)</label><input type="date" data-k="settings.asOf"></div>
+        <div class="field"><label>Forecast length</label>
+          <select data-k="settings.weeks" data-num><option value="8">8 weeks</option><option value="13">13 weeks (bank standard)</option><option value="26">26 weeks</option><option value="52">52 weeks</option></select></div>
+        <div class="field"><label>Minimum cash buffer, Jax Hire (warning line)</label><input class="money" data-k="settings.buffer" data-num inputmode="decimal"></div>
+      </div>
+      <div class="card">
+        <h4><span class="dot" style="width:10px;height:10px;border-radius:3px;background:var(--jhl);display:inline-block"></span>Jax Hire Limited: bank</h4>
+        <div class="field"><label>Current account balance</label><input class="money" data-k="jhl.bank" data-num inputmode="decimal"></div>
+        <div class="field"><label>Overdraft / credit limit (0 if none)</label><input class="money" data-k="jhl.overdraft" data-num inputmode="decimal"></div>
+        <p class="hint">Available funds = balance + unused overdraft.</p>
+      </div>
+      <div class="card">
+        <h4><span class="dot" style="width:10px;height:10px;border-radius:3px;background:var(--jbl);display:inline-block"></span>Jax Bobcats Limited: bank &amp; facility</h4>
+        <div class="field"><label>Current account balance</label><input class="money" data-k="jbl.bank" data-num inputmode="decimal"></div>
+        <div class="field"><label>Asset finance facility limit</label><input class="money" data-k="jbl.limit" data-num inputmode="decimal"></div>
+        <div class="field"><label>Amount drawn (currently owing)</label><input class="money" data-k="jbl.drawn" data-num inputmode="decimal"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h4>Bills &amp; income (cash in and out)</h4>
+      <div class="toolbar">
+        <button id="addIn">+ Income</button>
+        <button id="addOut">+ Bill</button>
+        <button id="sortTx">Sort by date</button>
+        <span class="hint" style="margin:0">Use "Repeats" for wages, leases and loan repayments so they fill the whole forecast. A Jax Hire bill with the type "Equipment lease to Jax Bobcats" is automatically shown as income for Jax Bobcats.</span>
+      </div>
+      <div class="scroll"><table class="tx" id="txTable"></table></div>
+    </div>
+
+    <div class="grid2e" style="margin-top:12px">
+      <div class="card">
+        <h4>Fleet / asset register (Jax Bobcats)</h4>
+        <div class="toolbar"><button id="addAsset">+ Asset</button></div>
+        <table class="tx" id="assetTable"></table>
+      </div>
+      <div class="card">
+        <h4>Profit &amp; loss and balance sheet</h4>
+        <div class="field"><label>Period label (e.g. "YTD to 30 Sep 2026")</label><input data-k="fin.period"></div>
+        <table class="fintbl" id="finTable"></table>
+      </div>
+    </div>
+
+    <div class="toolbar" style="margin-top:14px">
+      <button id="bSample">Load example data</button>
+      <button class="danger" id="bClear">Clear all data</button>
+    </div>
+  </section>
+</main>
+<div id="tip"></div>
+
+<script>
+(() => {
+const KEY = 'rck-cashflow-v1';
+const IN_CATS = ['Accounts receivable (debtors)','Hire revenue (cash sales)','Intercompany lease income','Facility drawdown','GST refund','Other income'];
+const OUT_CATS = ['Wages & PAYE','Accounts payable (creditors)','Equipment lease to Jax Bobcats','Asset finance repayment','GST / IRD','Rent','Fuel & maintenance','Insurance','Other expense'];
+const LEASE = 'Equipment lease to Jax Bobcats';
+const CAT_COLORS = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#6250d6','#e34948','#8a8984'];
+const RECUR = {once:'One-off',weekly:'Weekly',fortnightly:'Fortnightly',monthly:'Monthly',quarterly:'Quarterly'};
+const ENT = {JHL:'Jax Hire', JBL:'Jax Bobcats'};
+const FIN_ROWS = [['revenue','Revenue'],['cos','Cost of sales'],['opex','Operating expenses'],['curAssets','Current assets'],['totAssets','Total assets'],['curLiab','Current liabilities'],['totLiab','Total liabilities']];
+
+const today = () => iso(new Date());
+const blank = () => ({
+  settings:{asOf:today(), weeks:13, buffer:0},
+  jhl:{bank:0, overdraft:0},
+  jbl:{bank:0, limit:0, drawn:0},
+  assets:[], fin:{period:'', JHL:{}, JBL:{}}, tx:[]
+});
+let S;
+try { S = JSON.parse(localStorage.getItem(KEY)) || blank(); } catch(e){ S = blank(); }
+S = Object.assign(blank(), S);
+let view = {flow:'JHL', cfs:'JHL'};
+try { Object.assign(view, JSON.parse(localStorage.getItem(KEY+'-view'))||{}); } catch(e){}
+
+const save = () => { try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} };
+const uid = () => Math.random().toString(36).slice(2,9);
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n = v => { const x = parseFloat(String(v??'').replace(/[$,\s]/g,'')); return isFinite(x) ? x : 0; };
+
+/* ---------- dates ---------- */
+function parse(s){ if(!s) return null; const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+function iso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+const addDays = (d,k) => new Date(d.getFullYear(), d.getMonth(), d.getDate()+k);
+function addMonths(d,k,day){ const t=new Date(d.getFullYear(), d.getMonth()+k, 1); const last=new Date(t.getFullYear(),t.getMonth()+1,0).getDate(); t.setDate(Math.min(day,last)); return t; }
+const dayDiff = (a,b) => Math.round((b-a)/864e5);
+const fmtD = d => d.toLocaleDateString('en-NZ',{day:'numeric',month:'short'});
+const fmtDY = d => d.toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
+
+/* ---------- money ---------- */
+const nf0 = new Intl.NumberFormat('en-NZ',{maximumFractionDigits:0});
+function money(v){ const s='$'+nf0.format(Math.abs(Math.round(v))); return v<-0.5 ? '−'+s : s; }
+function moneyC(v){ const a=Math.abs(v); let s;
+  if(a>=1e6) s='$'+(a/1e6).toFixed(a>=1e7?1:2).replace(/\.?0+$/,'')+'m';
+  else if(a>=1e3) s='$'+(a/1e3).toFixed(a>=1e5?0:1).replace(/\.0$/,'')+'k';
+  else s='$'+Math.round(a);
+  return v<-0.5 ? '−'+s : s; }
+const pct = v => isFinite(v) ? (v*100).toFixed(1)+'%' : '–';
+
+/* ---------- forecast engine ---------- */
+function occurrences(t, start, end){
+  const out=[]; let d=parse(t.date); if(!d || !(n(t.amount))) return out;
+  const until = t.until ? parse(t.until) : end; const stop = until < end ? until : end;
+  const r=t.recur||'once';
+  if(r==='once'){ if(d>=start && d<=end) out.push(d); return out; }
+  const day=d.getDate(); let i=0, cur=d;
+  while(cur<=stop && i<1000){
+    if(cur>=start) out.push(cur);
+    i++;
+    cur = r==='weekly'?addDays(d,7*i): r==='fortnightly'?addDays(d,14*i): r==='monthly'?addMonths(d,i,day): addMonths(d,3*i,day);
+  }
+  return out;
+}
+function events(){
+  const start=parse(S.settings.asOf)||parse(today());
+  const days=S.settings.weeks*7; const end=addDays(start,days-1);
+  const ev=[];
+  for(const t of S.tx){
+    const amt=Math.abs(n(t.amount)); if(!amt) continue;
+    for(const d of occurrences(t,start,end)){
+      ev.push({d, ent:t.entity, kind:t.kind, cat:t.category, desc:t.desc, amt});
+      if(t.entity==='JHL' && t.kind==='out' && t.category===LEASE)
+        ev.push({d, ent:'JBL', kind:'in', cat:'Intercompany lease income', desc:(t.desc||'Lease')+' (from Jax Hire)', amt});
+    }
+  }
+  return {start,end,days,ev};
+}
+function forecast(){
+  const {start,end,days,ev}=events();
+  const W=S.settings.weeks;
+  const mk = (open) => ({open, daily:new Array(days).fill(0), wk:Array.from({length:W},()=>({inn:0,out:0,cats:{}})), cats:{}, catsIn:{}, totIn:0, totOut:0});
+  const E = {JHL:mk(n(S.jhl.bank)), JBL:mk(n(S.jbl.bank))};
+  for(const e of ev){
+    const x=E[e.ent]; if(!x) continue;
+    const i=dayDiff(start,e.d); if(i<0||i>=days) continue;
+    const w=Math.floor(i/7); const s = e.kind==='in'?1:-1;
+    x.daily[i]+=s*e.amt;
+    if(s>0){ x.wk[w].inn+=e.amt; x.totIn+=e.amt; x.catsIn[e.cat]=(x.catsIn[e.cat]||0)+e.amt; }
+    else { x.wk[w].out+=e.amt; x.totOut+=e.amt; x.cats[e.cat]=(x.cats[e.cat]||0)+e.amt; }
+    const key=(s>0?'in|':'out|')+e.cat; x.wk[w].cats[key]=(x.wk[w].cats[key]||0)+e.amt;
+  }
+  for(const k in E){ const x=E[k]; let b=x.open; x.bal=x.daily.map(v=>b+=v);
+    let mi=0; x.bal.forEach((v,i)=>{ if(v<x.bal[mi]) mi=i; }); x.minI=mi; x.min=x.bal.length?x.bal[mi]:x.open;
+    if(x.open<x.min){ x.min=x.open; x.minI=-1; }
+    x.close=x.bal.length?x.bal[x.bal.length-1]:x.open;
+    let c=x.open; x.wk.forEach(w=>{ w.open=c; c+=w.inn-w.out; w.close=c; });
+  }
+  return {start,end,days,W,E};
+}
+
+/* ---------- tooltip ---------- */
+const tip=document.getElementById('tip');
+function showTip(e,html){ tip.innerHTML=html; tip.style.display='block';
+  const r=tip.getBoundingClientRect(); let x=e.clientX+14, y=e.clientY+14;
+  if(x+r.width>innerWidth-8) x=e.clientX-r.width-14; if(y+r.height>innerHeight-8) y=e.clientY-r.height-14;
+  tip.style.left=x+'px'; tip.style.top=y+'px'; }
+const hideTip=()=>tip.style.display='none';
+const row=(l,v,c)=>`<div class="r"><span>${c?`<i style="background:${c}"></i>`:''}${l}</span><b class="num">${v}</b></div>`;
+
+/* ---------- scales ---------- */
+function niceTicks(lo,hi,count=5){
+  if(lo===hi){ hi=lo+1; lo=lo-1; }
+  const span=hi-lo, step0=span/count, mag=Math.pow(10,Math.floor(Math.log10(step0)));
+  const err=step0/mag, step=(err>=7.5?10:err>=3.5?5:err>=1.5?2:1)*mag;
+  const a=Math.floor(lo/step)*step, b=Math.ceil(hi/step)*step; const t=[];
+  for(let v=a; v<=b+step/2; v+=step) t.push(Math.abs(v)<step/1e6?0:v);
+  return t;
+}
+const W_ = el => Math.max(300, el.clientWidth);
+
+/* ---------- chart: balance ---------- */
+function chartBalance(F){
+  const el=document.getElementById('cBal'); const w=W_(el), h=320, m={l:64,r:110,t:14,b:30};
+  const iw=w-m.l-m.r, ih=h-m.t-m.b;
+  const ents=['JHL','JBL'];
+  const days=F.days;
+  const series=ents.map(k=>[F.E[k].open, ...F.E[k].bal]);
+  let vals=series.flat(); const buf=n(S.settings.buffer), od=n(S.jhl.overdraft);
+  vals.push(0); if(buf) vals.push(buf); if(od) vals.push(-od);
+  const ticks=niceTicks(Math.min(...vals),Math.max(...vals));
+  const y0=ticks[0], y1=ticks[ticks.length-1];
+  const X=i=>m.l+iw*i/days, Y=v=>m.t+ih*(1-(v-y0)/(y1-y0));
+  let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Projected bank balance">`;
+  for(const t of ticks){ s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(t)}" y2="${Y(t)}" stroke="${t===0?'#b5b4ae':'var(--grid)'}" stroke-width="1"/>`
+    + `<text x="${m.l-8}" y="${Y(t)+4}" text-anchor="end" font-size="11.5" fill="var(--muted)">${moneyC(t)}</text>`; }
+  // x ticks: each week start
+  const step = F.W>26?4:F.W>13?2:1;
+  for(let wk=0; wk<=F.W; wk+=step){ const x=X(wk*7); s+=`<line x1="${x}" x2="${x}" y1="${m.t+ih}" y2="${m.t+ih+4}" stroke="#b5b4ae"/>`
+    + `<text x="${x}" y="${h-8}" text-anchor="middle" font-size="11.5" fill="var(--muted)">${fmtD(addDays(F.start,wk*7))}</text>`; }
+  if(buf){ s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="var(--crit)" stroke-dasharray="5 4" stroke-width="1.5"/>`
+    + `<text x="${m.l+6}" y="${Y(buf)-5}" font-size="11.5" fill="var(--crit)">Min. buffer ${moneyC(buf)}</text>`; }
+  if(od){ s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(-od)}" y2="${Y(-od)}" stroke="var(--text-2)" stroke-dasharray="2 3" stroke-width="1.5"/>`
+    + `<text x="${m.l+6}" y="${Y(-od)-5}" font-size="11.5" fill="var(--text-2)">Overdraft limit ${moneyC(-od)}</text>`; }
+  // area for JHL
+  const col={JHL:'var(--jhl)',JBL:'var(--jbl)'};
+  const path = arr => { let p=`M${X(0)},${Y(arr[0])}`; for(let i=1;i<arr.length;i++){ p+=`H${X(i)}V${Y(arr[i])}`; } return p; };
+  const a=series[0]; s+=`<path d="${path(a)}V${Y(Math.max(y0,Math.min(0,y1)))}H${X(0)}Z" fill="var(--jhl)" opacity=".08"/>`;
+  const labels=[];
+  ents.forEach((k,j)=>{ const arr=series[j]; s+=`<path d="${path(arr)}" fill="none" stroke="${col[k]}" stroke-width="2.2" stroke-linejoin="round"/>`;
+    labels.push({y:Y(arr[arr.length-1]), k, v:arr[arr.length-1]}); });
+  // direct labels with collision avoidance
+  labels.sort((p,q)=>p.y-q.y); if(labels.length===2 && labels[1].y-labels[0].y<30){ const mid=(labels[0].y+labels[1].y)/2; labels[0].y=mid-15; labels[1].y=mid+15; }
+  for(const L of labels){ s+=`<text x="${m.l+iw+6}" y="${L.y-1}" font-size="11.5" font-weight="650" fill="var(--text)">${ENT[L.k]}</text><text x="${m.l+iw+6}" y="${L.y+12}" font-size="11.5" fill="var(--text-2)">${moneyC(L.v)}</text>`; }
+  // low point marker JHL
+  const J=F.E.JHL; if(J.minI>=0 && J.min<J.open){ const xi=X(J.minI+1), yi=Y(J.min);
+    s+=`<circle cx="${xi}" cy="${yi}" r="5" fill="var(--jhl)" stroke="var(--surface)" stroke-width="2"/><text x="${xi}" y="${yi+18}" text-anchor="middle" font-size="11.5" font-weight="650" fill="var(--text)">Low ${moneyC(J.min)}</text>`; }
+  s+=`<line id="xh" x1="0" x2="0" y1="${m.t}" y2="${m.t+ih}" stroke="#9a9993" stroke-width="1" visibility="hidden"/>`;
+  s+=`<g id="xhd"></g><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="hit"/></svg>`;
+  el.innerHTML=s;
+  const hit=el.querySelector('#hit'), xh=el.querySelector('#xh'), xhd=el.querySelector('#xhd');
+  hit.onmousemove=e=>{ const r=hit.getBoundingClientRect(); let i=Math.round((e.clientX-r.left)/r.width*days); i=Math.max(0,Math.min(days,i));
+    const x=X(i); xh.setAttribute('x1',x); xh.setAttribute('x2',x); xh.setAttribute('visibility','visible');
+    xhd.innerHTML=ents.map((k,j)=>`<circle cx="${x}" cy="${Y(series[j][i])}" r="4.5" fill="${col[k]}" stroke="var(--surface)" stroke-width="2"/>`).join('');
+    const d=i===0?F.start:addDays(F.start,i-1);
+    const dayEv = i===0?'':evOnDay(d);
+    showTip(e,`<div class="t">${i===0?'Opening, '+fmtDY(F.start):'Close of '+fmtDY(d)}</div>`+ents.map((k,j)=>row(ENT[k],money(series[j][i]),col[k])).join('')+dayEv); };
+  hit.onmouseleave=()=>{ hideTip(); xh.setAttribute('visibility','hidden'); xhd.innerHTML=''; };
+  document.getElementById('legBal').innerHTML = `<span><i class="line" style="background:var(--jhl)"></i>Jax Hire</span><span><i class="line" style="background:var(--jbl)"></i>Jax Bobcats</span>`
+    + (buf?`<span><i class="dash"></i>Min. buffer ${moneyC(buf)}</span>`:'');
+}
+let EVCACHE=[];
+function evOnDay(d){ const k=iso(d); const list=EVCACHE.filter(e=>iso(e.d)===k); if(!list.length) return '';
+  return '<div style="border-top:1px solid var(--grid);margin-top:6px;padding-top:4px">'+list.slice(0,8).map(e=>row(esc(e.desc||e.cat)+` <span style="color:var(--muted)">(${e.ent==='JHL'?'JH':'JB'})</span>`,(e.kind==='in'?'+':'−')+money(e.amt))).join('')+(list.length>8?`<div class="r"><span>+${list.length-8} more</span></div>`:'')+'</div>'; }
+
+/* ---------- chart: weekly flows ---------- */
+function chartFlow(F){
+  const el=document.getElementById('cFlow'); const k=view.flow; const X_=F.E[k];
+  const w=W_(el), h=280, m={l:60,r:12,t:12,b:30}; const iw=w-m.l-m.r, ih=h-m.t-m.b;
+  const mx=Math.max(1,...X_.wk.map(v=>v.inn)), mn=Math.max(1,...X_.wk.map(v=>v.out));
+  const ticks=niceTicks(-mn,mx,6); const y0=ticks[0], y1=ticks[ticks.length-1];
+  const Y=v=>m.t+ih*(1-(v-y0)/(y1-y0)); const bw=iw/F.W; const bar=Math.max(3,Math.min(34,bw*0.62));
+  let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`;
+  for(const t of ticks) s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(t)}" y2="${Y(t)}" stroke="${t===0?'#b5b4ae':'var(--grid)'}"/><text x="${m.l-8}" y="${Y(t)+4}" text-anchor="end" font-size="11.5" fill="var(--muted)">${moneyC(t)}</text>`;
+  const step=F.W>26?4:F.W>13?2:1; let net='';
+  X_.wk.forEach((v,i)=>{ const cx=m.l+bw*i+bw/2, x=cx-bar/2;
+    if(v.inn) s+=`<path d="${rbar(x,Y(v.inn),bar,Y(0)-Y(v.inn)-1,true)}" fill="var(--in)"/>`;
+    if(v.out) s+=`<path d="${rbar(x,Y(0)+1,bar,Y(-v.out)-Y(0)-1,false)}" fill="var(--out)"/>`;
+    net+=(i?'L':'M')+cx+','+Y(v.inn-v.out);
+    if(i%step===0) s+=`<text x="${cx}" y="${h-8}" text-anchor="middle" font-size="11" fill="var(--muted)">${fmtD(addDays(F.start,i*7))}</text>`;
+    s+=`<rect class="hb" data-i="${i}" x="${m.l+bw*i}" y="${m.t}" width="${bw}" height="${ih}" fill="transparent"/>`; });
+  s+=`<path d="${net}" fill="none" stroke="var(--text)" stroke-width="1.6" pointer-events="none"/>`;
+  X_.wk.forEach((v,i)=>{ const cx=m.l+bw*i+bw/2; s+=`<circle cx="${cx}" cy="${Y(v.inn-v.out)}" r="3" fill="var(--text)" pointer-events="none"/>`; });
+  el.innerHTML=s+'</svg>';
+  el.querySelectorAll('.hb').forEach(r=>{ r.onmousemove=e=>{ const i=+r.dataset.i, v=X_.wk[i];
+    const cats=Object.entries(v.cats).sort((a,b)=>b[1]-a[1]).map(([kk,a])=>{const [kind,c]=kk.split('|');return row(esc(c),(kind==='in'?'+':'−')+money(a));}).join('');
+    showTip(e,`<div class="t">Week of ${fmtD(addDays(F.start,i*7))} to ${fmtD(addDays(F.start,i*7+6))}</div>`+row('Receipts',money(v.inn),'var(--in)')+row('Payments',money(v.out),'var(--out)')+row('Net',money(v.inn-v.out))+row('Closing balance',money(v.close))+(cats?`<div style="border-top:1px solid var(--grid);margin-top:6px;padding-top:4px">${cats}</div>`:'')); };
+    r.onmouseleave=hideTip; });
+}
+function rbar(x,y,w,h,up){ h=Math.max(0,h); const r=Math.min(4,w/2,h); if(h<=0) return '';
+  return up ? `M${x},${y+h}V${y+r}Q${x},${y} ${x+r},${y}H${x+w-r}Q${x+w},${y} ${x+w},${y+r}V${y+h}Z`
+            : `M${x},${y}V${y+h-r}Q${x},${y+h} ${x+r},${y+h}H${x+w-r}Q${x+w},${y+h} ${x+w},${y+h-r}V${y}Z`; }
+
+/* ---------- chart: categories ---------- */
+function chartCat(F){
+  const el=document.getElementById('cCat'); const k=view.flow; const X_=F.E[k];
+  document.getElementById('capCat').textContent=`${ENT[k]}: total payments by type over the next ${F.W} weeks.`;
+  const ent=Object.entries(X_.cats).sort((a,b)=>b[1]-a[1]);
+  if(!ent.length){ el.innerHTML='<div class="empty">No payments entered yet</div>'; return; }
+  const w=W_(el), rh=34, m={l:220,r:90,t:4,b:4}; const h=m.t+m.b+rh*ent.length; const iw=w-m.l-m.r;
+  const mx=Math.max(...ent.map(e=>e[1])); const tot=X_.totOut;
+  let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`;
+  ent.forEach(([c,v],i)=>{ const y=m.t+i*rh+7, bh=rh-14, bw=Math.max(2,iw*v/mx); const col=CAT_COLORS[OUT_CATS.indexOf(c)]||'#8a8984';
+    s+=`<text x="${m.l-10}" y="${y+bh/2+4}" text-anchor="end" font-size="12.5" fill="var(--text)">${esc(c)}</text>`
+     + `<path d="M${m.l},${y}H${m.l+bw-4}Q${m.l+bw},${y} ${m.l+bw},${y+4}V${y+bh-4}Q${m.l+bw},${y+bh} ${m.l+bw-4},${y+bh}H${m.l}Z" fill="${col}"/>`
+     + `<text x="${m.l+bw+8}" y="${y+bh/2+4}" font-size="12" fill="var(--text-2)" class="num">${moneyC(v)} · ${Math.round(v/tot*100)}%</text>`
+     + `<rect class="hc" data-c="${esc(c)}" data-v="${v}" x="0" y="${m.t+i*rh}" width="${w}" height="${rh}" fill="transparent"/>`; });
+  el.innerHTML=s+'</svg>';
+  el.querySelectorAll('.hc').forEach(r=>{ r.onmousemove=e=>showTip(e,`<div class="t">${r.dataset.c}</div>`+row('Total',money(+r.dataset.v))+row('Share of payments',pct(+r.dataset.v/tot))+row('Weekly average',money(+r.dataset.v/F.W))); r.onmouseleave=hideTip; });
+}
+
+/* ---------- chart: facility + equity ---------- */
+function hbars(id, rows, maxV, note){
+  const el=document.getElementById(id); const w=W_(el); const m={l:150,r:20,t:6,b:26}, rh=46; const h=m.t+m.b+rh*rows.length; const iw=w-m.l-m.r;
+  if(!maxV){ el.innerHTML='<div class="empty">Enter the facility and fleet values in Edit data</div>'; return; }
+  const ticks=niceTicks(0,maxV,4); const top=ticks[ticks.length-1]; const X=v=>m.l+iw*Math.max(0,v)/top;
+  let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`;
+  for(const t of ticks) s+=`<line x1="${X(t)}" x2="${X(t)}" y1="${m.t}" y2="${h-m.b}" stroke="var(--grid)"/><text x="${X(t)}" y="${h-8}" text-anchor="middle" font-size="11" fill="var(--muted)">${moneyC(t)}</text>`;
+  rows.forEach((r,i)=>{ const y=m.t+i*rh+8, bh=rh-16;
+    s+=`<text x="${m.l-10}" y="${y+bh/2+4}" text-anchor="end" font-size="12.5" fill="var(--text)">${r.label}</text>`;
+    let x=m.l; r.parts.forEach((p,j)=>{ if(p.v<=0) return; const bw=X(p.v)-m.l; const last = j===r.parts.length-1 || r.parts.slice(j+1).every(q=>q.v<=0);
+      const rr=last?Math.min(4,bw):0;
+      s+=`<path d="M${x},${y}H${x+bw-rr}Q${x+bw},${y} ${x+bw},${y+rr}V${y+bh-rr}Q${x+bw},${y+bh} ${x+bw-rr},${y+bh}H${x}Z" fill="${p.c}" ${p.stroke?`stroke="${p.stroke}" stroke-dasharray="4 3"`:''}/>`;
+      if(bw>70) s+=`<text x="${x+8}" y="${y+bh/2+4}" font-size="12" font-weight="650" fill="${p.ink||'#fff'}">${moneyC(p.v)}</text>`;
+      else if(last) s+=`<text x="${x+bw+8}" y="${y+bh/2+4}" font-size="12" font-weight="650" fill="var(--text)">${moneyC(p.v)}</text>`;
+      s+=`<rect class="hf" data-t="${esc(p.tip)}" x="${x}" y="${y}" width="${bw}" height="${bh}" fill="transparent"/>`;
+      x+=bw+(p.gap?2:0); }); });
+  el.innerHTML=s+'</svg>';
+  el.querySelectorAll('.hf').forEach(r=>{ r.onmousemove=e=>showTip(e,r.dataset.t); r.onmouseleave=hideTip; });
+}
+
+/* ---------- KPIs ---------- */
+function kpi(lbl,val,foot,cls='',extra=''){ return `<div class="card kpi"><div class="lbl">${lbl}</div><div class="val num ${cls}">${val}</div><div class="foot">${foot||'&nbsp;'}</div>${extra}</div>`; }
+function meter(p){ const c=p>=.9?'var(--crit)':p>=.75?'var(--warn)':'var(--good)'; return `<div class="meter"><span style="width:${Math.min(100,p*100)}%;background:${c}"></span></div>`; }
+
+function render(){
+  save();
+  const F=forecast(); EVCACHE=events().ev;
+  const J=F.E.JHL, B=F.E.JBL; const od=n(S.jhl.overdraft), buf=n(S.settings.buffer);
+  document.getElementById('hSub').textContent=`Forecast from ${fmtDY(F.start)} to ${fmtDY(F.end)} (${F.W} weeks) · All figures NZD`;
+  document.getElementById('horizonNote').textContent=`Next ${F.W} weeks`;
+  const lowD = J.minI<0?F.start:addDays(F.start,J.minI);
+  document.getElementById('kJhl').innerHTML =
+    kpi('Current account balance', money(J.open), 'at '+fmtDY(F.start), J.open<0?'neg':'')
+   +kpi('Available funds', money(J.open+od), od?`incl. ${money(od)} overdraft`:'no overdraft facility', J.open+od<0?'neg':'')
+   +kpi('Lowest projected balance', money(J.min), 'on '+fmtDY(lowD), J.min<buf||J.min<0?'neg':'')
+   +kpi(`Projected balance, week ${F.W}`, money(J.close), 'at '+fmtDY(F.end), J.close<0?'neg':'')
+   +kpi('Net cash flow', (J.close-J.open>=0?'+':'')+money(J.close-J.open), `${moneyC(J.totIn)} in · ${moneyC(J.totOut)} out`, J.close-J.open<0?'neg':'');
+
+  // callout
+  let co;
+  const breachI = J.bal.findIndex(v=>v<buf);
+  const odI = J.bal.findIndex(v=>v<-od);
+  if(!S.tx.length && !J.open) co=['warn','!','No data yet. Click <b>Edit data</b> to enter bank balances, bills and income.'];
+  else if(odI>=0) co=['crit','!',`Jax Hire is projected to exceed ${od?'its overdraft limit':'its available funds'} on <b>${fmtDY(addDays(F.start,odI))}</b>. Lowest point: <b>${money(J.min)}</b> on ${fmtDY(lowD)}. Funding is needed before then.`];
+  else if(breachI>=0) co=['warn','!',`Jax Hire is projected to fall below the ${money(buf)} minimum buffer on <b>${fmtDY(addDays(F.start,breachI))}</b>. Lowest point: <b>${money(J.min)}</b> on ${fmtDY(lowD)}.`];
+  else co=['good','✓',`Jax Hire's cash stays above ${buf?'the '+money(buf)+' minimum buffer':'zero'} for the whole ${F.W}-week forecast. Lowest point: <b>${money(J.min)}</b> on ${fmtDY(lowD)}.`];
+  document.getElementById('callout').innerHTML=`<div class="callout ${co[0]}"><span class="ic">${co[1]}</span><div>${co[2]}</div></div>`;
+
+  // Bobcats
+  const lim=n(S.jbl.limit), dr=n(S.jbl.drawn), head=lim-dr, util=lim?dr/lim:0;
+  const fleet=S.assets.reduce((a,x)=>a+n(x.value),0); const eq=fleet-dr; const lvr=fleet?dr/fleet:NaN;
+  document.getElementById('kJbl').innerHTML =
+    kpi('Facility limit', money(lim), 'asset finance facility')
+   +kpi('Drawn (owing)', money(dr), lim?`${pct(util)} of the facility used`:'', '', lim?meter(util):'')
+   +kpi('Available to draw', money(head), lim?`${pct(1-util)} headroom`:'', head<0?'neg':'')
+   +kpi('Fleet value', money(fleet), `${S.assets.length} asset${S.assets.length===1?'':'s'} · LVR ${pct(lvr)}`)
+   +kpi('Equity in fleet', money(eq), 'fleet value minus finance owed', eq<0?'neg':'');
+
+  hbars('cFac',[{label:'Facility',parts:[
+      {v:dr,c:'var(--jbl)',tip:`<div class="t">Drawn</div>${row('Amount',money(dr))}${row('Share of limit',pct(util))}`,gap:true},
+      {v:Math.max(0,head),c:'#f6d3c3',ink:'#8a3a17',tip:`<div class="t">Available to draw</div>${row('Amount',money(head))}${row('Share of limit',pct(1-util))}`}]}],
+    Math.max(lim,dr));
+  hbars('cEq',[
+    {label:'Fleet value',parts:[{v:fleet,c:'var(--jhl)',tip:`<div class="t">Fleet value</div>${row('Total',money(fleet))}`+S.assets.slice(0,10).map(a=>row(esc(a.name||'Asset'),money(n(a.value)))).join('')}]},
+    {label:'Finance owed',parts:[{v:dr,c:'var(--jbl)',tip:`<div class="t">Finance owed</div>${row('Drawn',money(dr))}${row('Loan-to-value (LVR)',pct(lvr))}`}]},
+    {label:'Equity cushion',parts:[{v:Math.max(0,eq),c:'var(--in)',tip:`<div class="t">Equity cushion</div>${row('Fleet minus finance',money(eq))}${row('Equity share',pct(fleet?eq/fleet:NaN))}`}]}],
+    Math.max(fleet,dr));
+
+  chartBalance(F); chartFlow(F); chartCat(F);
+  renderFin(); renderCfs(F); renderSegs();
+}
+
+/* ---------- financial position table ---------- */
+function renderFin(){
+  const f=S.fin; document.getElementById('finPeriod').textContent=f.period||'';
+  const g=k=>({JHL:n(f.JHL?.[k]),JBL:n(f.JBL?.[k])});
+  const cols=['JHL','JBL','G']; const v=(o,c)=>c==='G'?o.JHL+o.JBL:o[c];
+  const R=g('revenue'),C=g('cos'),O=g('opex'),CA=g('curAssets'),TA=g('totAssets'),CL=g('curLiab'),TL=g('totLiab');
+  const line=(lbl,fn,cls='',fmt=money)=>`<tr class="${cls}"><td>${lbl}</td>${cols.map(c=>{const x=fn(c);return `<td class="${typeof x==='number'&&x<0?'neg':''}">${fmt(x)}</td>`;}).join('')}</tr>`;
+  const ratio=x=>isFinite(x)&&x?x.toFixed(2)+'×':'–';
+  document.getElementById('tFin').innerHTML=`<thead><tr><th></th><th>Jax Hire</th><th>Jax Bobcats</th><th>Combined*</th></tr></thead><tbody>
+   <tr class="hdr"><td colspan="4">Profit &amp; loss</td></tr>
+   ${line('Revenue',c=>v(R,c))}${line('Cost of sales',c=>-v(C,c),'sub')}${line('Gross profit',c=>v(R,c)-v(C,c))}
+   ${line('Gross margin',c=>v(R,c)?(v(R,c)-v(C,c))/v(R,c):NaN,'sub',pct)}
+   ${line('Operating expenses',c=>-v(O,c),'sub')}${line('Net profit',c=>v(R,c)-v(C,c)-v(O,c),'total')}
+   ${line('Net margin',c=>v(R,c)?(v(R,c)-v(C,c)-v(O,c))/v(R,c):NaN,'sub',pct)}
+   <tr class="hdr"><td colspan="4">Balance sheet</td></tr>
+   ${line('Total assets',c=>v(TA,c))}${line('Total liabilities',c=>-v(TL,c),'sub')}${line('Net assets (equity)',c=>v(TA,c)-v(TL,c),'total')}
+   ${line('Working capital',c=>v(CA,c)-v(CL,c))}${line('Current ratio',c=>v(CL,c)?v(CA,c)/v(CL,c):NaN,'sub',ratio)}
+   ${line('Debt to equity',c=>{const e=v(TA,c)-v(TL,c);return e>0?v(TL,c)/e:NaN;},'sub',ratio)}
+   </tbody>`;
+  if(!document.getElementById('finNote')) document.getElementById('tFin').insertAdjacentHTML('afterend','<p class="hint" id="finNote">* Combined is a simple sum of the two companies. Intercompany items (e.g. the equipment lease) are not eliminated.</p>');
+}
+
+/* ---------- weekly statement ---------- */
+function renderCfs(F){
+  const k=view.cfs, X_=F.E[k]; const t=document.getElementById('tCfs');
+  const inC=[...new Set(X_.wk.flatMap(w=>Object.keys(w.cats).filter(c=>c.startsWith('in|'))))].map(c=>c.slice(3));
+  const outC=[...new Set(X_.wk.flatMap(w=>Object.keys(w.cats).filter(c=>c.startsWith('out|'))))].map(c=>c.slice(4));
+  const cell=v=>`<td class="${v<0?'neg':''}">${v?money(v):'–'}</td>`;
+  let h=`<thead><tr><th>${ENT[k]} · week starting</th>${X_.wk.map((_,i)=>`<th>${fmtD(addDays(F.start,i*7))}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
+  h+=`<tr><td>Opening balance</td>${X_.wk.map(w=>cell(w.open)).join('')}<td></td></tr>`;
+  h+=`<tr class="hdr"><td>Receipts</td>${'<td></td>'.repeat(F.W+1)}</tr>`;
+  for(const c of inC) h+=`<tr class="sub"><td>${esc(c)}</td>${X_.wk.map(w=>cell(w.cats['in|'+c]||0)).join('')}${cell(X_.catsIn[c]||0)}</tr>`;
+  h+=`<tr class="total"><td>Total receipts</td>${X_.wk.map(w=>cell(w.inn)).join('')}${cell(X_.totIn)}</tr>`;
+  h+=`<tr class="hdr"><td>Payments</td>${'<td></td>'.repeat(F.W+1)}</tr>`;
+  for(const c of outC) h+=`<tr class="sub"><td>${esc(c)}</td>${X_.wk.map(w=>cell(w.cats['out|'+c]||0)).join('')}${cell(X_.cats[c]||0)}</tr>`;
+  h+=`<tr class="total"><td>Total payments</td>${X_.wk.map(w=>cell(w.out)).join('')}${cell(X_.totOut)}</tr>`;
+  h+=`<tr class="total"><td>Net cash flow</td>${X_.wk.map(w=>cell(w.inn-w.out)).join('')}${cell(X_.totIn-X_.totOut)}</tr>`;
+  h+=`<tr class="total"><td>Closing balance</td>${X_.wk.map(w=>cell(w.close)).join('')}<td></td></tr></tbody>`;
+  t.innerHTML=h;
+}
+function renderSegs(){
+  document.querySelectorAll('.seg[data-ent]').forEach(sg=>{ const key=sg.dataset.ent;
+    sg.innerHTML=Object.keys(ENT).map(k=>`<button class="${view[key]===k?'on':''}" data-k="${k}">${ENT[k]}</button>`).join('');
+    sg.querySelectorAll('button').forEach(b=>b.onclick=()=>{ view[key]=b.dataset.k; try{localStorage.setItem(KEY+'-view',JSON.stringify(view));}catch(e){} render(); }); });
+}
+
+/* ---------- edit panel ---------- */
+let rT; const soon=()=>{ clearTimeout(rT); rT=setTimeout(render,120); };
+const getP=(p)=>p.split('.').reduce((o,k)=>o?.[k],S);
+const setP=(p,v)=>{ const ks=p.split('.'); let o=S; ks.slice(0,-1).forEach(k=>{o[k]=o[k]||{};o=o[k];}); o[ks[ks.length-1]]=v; };
+function bindStatic(){
+  document.querySelectorAll('#edit [data-k]').forEach(el=>{
+    const v=getP(el.dataset.k); el.value = v??'';
+    el.oninput=()=>{ setP(el.dataset.k, el.hasAttribute('data-num')?n(el.value):el.value); soon(); };
+  });
+}
+function txRow(t){
+  const cats=t.kind==='in'?IN_CATS:OUT_CATS;
+  return `<tr class="${t.kind}" data-id="${t.id}">
+    <td><input type="date" data-f="date" value="${esc(t.date)}" style="width:138px"></td>
+    <td><select data-f="entity" style="width:118px">${Object.keys(ENT).map(k=>`<option value="${k}" ${t.entity===k?'selected':''}>${ENT[k]}</option>`).join('')}</select></td>
+    <td><select data-f="kind" style="width:92px"><option value="in" ${t.kind==='in'?'selected':''}>Income</option><option value="out" ${t.kind==='out'?'selected':''}>Bill</option></select></td>
+    <td><select data-f="category" style="min-width:190px">${cats.map(c=>`<option ${t.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></td>
+    <td><input data-f="desc" value="${esc(t.desc)}" placeholder="e.g. Fortnightly payroll" style="min-width:170px"></td>
+    <td><input class="money" data-f="amount" value="${t.amount?esc(t.amount):''}" placeholder="0" inputmode="decimal" style="width:110px"></td>
+    <td><select data-f="recur" style="width:116px">${Object.entries(RECUR).map(([k,l])=>`<option value="${k}" ${t.recur===k?'selected':''}>${l}</option>`).join('')}</select></td>
+    <td><input type="date" data-f="until" value="${esc(t.until||'')}" title="Optional: stop repeating after this date" style="width:138px" ${t.recur==='once'?'disabled':''}></td>
+    <td><button class="small danger" data-del>✕</button></td></tr>`;
+}
+function renderTx(){
+  const tb=document.getElementById('txTable');
+  tb.innerHTML=`<thead><tr><th>Date (first)</th><th>Company</th><th>In / out</th><th>Type</th><th>Description</th><th>Amount (NZD)</th><th>Repeats</th><th>Repeat until</th><th></th></tr></thead><tbody>${S.tx.map(txRow).join('')||'<tr><td colspan="9" class="empty">No bills or income yet. Click "+ Income" or "+ Bill".</td></tr>'}</tbody>`;
+  tb.querySelectorAll('tr[data-id]').forEach(tr=>{ const t=S.tx.find(x=>x.id===tr.dataset.id);
+    tr.querySelectorAll('[data-f]').forEach(el=>{ const ev=el.tagName==='SELECT'||el.type==='date'?'change':'input';
+      el.addEventListener(ev,()=>{ const f=el.dataset.f; t[f]= f==='amount'? el.value : el.value;
+        if(f==='kind'){ t.category=(t.kind==='in'?IN_CATS:OUT_CATS)[0]; save(); renderTx(); }
+        if(f==='recur'){ tr.querySelector('[data-f=until]').disabled = t.recur==='once'; }
+        if(f==='kind') tr.className=t.kind; soon(); }); });
+    tr.querySelector('[data-del]').onclick=()=>{ S.tx=S.tx.filter(x=>x!==t); renderTx(); render(); }; });
+}
+function addTx(kind){ const t={id:uid(),date:S.settings.asOf||today(),entity:'JHL',kind,category:(kind==='in'?IN_CATS:OUT_CATS)[0],desc:'',amount:'',recur:'once',until:''};
+  S.tx.push(t); renderTx(); render(); const last=document.querySelector('#txTable tr[data-id="'+t.id+'"] [data-f=amount]'); last&&last.focus(); }
+function renderAssets(){
+  const tb=document.getElementById('assetTable');
+  tb.innerHTML=`<thead><tr><th>Asset</th><th>Current value (NZD)</th><th></th></tr></thead><tbody>${S.assets.map(a=>`<tr data-id="${a.id}"><td><input data-f="name" value="${esc(a.name)}" placeholder="e.g. Bobcat S650 #3"></td><td><input class="money" data-f="value" value="${a.value?esc(a.value):''}" placeholder="0" inputmode="decimal"></td><td><button class="small danger" data-del>✕</button></td></tr>`).join('')||'<tr><td colspan="3" class="empty">No assets yet</td></tr>'}</tbody>`;
+  tb.querySelectorAll('tr[data-id]').forEach(tr=>{ const a=S.assets.find(x=>x.id===tr.dataset.id);
+    tr.querySelectorAll('[data-f]').forEach(el=>el.oninput=()=>{ a[el.dataset.f]=el.value; soon(); });
+    tr.querySelector('[data-del]').onclick=()=>{ S.assets=S.assets.filter(x=>x!==a); renderAssets(); render(); }; });
+}
+function renderFinForm(){
+  const tb=document.getElementById('finTable'); S.fin.JHL=S.fin.JHL||{}; S.fin.JBL=S.fin.JBL||{};
+  tb.innerHTML=`<thead><tr><th></th><th>Jax Hire</th><th>Jax Bobcats</th></tr></thead><tbody>${FIN_ROWS.map(([k,l])=>`<tr><td style="font-size:12.5px;color:var(--text-2);white-space:nowrap">${l}</td>${['JHL','JBL'].map(e=>`<td><input class="money" data-e="${e}" data-f="${k}" value="${S.fin[e][k]?esc(S.fin[e][k]):''}" placeholder="0" inputmode="decimal"></td>`).join('')}</tr>`).join('')}</tbody>`;
+  tb.querySelectorAll('input').forEach(el=>el.oninput=()=>{ S.fin[el.dataset.e][el.dataset.f]=el.value; soon(); });
+}
+function renderEdit(){ bindStatic(); renderTx(); renderAssets(); renderFinForm(); }
+
+/* ---------- sample data ---------- */
+function sample(){
+  const d0=parse(today()); const D=k=>iso(addDays(d0,k));
+  return { settings:{asOf:iso(d0),weeks:13,buffer:50000},
+    jhl:{bank:185000,overdraft:100000}, jbl:{bank:42000,limit:2500000,drawn:1680000},
+    assets:[{id:uid(),name:'Bobcat compact track loaders (x6)',value:720000},{id:uid(),name:'Excavators 1.7t–8t (x5)',value:610000},{id:uid(),name:'Trucks & trailers (x4)',value:420000},{id:uid(),name:'Attachments & ancillary',value:310000}],
+    fin:{period:'Example: YTD to 30 Sep 2026',JHL:{revenue:2150000,cos:1180000,opex:690000,curAssets:520000,totAssets:640000,curLiab:410000,totLiab:470000},JBL:{revenue:780000,cos:0,opex:520000,curAssets:90000,totAssets:2150000,curLiab:260000,totLiab:1720000}},
+    tx:[
+      {id:uid(),date:D(3),entity:'JHL',kind:'out',category:'Wages & PAYE',desc:'Fortnightly payroll',amount:'68000',recur:'fortnightly',until:''},
+      {id:uid(),date:D(1),entity:'JHL',kind:'in',category:'Accounts receivable (debtors)',desc:'Debtor receipts',amount:'72000',recur:'weekly',until:''},
+      {id:uid(),date:D(5),entity:'JHL',kind:'in',category:'Hire revenue (cash sales)',desc:'Card & cash hires',amount:'9000',recur:'weekly',until:''},
+      {id:uid(),date:D(8),entity:'JHL',kind:'out',category:'Equipment lease to Jax Bobcats',desc:'Monthly fleet lease',amount:'65000',recur:'monthly',until:''},
+      {id:uid(),date:D(13),entity:'JHL',kind:'out',category:'Accounts payable (creditors)',desc:'Supplier run (20th)',amount:'84000',recur:'monthly',until:''},
+      {id:uid(),date:D(6),entity:'JHL',kind:'out',category:'Fuel & maintenance',desc:'Fuel cards',amount:'7500',recur:'weekly',until:''},
+      {id:uid(),date:D(36),entity:'JHL',kind:'out',category:'GST / IRD',desc:'GST return',amount:'58000',recur:'once',until:''},
+      {id:uid(),date:D(10),entity:'JHL',kind:'out',category:'Rent',desc:'Yard rent',amount:'8200',recur:'monthly',until:''},
+      {id:uid(),date:D(20),entity:'JHL',kind:'out',category:'Insurance',desc:'Fleet insurance instalment',amount:'6400',recur:'monthly',until:''},
+      {id:uid(),date:D(12),entity:'JBL',kind:'out',category:'Asset finance repayment',desc:'Facility repayment',amount:'58000',recur:'monthly',until:''},
+      {id:uid(),date:D(25),entity:'JBL',kind:'out',category:'Accounts payable (creditors)',desc:'Major servicing',amount:'14000',recur:'once',until:''}
+    ]};
+}
+
+/* ---------- wiring ---------- */
+const bEdit=document.getElementById('bEdit');
+function toggleEdit(on){ document.body.classList.toggle('editing',on); bEdit.textContent=on?'Done (presentation view)':'Edit data';
+  if(on){ renderEdit(); document.getElementById('edit').scrollIntoView({behavior:'smooth'}); } else window.scrollTo({top:0,behavior:'smooth'}); }
+bEdit.onclick=()=>toggleEdit(!document.body.classList.contains('editing'));
+document.addEventListener('keydown',e=>{ if(e.key.toLowerCase()==='e' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && !e.metaKey && !e.ctrlKey) bEdit.click(); });
+document.getElementById('addIn').onclick=()=>addTx('in');
+document.getElementById('addOut').onclick=()=>addTx('out');
+document.getElementById('sortTx').onclick=()=>{ S.tx.sort((a,b)=>(a.date||'').localeCompare(b.date||'')); renderTx(); render(); };
+document.getElementById('addAsset').onclick=()=>{ S.assets.push({id:uid(),name:'',value:''}); renderAssets(); render(); };
+document.getElementById('bSample').onclick=()=>{ if(S.tx.length && !confirm('Replace your current data with example data?')) return; S=sample(); renderEdit(); render(); };
+document.getElementById('bClear').onclick=()=>{ if(!confirm('Clear ALL data? Export first if you want to keep a copy.')) return; S=blank(); renderEdit(); render(); };
+document.getElementById('bExport').onclick=()=>{ const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'}); const a=document.createElement('a');
+  a.href=URL.createObjectURL(b); a.download=`rck-cashflow-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); };
+const fI=document.getElementById('fImport');
+document.getElementById('bImport').onclick=()=>fI.click();
+fI.onchange=async()=>{ const f=fI.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); S=Object.assign(blank(),d); renderEdit(); render(); }catch(e){ alert('That file could not be read: '+e.message); } fI.value=''; };
+let rz; addEventListener('resize',()=>{ clearTimeout(rz); rz=setTimeout(render,150); });
+
+render();
+if(!S.tx.length && !n(S.jhl.bank)) toggleEdit(true);
+})();
+</script>
+</body>
+</html>
