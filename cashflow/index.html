@@ -27,7 +27,7 @@ body{
 }
 .num{font-variant-numeric:tabular-nums}
 .glass{background:var(--glass);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:1px solid var(--glass-border);box-shadow:var(--shadow);border-radius:28px}
-.wrap{max-width:1080px;margin:0 auto;padding:22px 20px 60px}
+.wrap{max-width:1080px;margin:0 auto;padding-block:22px 60px;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
 
 .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:12px}
@@ -134,7 +134,25 @@ input::placeholder{color:var(--muted)}
 .empty{color:var(--muted);font-size:13.5px;padding:20px 0;text-align:center}
 
 @media (max-width:900px){.tiles{grid-template-columns:1fr 1fr}.fg{grid-template-columns:1fr!important}.big{font-size:50px}}
-@media (max-width:560px){.wrap{padding:16px 16px 40px}.hero{padding:20px}.big{font-size:42px}.seg button{padding:6px 10px;font-size:13px}}
+@media (max-width:560px){
+  .wrap{padding-block:14px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .bar{gap:10px}.bar h1{font-size:21px}.logo{width:38px;height:38px;border-radius:12px;font-size:12px}
+  .pills{width:100%;display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:6px}.pill{padding:8px 8px;font-size:13.5px;text-align:center}
+  .hero{padding:18px 18px 18px;border-radius:24px}.big{font-size:44px;letter-spacing:-1.5px}.hero .how{font-size:14px}
+  .hero-top{flex-direction:column;align-items:stretch}
+  .seg{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);width:100%}.seg button{padding:7px 4px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .status{font-size:13px;padding:7px 12px}
+  .chart-card{padding:16px 14px 10px;border-radius:24px}.chart-top{flex-direction:column;align-items:stretch}
+  .tiles{gap:10px}.tile{padding:13px 14px;border-radius:18px}.tile .v{font-size:19px}.tile .f{font-size:11.5px}
+  .fac{gap:18px}.fac li{font-size:14px}
+  #sheet{padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px));max-height:92vh;border-radius:22px 22px 0 0}
+}
+#sheet{padding-bottom:calc(30px + env(safe-area-inset-bottom,0px))}
+.chart svg{touch-action:pan-y;display:block}
+.seg .ls{display:none}
+@media (max-width:560px){.seg .lf{display:none}.seg .ls{display:inline}}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);opacity:0;transition:.25s;z-index:70;padding:10px 18px;border-radius:999px;font-size:14px;font-weight:600;color:var(--text);background:rgba(22,32,27,.92);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px rgba(0,0,0,.5);pointer-events:none;max-width:calc(100% - 32px);text-align:center}
+#toast.on{opacity:1;transform:translate(-50%,0)}
 @media print{
   .pills,.details-toggle,#sheet,#sheetBg{display:none!important}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -180,7 +198,7 @@ input::placeholder{color:var(--muted)}
     <div class="glass dcard"><h3>Weekly cash flow</h3><div class="scroll"><table class="t num" id="tWeeks"></table></div></div>
   </section>
 </div>
-<div id="tip"></div>
+<div id="tip"></div><div id="toast" role="status"></div>
 
 <div id="sheetBg"></div>
 <section id="sheet" aria-label="Edit data">
@@ -246,6 +264,7 @@ const RECUR = {once:'One-off',weekly:'Weekly',fortnightly:'Fortnightly',monthly:
 const ENT = {JHL:'Jack’s Hire', JBL:'Jack’s Bobcats', GRP:'Group'};
 const COL = {JHL:'#2fbf71', JBL:'#d9b44a', GRP:'#5ec8e5'};
 const METRICS = {avail:'Available cash', bank:'Bank balance', flow:'Cash in & out', fac:'Facility'};
+const SHORT = {avail:'Available', bank:'Bank', flow:'In & out', fac:'Facility', JHL:'Jack’s Hire', JBL:'Jack’s Bobcats', GRP:'Group'};
 
 const today = () => iso(new Date());
 const blank = () => ({ settings:{asOf:today(), weeks:13, buffer:0}, jhl:{bank:0, overdraft:0}, jbl:{bank:0, limit:0, drawn:0}, assets:[], tx:[] });
@@ -336,6 +355,8 @@ function showTip(e,html){ tip.innerHTML=html; tip.style.display='block';
   if(x+r.width>innerWidth-8) x=e.clientX-r.width-16; if(y<8) y=e.clientY+16;
   tip.style.left=x+'px'; tip.style.top=y+'px'; }
 const hideTip=()=>tip.style.display='none';
+document.addEventListener('pointerdown',e=>{ if(!e.target.closest('.chart')){ hideTip(); document.querySelectorAll('#xh,#xd').forEach(n=>n.setAttribute('visibility','hidden')); } });
+addEventListener('scroll',()=>{ if(tip.style.display==='block' && matchMedia('(hover:none)').matches) hideTip(); },{passive:true});
 const trow=(l,v)=>`<div class="r"><span>${l}</span><b class="num">${v}</b></div>`;
 
 function niceTicks(lo,hi,count=4){
@@ -361,7 +382,7 @@ function pill(x,y,text,w){ const tw=text.length*7.3+22; const bx=Math.max(4,Math
 /* ---------- line chart (available / bank) ---------- */
 function lineChart(F, key){
   const el=document.getElementById('chart'); const x=F.E[view.ent]; const vals=x[key]; const col=COL[view.ent];
-  const w=Math.max(300,el.clientWidth), h=300, m={l:8,r:64,t:24,b:30}; const iw=w-m.l-m.r, ih=h-m.t-m.b;
+  const w=Math.max(280,el.clientWidth), h=w<520?240:300, m={l:8,r:w<520?50:64,t:24,b:30}; const iw=w-m.l-m.r, ih=h-m.t-m.b;
   const buf=key==='avail'?n(S.settings.buffer):0;
   const all=[...vals,0]; if(buf) all.push(buf);
   const ticks=niceTicks(Math.min(...all),Math.max(...all)); const y0=ticks[0], y1=ticks[ticks.length-1];
@@ -370,8 +391,8 @@ function lineChart(F, key){
   const base=Y(Math.max(y0,0));
   let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="gf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".30"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>`;
   s+=gridAndAxis(ticks,Y,m,iw,w);
-  const nl=Math.min(6,F.W); for(let j=0;j<=nl;j++){ const i=Math.round(F.days*j/nl); s+=`<text x="${X(i)}" y="${h-8}" text-anchor="${j===0?'start':j===nl?'end':'middle'}" font-size="12" fill="#7d8a82">${j===0?'Today':fmtD(addDays(F.start,i))}</text>`; }
-  if(buf) s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="#ff6b5e" stroke-opacity=".7" stroke-dasharray="6 6" stroke-width="1.5"/><text x="${m.l+4}" y="${Y(buf)-7}" font-size="12" font-weight="600" fill="#ff6b5e">Minimum ${moneyC(buf)}</text>`;
+  const nl=Math.min(w<520?3:6,F.W); for(let j=0;j<=nl;j++){ const i=Math.round(F.days*j/nl); s+=`<text x="${X(i)}" y="${h-8}" text-anchor="${j===0?'start':j===nl?'end':'middle'}" font-size="12" fill="#7d8a82">${j===0?'Today':fmtD(addDays(F.start,i))}</text>`; }
+  if(buf) s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${Y(buf)}" y2="${Y(buf)}" stroke="#ff6b5e" stroke-opacity=".7" stroke-dasharray="6 6" stroke-width="1.5"/><text x="${m.l+iw-4}" y="${Y(buf)-7}" text-anchor="end" font-size="12" font-weight="600" fill="#ff6b5e">Minimum ${moneyC(buf)}</text>`;
   s+=`<path d="${line}L${X(F.days)},${base}L${X(0)},${base}Z" fill="url(#gf)"/>`;
   s+=`<path d="${line}" fill="none" stroke="${col}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
   const mi = key==='avail' ? x.minI : vals.indexOf(Math.min(...vals));
@@ -382,32 +403,32 @@ function lineChart(F, key){
   s+=`<rect id="hit" x="${m.l}" y="0" width="${iw}" height="${h}" fill="transparent"/></svg>`;
   el.innerHTML=s;
   const hit=el.querySelector('#hit'), xh=el.querySelector('#xh'), xd=el.querySelector('#xd');
-  hit.onmousemove=e=>{ const r=hit.getBoundingClientRect(); let i=Math.round((e.clientX-r.left)/r.width*F.days); i=Math.max(0,Math.min(F.days,i));
+  hit.onpointermove=hit.onpointerdown=e=>{ const r=hit.getBoundingClientRect(); let i=Math.round((e.clientX-r.left)/r.width*F.days); i=Math.max(0,Math.min(F.days,i));
     const px=X(i); xh.setAttribute('x1',px); xh.setAttribute('x2',px); xh.setAttribute('visibility','visible');
     xd.setAttribute('cx',px); xd.setAttribute('cy',Y(vals[i])); xd.setAttribute('visibility','visible');
     showTip(e,`<div class="t">${i===0?'Today':fmtDY(addDays(F.start,i-1))}</div><div class="v num">${money(vals[i])}</div>`
       +(key==='avail'?trow('In the bank',money(x.bank[i])):'')); };
-  hit.onmouseleave=()=>{ hideTip(); xh.setAttribute('visibility','hidden'); xd.setAttribute('visibility','hidden'); };
+  hit.onpointerleave=e=>{ if(e.pointerType!=='mouse') return; hideTip(); xh.setAttribute('visibility','hidden'); xd.setAttribute('visibility','hidden'); };
 }
 
 /* ---------- cash in & out ---------- */
 function flowChart(F){
   const el=document.getElementById('chart'); const x=F.E[view.ent];
-  const w=Math.max(300,el.clientWidth), h=300, m={l:8,r:64,t:20,b:30}; const iw=w-m.l-m.r, ih=h-m.t-m.b;
+  const w=Math.max(280,el.clientWidth), h=w<520?240:300, m={l:8,r:w<520?50:64,t:20,b:30}; const iw=w-m.l-m.r, ih=h-m.t-m.b;
   const mx=Math.max(1,...x.wk.map(v=>v.inn)), mn=Math.max(1,...x.wk.map(v=>v.out));
   const ticks=niceTicks(-mn,mx,4); const y0=ticks[0], y1=ticks[ticks.length-1]; const Y=v=>m.t+ih*(1-(v-y0)/(y1-y0));
   const bw=iw/F.W, bar=Math.max(4,Math.min(24,bw*.45));
   let s=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`+gridAndAxis(ticks,Y,m,iw,w);
-  const every=Math.ceil(F.W/7);
+  const every=Math.ceil(F.W/(w<520?4:7));
   x.wk.forEach((v,i)=>{ const cx=m.l+bw*i+bw/2, bx=cx-bar/2, r=bar/2;
     if(v.inn){ const hh=Math.max(2,Y(0)-Y(v.inn)-2); s+=`<rect x="${bx}" y="${Y(0)-2-hh}" width="${bar}" height="${hh}" rx="${Math.min(r,hh/2)}" fill="#2fbf71"/>`; }
     if(v.out){ const hh=Math.max(2,Y(-v.out)-Y(0)-2); s+=`<rect x="${bx}" y="${Y(0)+2}" width="${bar}" height="${hh}" rx="${Math.min(r,hh/2)}" fill="#ff6b5e" fill-opacity=".85"/>`; }
     if(i%every===0) s+=`<text x="${cx}" y="${h-8}" text-anchor="middle" font-size="12" fill="#7d8a82">${fmtD(addDays(F.start,i*7))}</text>`;
     s+=`<rect class="hb" data-i="${i}" x="${m.l+bw*i}" y="0" width="${bw}" height="${h}" fill="transparent"/>`; });
   el.innerHTML=s+'</svg>';
-  el.querySelectorAll('.hb').forEach(r=>{ r.onmousemove=e=>{ const i=+r.dataset.i, v=x.wk[i];
+  el.querySelectorAll('.hb').forEach(r=>{ r.onpointermove=r.onpointerdown=e=>{ const i=+r.dataset.i, v=x.wk[i];
     showTip(e,`<div class="t">Week of ${fmtD(addDays(F.start,i*7))} · net</div><div class="v num">${(v.inn-v.out>=0?'+':'')+money(v.inn-v.out)}</div>`+trow('In',money(v.inn))+trow('Out',money(v.out))); };
-    r.onmouseleave=hideTip; });
+    r.onpointerleave=e=>{ if(e.pointerType==='mouse') hideTip(); }; });
 }
 
 /* ---------- facility ring ---------- */
@@ -446,7 +467,7 @@ const CAPS = {
   fac:'Jack’s Bobcats asset finance: drawn vs still available.'
 };
 function seg(id, opts, cur, on){ const el=document.getElementById(id);
-  el.innerHTML=Object.entries(opts).map(([k,l])=>`<button class="${k===cur?'on':''}" data-k="${k}">${l}</button>`).join('');
+  el.innerHTML=Object.entries(opts).map(([k,l])=>`<button class="${k===cur?'on':''}" data-k="${k}"><span class="lf">${l}</span><span class="ls">${SHORT[k]||l}</span></button>`).join('');
   el.querySelectorAll('button').forEach(b=>b.onclick=()=>on(b.dataset.k)); }
 
 function render(){
@@ -561,6 +582,11 @@ function sample(){
 }
 
 /* ---------- wiring ---------- */
+const toastEl=document.getElementById('toast'); let tT;
+function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('on'); clearTimeout(tT); tT=setTimeout(()=>toastEl.classList.remove('on'),2600); }
+// Second tap within 3s confirms; dialogs are not available everywhere
+function confirmTap(btn,label,fn){ btn.onclick=()=>{ if(btn.dataset.armed){ delete btn.dataset.armed; btn.textContent=label; fn(); return; }
+  btn.dataset.armed=1; btn.textContent='Tap again to confirm'; setTimeout(()=>{ if(btn.dataset.armed){ delete btn.dataset.armed; btn.textContent=label; } },3000); }; }
 function toggleEdit(on){ document.body.classList.toggle('editing',on); if(on) renderEdit(); }
 document.getElementById('bEdit').onclick=()=>toggleEdit(true);
 document.getElementById('bDone').onclick=()=>toggleEdit(false);
@@ -572,13 +598,14 @@ document.getElementById('addIn').onclick=()=>addTx('in');
 document.getElementById('addOut').onclick=()=>addTx('out');
 document.getElementById('sortTx').onclick=()=>{ S.tx.sort((a,b)=>(a.date||'').localeCompare(b.date||'')); renderTx(); render(); };
 document.getElementById('addAsset').onclick=()=>{ S.assets.push({id:uid(),name:'',value:''}); renderAssets(); render(); };
-document.getElementById('bSample').onclick=()=>{ if(S.tx.length && !confirm('Replace your current data with example data?')) return; S=sample(); renderEdit(); render(); };
-document.getElementById('bClear').onclick=()=>{ if(!confirm('Clear ALL data? Export first if you want to keep a copy.')) return; S=blank(); renderEdit(); render(); };
+confirmTap(document.getElementById('bSample'),'Load example data',()=>{ S=sample(); renderEdit(); render(); toast('Example data loaded'); });
+confirmTap(document.getElementById('bClear'),'Clear all data',()=>{ S=blank(); renderEdit(); render(); toast('All data cleared'); });
 document.getElementById('bExport').onclick=()=>{ const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'}); const a=document.createElement('a');
-  a.href=URL.createObjectURL(b); a.download=`rck-cashflow-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); };
+  a.href=URL.createObjectURL(b); a.download=`rck-cashflow-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  try{ navigator.clipboard.writeText(JSON.stringify(S)).then(()=>toast('Data saved and copied to clipboard'),()=>toast('Data file saved')); }catch(e){ toast('Data file saved'); } };
 const fI=document.getElementById('fImport');
 document.getElementById('bImport').onclick=()=>fI.click();
-fI.onchange=async()=>{ const f=fI.files[0]; if(!f) return; try{ S=Object.assign(blank(),JSON.parse(await f.text())); renderEdit(); render(); }catch(e){ alert('That file could not be read: '+e.message); } fI.value=''; };
+fI.onchange=async()=>{ const f=fI.files[0]; if(!f) return; try{ S=Object.assign(blank(),JSON.parse(await f.text())); renderEdit(); render(); toast('Data imported'); }catch(e){ toast('That file could not be read. Choose a .json file saved with Export.'); } fI.value=''; };
 let rz; addEventListener('resize',()=>{ clearTimeout(rz); rz=setTimeout(render,150); });
 
 render();
