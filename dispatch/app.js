@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.11.0';
+const VERSION = '2.12.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1346,7 +1346,7 @@ const scrollMemory = {};
 let lastPath = null;
 
 function restoreScroll(path) {
-  const keepsPlace = path === '/jobs' || path === '/today' || path === '/crew'
+  const keepsPlace = path === '/jobs' || path === '/today' || path === '/crew' || path === '/forward'
     || path.startsWith('/crew/') || path.startsWith('/diary/');
   const y = keepsPlace ? (scrollMemory[path] || 0) : 0;
   requestAnimationFrame(() => window.scrollTo(0, y));
@@ -1387,6 +1387,9 @@ function render() {
 
   const view = $('#view');
   view.innerHTML = '';
+  const host = $('#sheetHost');
+  if (host) host.innerHTML = '';
+  document.body.classList.remove('has-sheet');
   // Restart the entrance animation on every navigation.
   view.classList.remove('enter');
   void view.offsetWidth;
@@ -1442,6 +1445,8 @@ function paintMenu() {
 }
 
 function paintTabs() {
+  const fw = $('#tabbar a[data-tab="forward"]');
+  if (fw) fw.hidden = !isOffice();
   const tab = $('#tabbar a.tab-primary');
   if (!tab) return;
   const office = isOffice();
@@ -1641,18 +1646,20 @@ function renderHome(view) {
     : 'Nothing logged today yet';
 
   view.innerHTML = `
+    <div class="home-brand">
+      ${MARK}
+      <div><b>${esc(BRAND.name)}</b><span>${esc(BRAND.trade)}</span></div>
+    </div>
     <div class="tiles">
       <a class="tile" href="#/jobs">
         <span class="ti">${icon('book')}</span>
         <b>Jobs</b>
-        <span class="td">Site paperwork and the daily job diary</span>
         <span class="ts">${jobs.length} job${jobs.length === 1 ? '' : 's'} · ${onSite} on site · ${planned} planned</span>
       </a>
 
       <a class="tile" href="#/crew">
         <span class="ti">${icon('people')}</span>
         <b>Crew &amp; supervisors</b>
-        <span class="td">Who did what, day by day, across every job</span>
         <span class="ts">${crewToday}</span>
       </a>
 
@@ -1660,12 +1667,9 @@ function renderHome(view) {
       <a class="tile plan" href="#/forward">
         <span class="ti">${icon('calendar')}</span>
         <b>Forward works</b>
-        <span class="td">What is coming up, month by month, crew by crew</span>
         <span class="ts">${ahead}</span>
       </a>` : ''}
-    </div>
-
-    ${isOffice() ? '<p class="muted tiny center mt">Forward works is shown on Office and Director devices only.</p>' : ''}`;
+    </div>`;
 }
 
 /* ================================================================
@@ -3180,9 +3184,15 @@ function renderJobEdit(view) {
       } else {
         if (from && from.contract_value != null) data.contract_value = from.contract_value;
         const saved = await createJob(data);
-        // Made from a forward works line: the line now points at its job.
+        // Made from a forward works line: the line now points at its job, and
+        // the scope document that made the line "scoped" goes on the job.
         if (from && from.forward_id && DB.forward_works.some(r => r.id === from.forward_id)) {
           await Store.patch('forward_works', from.forward_id, { project_id: saved.id, updated_at: new Date().toISOString(), updated_by: whoami() });
+          if (from.scope_url) {
+            await Store.insert('project_docs', { id: uid(), project_id: saved.id, kind: 'scope', title: 'Scope',
+              audience: 'all', file_name: from.scope_name || 'scope', file_url: from.scope_url, file_type: from.scope_type || '',
+              file_size: 0, notes: 'From the forward works outline', uploaded_by: whoami(), uploaded_at: new Date().toISOString() });
+          }
         }
         jobPrefill = null;
         toast(connected() ? 'Job created' : 'Saved on this device');
@@ -3365,10 +3375,12 @@ function wireCosts(view, p) {
    The month ahead as the office keeps it on paper: Monday-to-Sunday
    weeks, a crew's day in each cell — who it is for, where, day or
    night, and what it is worth. On a phone the week reads down, a day
-   a row. Jobs are made from a line one at a time, never by themselves.
+   a row; a line opens in a sheet over the page. Jobs are made from a
+   line one at a time, never by themselves.
    ================================================================ */
-const fwView = { month: null, view: 'calendar', day: null, editing: null, adding: false, addDate: null };
+const fwView = { month: null, view: 'calendar', day: null, open: null, sheet: null, addDate: null };
 let jobPrefill = null;   // what the new-job form opens with, when a line is turned into a job
+let scopeDraft = null;   // the scope document picked in the open form, until it is saved
 
 function fwThisMonth() { return today().slice(0, 7); }
 function fwMonth() { return fwView.month || fwThisMonth(); }
@@ -3388,6 +3400,8 @@ function fwDays(r) { return Math.max(1, Math.min(31, Number(r.days) || 1)); }
 function fwLast(r) { return r.work_date ? dayShift(r.work_date, fwDays(r) - 1) : null; }
 /** Does the line's spell on site cover this day? */
 function fwCovers(r, day) { return !!r.work_date && r.work_date <= day && day <= fwLast(r); }
+/** Scoped means the scope document is on the line. Nothing else counts. */
+function fwScoped(r) { return !!(r && r.scope_url); }
 
 /** The lines in a month, by day then by crew order. */
 function fwRows(month) {
@@ -3420,15 +3434,48 @@ function fwWeeks(month) {
   }
   return weeks;
 }
+/** Which weeks are open: this week when looking at this month, otherwise
+    the first week with anything in it. Remembered per month once touched. */
+function fwOpenWeeks(month, weeks, rows) {
+  if (fwView.open && fwView.open.month === month) return fwView.open.set;
+  const set = new Set();
+  const t = today();
+  const i = weeks.findIndex(w => w.includes(t));
+  if (i >= 0 && t.slice(0, 7) === month) set.add(i);
+  else {
+    const j = weeks.findIndex(w => rows.some(r => r.work_date && w.includes(r.work_date)));
+    set.add(j >= 0 ? j : 0);
+  }
+  fwView.open = { month, set };
+  return set;
+}
 /** The nearest sensible day to add work on: the day picked, today if it is
     in the month, otherwise the 1st. */
 function fwDefaultDay(month) {
   if (fwView.addDate && fwView.addDate.slice(0, 7) === month) return fwView.addDate;
+  if (fwView.day && fwView.day.slice(0, 7) === month) return fwView.day;
   if (today().slice(0, 7) === month) return today();
   return month + '-01';
 }
 const fwDayNo = day => Number(day.slice(8, 10));
 const fwDayName = day => DAYS[new Date(day + 'T00:00:00').getDay()].slice(0, 3);
+const fwWhen = day => `${fwDayName(day)} ${fwDayNo(day)} ${MONTHS[Number(day.slice(5, 7)) - 1]}`;
+
+/** One line as it sits on a day: crew colour, who, where, what it is worth.
+    Red text for a night shift; pink until the scope document is on it. */
+function fwEntry(r, day) {
+  const c = crewDef(crewOf(r));
+  const job = r.project_id ? jobById(r.project_id) : null;
+  const first = !day || r.work_date === day;
+  const open = fwView.sheet && fwView.sheet.id === r.id;
+  return `
+    <button class="fw-ent${open ? ' on' : ''}${first ? '' : ' cont'}${r.shift === 'night' ? ' night' : ''}${fwScoped(r) ? '' : ' unscoped'}" data-id="${r.id}" style="--c:${c.dot}">
+      <i></i>
+      <span class="who"><b>${esc(r.client || 'Client not named')}</b><span>${esc(c.short)}${r.site ? ' · ' + esc(r.site) : ''}${
+        fwDays(r) > 1 ? ` · ${fwDays(r)} days` : ''}${job ? ' · ' + esc(jobNo(job)) : ''}${fwScoped(r) ? '' : ' · <strong>not scoped</strong>'}</span></span>
+      <span class="val">${first ? esc(fmtMoney(r.invoice_value)) : '<em>cont.</em>'}<small>${fwShiftLabel(r.shift)}</small></span>
+    </button>`;
+}
 
 function renderForward(view) {
   if (!isOffice()) {
@@ -3447,24 +3494,24 @@ function renderForward(view) {
   const rows = fwRows(month);
   const total = fwTotal(rows);
   const nights = rows.filter(r => r.shift === 'night').length;
-  const editing = fwView.editing ? DB.forward_works.find(r => r.id === fwView.editing) : null;
+  const unscoped = rows.filter(r => !fwScoped(r)).length;
   const next = fwRows(fwShift(month, 1));
   const undated = rows.filter(r => !r.work_date);
   const weeks = fwWeeks(month);
+  const openWeeks = fwOpenWeeks(month, weeks, rows);
   const onDay = day => rows.filter(r => fwCovers(r, day));
   const nowDay = today();
+  const picked = fwView.day && fwView.day.slice(0, 7) === month ? fwView.day : null;
 
-  const entry = (r, day) => {
-    const c = crewDef(crewOf(r));
-    const job = r.project_id ? jobById(r.project_id) : null;
-    const first = !day || r.work_date === day;
+  const dayRow = day => {
+    const out = day.slice(0, 7) !== month;
+    const on = onDay(day);
     return `
-      <button class="fw-ent${fwView.editing === r.id ? ' on' : ''}${first ? '' : ' cont'}" data-id="${r.id}" style="--c:${c.dot}">
-        <i></i>
-        <span class="who"><b>${esc(r.client || 'Client not named')}</b><span>${esc(c.short)}${r.site ? ' · ' + esc(r.site) : ''}${
-          fwDays(r) > 1 ? ` · ${fwDays(r)} days` : ''}${job ? ' · ' + esc(jobNo(job)) : ''}</span></span>
-        <span class="val">${first ? esc(fmtMoney(r.invoice_value)) : '<em>cont.</em>'}<small>${fwShiftLabel(r.shift)}</small></span>
-      </button>`;
+      <div class="fw-day${out ? ' out' : ''}${day === nowDay ? ' today' : ''}" id="day-${day}">
+        <div class="fw-dn"><span>${fwDayName(day)}</span><b>${fwDayNo(day)}</b></div>
+        <div class="fw-ents">${on.length ? on.map(r => fwEntry(r, day)).join('') : `<span class="none">${out ? '' : '—'}</span>`}</div>
+        ${out || forwardTableMissing ? '' : `<button class="fw-add" data-day="${day}" title="Add work on this day">${icon('plus')}</button>`}
+      </div>`;
   };
 
   const calendar = `
@@ -3474,35 +3521,38 @@ function renderForward(view) {
         const out = day.slice(0, 7) !== month;
         const on = onDay(day);
         const crews = Array.from(new Set(on.map(r => crewOf(r))));
-        return `<button class="d${out ? ' out' : ''}${day === nowDay ? ' today' : ''}${fwView.day === day ? ' on' : ''}" data-day="${day}" ${out ? 'disabled' : ''}>
+        return `<button class="d${out ? ' out' : ''}${day === nowDay ? ' today' : ''}${picked === day ? ' on' : ''}${on.some(r => !fwScoped(r)) ? ' warn' : ''}" data-day="${day}" ${out ? 'disabled' : ''}>
           <b>${fwDayNo(day)}</b>
           <span class="dots">${crews.slice(0, 4).map(k => `<i style="background:${crewDef(k).dot}"></i>`).join('')}${crews.length > 4 ? `<em>+${crews.length - 4}</em>` : ''}</span>
         </button>`; }).join('')).join('')}
     </div>
 
+    ${picked ? `
+    <div class="fw-week open">
+      <div class="fw-wh"><b>${esc(fmtDayDate(picked))}</b><span>${onDay(picked).length ? `${onDay(picked).length} job${onDay(picked).length === 1 ? '' : 's'}` : 'nothing on'}</span></div>
+      ${dayRow(picked)}
+    </div>
+    <button class="btn wide mb" id="fwAllWeeks">Show the whole month</button>` : `
+
     ${undated.length ? `
-    <div class="fw-week">
+    <div class="fw-week open">
       <div class="fw-wh"><b>No day yet</b><span>${undated.length} line${undated.length === 1 ? '' : 's'} · tap one to give it a day</span></div>
-      <div class="fw-ents">${undated.map(r => entry(r, null)).join('')}</div>
+      <div class="fw-ents pad">${undated.map(r => fwEntry(r, null)).join('')}</div>
     </div>` : ''}
 
     ${weeks.map((w, i) => {
       const inMonth = w.filter(d => d.slice(0, 7) === month);
       const weekRows = rows.filter(r => r.work_date && inMonth.includes(r.work_date));
+      const isOpen = openWeeks.has(i);
       return `
-      <div class="fw-week" id="wk${i}">
-        <div class="fw-wh"><b>Week ${i + 1}</b><span>w/c Mon ${fwDayNo(w[0])} ${MONTHS[Number(w[0].slice(5, 7)) - 1]} · ${
-          weekRows.length ? `${weekRows.length} job${weekRows.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(weekRows)))}` : 'nothing yet'}</span></div>
-        ${w.map(day => {
-          const out = day.slice(0, 7) !== month;
-          const on = onDay(day);
-          return `
-          <div class="fw-day${out ? ' out' : ''}${day === nowDay ? ' today' : ''}${fwView.day === day ? ' on' : ''}" id="day-${day}">
-            <div class="fw-dn"><span>${fwDayName(day)}</span><b>${fwDayNo(day)}</b></div>
-            <div class="fw-ents">${on.length ? on.map(r => entry(r, day)).join('') : `<span class="none">${out ? '' : '—'}</span>`}</div>
-            ${out || forwardTableMissing ? '' : `<button class="fw-add" data-day="${day}" title="Add work on this day">${icon('plus')}</button>`}
-          </div>`; }).join('')}
-      </div>`; }).join('')}`;
+      <div class="fw-week${isOpen ? ' open' : ''}" id="wk${i}">
+        <button class="fw-wh" data-week="${i}" aria-expanded="${isOpen}">
+          <b>Week ${i + 1}</b><span>w/c Mon ${fwDayNo(w[0])} ${MONTHS[Number(w[0].slice(5, 7)) - 1]} · ${
+            weekRows.length ? `${weekRows.length} job${weekRows.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(weekRows)))}` : 'nothing yet'}</span>
+          ${icon('chevR')}
+        </button>
+        ${isOpen ? w.map(dayRow).join('') : ''}
+      </div>`; }).join('')}`}`;
 
   const byCrew = fwByCrew(rows).map(g => `
       <div class="fw-crew">
@@ -3511,7 +3561,7 @@ function renderForward(view) {
         ${g.rows.map(r => {
           const job = r.project_id ? jobById(r.project_id) : null;
           return `
-          <button class="fw-row${fwView.editing === r.id ? ' on' : ''}" data-id="${r.id}">
+          <button class="fw-row${fwView.sheet && fwView.sheet.id === r.id ? ' on' : ''}${r.shift === 'night' ? ' night' : ''}${fwScoped(r) ? '' : ' unscoped'}" data-id="${r.id}">
             <div class="fw-main">
               <b>${esc(r.client || 'Client not named')}</b>
               <span>${r.work_date ? `${fwDayName(r.work_date)} ${fwDayNo(r.work_date)}${fwDays(r) > 1 ? '–' + fwDayNo(fwLast(r)) : ''} · ` : 'No day yet · '}${esc(r.site || 'Site to be confirmed')}</span>
@@ -3519,7 +3569,7 @@ function renderForward(view) {
             <div class="fw-side">
               <b>${esc(fmtMoney(r.invoice_value))}</b>
               <span class="pill ${r.shift === 'night' ? 'night' : 'plain'}">${fwShiftLabel(r.shift)}</span>
-              ${job ? `<span class="pill plain">${esc(jobNo(job))}</span>` : ''}
+              ${fwScoped(r) ? (job ? `<span class="pill plain">${esc(jobNo(job))}</span>` : '') : '<span class="pill warn">Not scoped</span>'}
             </div>
           </button>`; }).join('')}
       </div>`).join('') || `
@@ -3543,15 +3593,15 @@ function renderForward(view) {
     <div class="ledger">
       <div class="lh">Forward works · ${esc(fwLabel(month))}</div>
       <div class="lrow"><span>Jobs planned</span><b>${rows.length}</b></div>
-      <div class="lrow"><span>Day / night</span><b>${rows.length - nights} / ${nights}</b></div>
+      <div class="lrow"><span>Day / night</span><b>${rows.length - nights} / <em class="nightx">${nights}</em></b></div>
+      ${unscoped ? `<div class="lrow"><span>Not yet scoped</span><b class="warnx">${unscoped}</b></div>` : ''}
       <div class="lrow tot"><span>Invoice value</span><b>${esc(fmtMoney(total))}</b></div>
       <div class="lf">${next.length
         ? `${fwLabel(fwShift(month, 1))}: ${next.length} job${next.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(next)))}`
         : `Nothing in ${fwLabel(fwShift(month, 1))} yet`}</div>
     </div>
 
-    ${fwView.adding || editing ? fwForm(editing, month) : `
-    <button class="btn primary wide mb" id="fwAdd" ${forwardTableMissing ? 'disabled' : ''}>${icon('plus')}Add work to ${esc(fwLabel(month))}</button>`}
+    <button class="btn primary wide mb" id="fwAdd" ${forwardTableMissing ? 'disabled' : ''}>${icon('plus')}Add work to ${esc(fwLabel(month))}</button>
 
     <div class="seg">
       <a href="#/forward" data-view="calendar" class="${fwView.view === 'calendar' ? 'on' : ''}">Calendar</a>
@@ -3568,27 +3618,72 @@ function renderForward(view) {
       </div>
     </div>` : ''}`;
 
-  const goMonth = m => { fwView.month = m; fwView.day = null; fwView.editing = null; fwView.adding = false; render(); };
+  // The sheet lives outside #view (see index.html), over everything.
+  const host = $('#sheetHost') || view;
+  host.innerHTML = fwView.sheet ? fwSheet(month) : '';
+  document.body.classList.toggle('has-sheet', !!fwView.sheet);
+
+  const goMonth = m => { fwView.month = m; fwView.day = null; fwView.sheet = null; render(); };
   $('#mPrev', view).onclick = () => goMonth(fwShift(month, -1));
   $('#mNext', view).onclick = () => goMonth(fwShift(month, 1));
   const back = $('#mThis', view);
   if (back) back.onclick = () => goMonth(null);
   $$('.seg a', view).forEach(a => a.onclick = e => { e.preventDefault(); fwView.view = a.dataset.view; render(); });
-  const openAdd = day => { fwView.adding = true; fwView.editing = null; fwView.addDate = day || null; render(); window.scrollTo(0, 0); };
-  const add = $('#fwAdd', view);
-  if (add) add.onclick = () => openAdd(null);
-  $$('.fw-add', view).forEach(b => b.onclick = () => openAdd(b.dataset.day));
-  $$('.fw-row, .fw-ent', view).forEach(b => b.onclick = () => { fwView.editing = b.dataset.id; fwView.adding = false; render(); window.scrollTo(0, 0); });
-  // A day on the calendar: mark it, and bring its week into view.
-  $$('.fw-cal .d', view).forEach(b => b.onclick = () => {
-    fwView.day = fwView.day === b.dataset.day ? null : b.dataset.day;
+  const openSheet = sheet => { fwView.sheet = sheet; scopeDraft = null; render(); };
+  $('#fwAdd', view).onclick = () => { fwView.addDate = null; openSheet({ mode: 'add' }); };
+  $$('.fw-add', view).forEach(b => b.onclick = () => { fwView.addDate = b.dataset.day; openSheet({ mode: 'add' }); });
+  $$('.fw-row, .fw-ent', view).forEach(b => b.onclick = () => openSheet({ id: b.dataset.id, mode: 'info' }));
+  // A day on the calendar: just that day, until it is tapped again.
+  $$('.fw-cal .d', view).forEach(b => b.onclick = () => { fwView.day = fwView.day === b.dataset.day ? null : b.dataset.day; render(); });
+  const all = $('#fwAllWeeks', view); if (all) all.onclick = () => { fwView.day = null; render(); };
+  $$('.fw-wh[data-week]', view).forEach(b => b.onclick = () => {
+    const i = Number(b.dataset.week);
+    if (openWeeks.has(i)) openWeeks.delete(i); else openWeeks.add(i);
     render();
-    const el = fwView.day && document.getElementById('day-' + fwView.day);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   const pr = $('#fwPrint', view); if (pr) pr.onclick = () => printForwardMonth(month);
   const cs = $('#fwCsv', view);   if (cs) cs.onclick = () => exportForwardCsv(month);
-  if (fwView.adding || editing) wireFwForm(view, editing, month);
+  if (fwView.sheet) wireFwSheet(host, month);
+}
+
+/* ---- the sheet: a line, over the page ---------------------------------- */
+function fwSheet(month) {
+  const sh = fwView.sheet;
+  const r = sh.id ? DB.forward_works.find(x => x.id === sh.id) : null;
+  if (sh.id && !r) return '';
+  let body;
+  if (sh.mode === 'info') {
+    const c = crewDef(crewOf(r));
+    const job = r.project_id ? jobById(r.project_id) : null;
+    body = `
+      <div class="sh-head${r.shift === 'night' ? ' night' : ''}">
+        <div><b>${esc(r.client || 'Client not named')}</b><span>${esc(r.site || 'Site to be confirmed')}</span></div>
+        <strong>${esc(fmtMoney(r.invoice_value))}</strong>
+      </div>
+      <dl class="sh-facts">
+        <dt>When</dt><dd>${r.work_date ? esc(fmtDayDate(r.work_date)) + (fwDays(r) > 1 ? ` → ${esc(fmtDayDate(fwLast(r)))} · ${fwDays(r)} days` : '') : 'No day yet'}</dd>
+        <dt>Shift</dt><dd class="${r.shift === 'night' ? 'nightx' : ''}">${fwShiftLabel(r.shift)} shift</dd>
+        <dt>Crew</dt><dd>${crewDot(c.key)} ${esc(c.label)}</dd>
+        <dt>Scoped</dt><dd>${fwScoped(r)
+          ? `<span class="okx">Yes</span> · <a href="${esc(r.scope_url)}" target="_blank" rel="noopener">${esc(r.scope_name || 'Scope document')}</a>`
+          : '<span class="warnx">No — the scope document is not on it yet</span>'}</dd>
+        ${job ? `<dt>Job</dt><dd><a href="#/job/${job.id}">${esc(jobNo(job))} — ${esc(job.name)}</a></dd>` : ''}
+        ${r.notes ? `<dt>Note</dt><dd>${esc(r.notes)}</dd>` : ''}
+      </dl>
+      <div class="btn-row">
+        <button class="btn primary" id="shEdit">Edit</button>
+        ${job ? `<a class="btn" href="#/job/${job.id}">Open the job</a>` : `<button class="btn" id="shMakeJob">Make a job</button>`}
+      </div>`;
+  } else {
+    body = fwForm(r, month);
+  }
+  return `
+    <div class="scrim" id="shScrim"></div>
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="sh-grab"></div>
+      <button class="sh-close" id="shClose" title="Close">✕</button>
+      ${body}
+    </div>`;
 }
 
 /** One line of the outline, to add or to change. */
@@ -3596,10 +3691,10 @@ function fwForm(r, month) {
   r = r || {};
   const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim())
     .concat(DB.forward_works.map(x => (x.client || '').trim())).filter(Boolean))).sort();
-  const job = r.project_id ? jobById(r.project_id) : null;
   const day = r.work_date || (r.id ? '' : fwDefaultDay(month));
+  const scope = scopeDraft !== null ? scopeDraft : (r.scope_url ? { url: r.scope_url, name: r.scope_name, type: r.scope_type } : null);
   return `
-    <div class="card fw-form">
+    <div class="fw-form">
       <h2>${r.id ? 'This line' : 'Add work'}</h2>
       <label class="field"><span>Client</span>
         <input type="text" id="fwClient" value="${esc(r.client || '')}" placeholder="e.g. Auckland Transport" list="fwClients">
@@ -3619,39 +3714,71 @@ function fwForm(r, month) {
             ${CREWS.map(c => `<option value="${c.key}" ${crewOf(r) === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
           </select></label>
         <label class="field grow"><span>Shift</span>
-          <select id="fwShift">
+          <select id="fwShift" class="${r.shift === 'night' ? 'nightx' : ''}">
             <option value="day" ${r.shift !== 'night' ? 'selected' : ''}>Day</option>
             <option value="night" ${r.shift === 'night' ? 'selected' : ''}>Night</option>
           </select></label>
       </div>
       <label class="field"><span>Invoice value</span>
         <input type="number" id="fwValue" inputmode="decimal" step="any" min="0" value="${r.invoice_value == null ? '' : esc(String(r.invoice_value))}" placeholder="0"></label>
-      <label class="field"><span>Notes <span class="muted">(optional)</span></span>
-        <input type="text" id="fwNotes" value="${esc(r.notes || '')}" placeholder="Anything the office should remember"></label>
+
+      <div class="switchrow${scope ? ' on' : ' warn'}">
+        <div><b>Scoped</b><span>${scope
+          ? `Yes — <a href="${esc(scope.url)}" target="_blank" rel="noopener">${esc(scope.name || 'scope document')}</a>`
+          : 'No. Switch it on to put the scope document on this line.'}</span></div>
+        <label class="switch"><input type="checkbox" id="fwScoped" ${scope ? 'checked' : ''}><i></i></label>
+        <input type="file" id="fwScopeFile" accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx" hidden>
+      </div>
+
       <div class="btn-row">
         <button class="btn primary" id="fwSave">${r.id ? 'Save' : 'Add it'}</button>
         <button class="btn" id="fwCancel">Cancel</button>
-        ${r.id ? `<button class="btn danger" id="fwDel">${icon('trash')}Remove</button>` : ''}
       </div>
       ${r.id ? `
       <div class="btn-row mt">
         <button class="btn sm" id="fwCopyWeek">Copy to next week</button>
         <button class="btn sm" id="fwCopyMonth">Copy to next month</button>
-      </div>
-      <div class="btn-row mt">
-        ${job
-          ? `<a class="btn wide" href="#/job/${job.id}">${icon('book')}Open ${esc(jobNo(job))} — ${esc(job.name)}</a>`
-          : `<button class="btn wide" id="fwMakeJob">${icon('plus')}Make a job from this line</button>`}
-      </div>
-      <p class="muted tiny mt" style="margin-bottom:0">${job
-        ? 'This line has its job on the board. Changing the line does not change the job.'
-        : 'Opens a new job with the client, site, crew and dates filled in. Nothing is made until you save it there.'}</p>` : ''}
+        <button class="btn sm danger" id="fwDel">${icon('trash')}Remove</button>
+      </div>` : ''}
     </div>`;
 }
 
-function wireFwForm(view, editing, month) {
+function wireFwSheet(view, month) {
+  const sh = fwView.sheet;
+  const r = sh.id ? DB.forward_works.find(x => x.id === sh.id) : null;
+  const close = () => { fwView.sheet = null; fwView.addDate = null; scopeDraft = null; render(); };
+  const scrim = $('#shScrim', view); if (scrim) scrim.onclick = close;
+  const x = $('#shClose', view); if (x) x.onclick = close;
+  if (sh.mode === 'info') {
+    $('#shEdit', view).onclick = () => { fwView.sheet = { id: r.id, mode: 'edit' }; scopeDraft = null; render(); };
+    const mk = $('#shMakeJob', view);
+    if (mk) mk.onclick = () => fwMakeJob(r);
+    return;
+  }
+  wireFwForm(view, r, month, close);
+}
+
+function fwMakeJob(r) {
+  jobPrefill = {
+    forward_id: r.id,
+    name: [r.client, r.site].filter(Boolean).join(' — '),
+    client: r.client || '', site: r.site || '', crew: crewOf(r),
+    work_type: { milling: 'milling', chipseal: 'chipseal', spraying: 'spraying', subbie: 'paving' }[crewOf(r)] || '',
+    description: [r.shift === 'night' ? 'Night shift.' : 'Day shift.', r.notes].filter(Boolean).join(' '),
+    contract_value: r.invoice_value,     // what it is worth: an office figure, never on a site phone
+    start_date: r.work_date || r.month,
+    end_date: r.work_date ? fwLast(r) : null,
+    scope_url: r.scope_url || '', scope_name: r.scope_name || '', scope_type: r.scope_type || ''
+  };
+  if (!crewOf(r)) delete jobPrefill.crew;
+  fwView.sheet = null;
+  go('#/new');
+}
+
+function wireFwForm(view, editing, month, close) {
   const read = () => {
     const day = $('#fwDate', view).value;
+    const scope = scopeDraft !== null ? scopeDraft : (editing && editing.scope_url ? { url: editing.scope_url, name: editing.scope_name, type: editing.scope_type } : null);
     return {
       client: $('#fwClient', view).value.trim(),
       site: $('#fwSite', view).value.trim(),
@@ -3661,12 +3788,13 @@ function wireFwForm(view, editing, month) {
       work_date: day || null,
       days: Math.max(1, Math.min(31, Math.round(Number($('#fwNDays', view).value) || 1))),
       month: (day ? day.slice(0, 7) : month) + '-01',
-      notes: $('#fwNotes', view).value.trim(),
+      scope_url: scope ? scope.url : '',
+      scope_name: scope ? (scope.name || '') : '',
+      scope_type: scope ? (scope.type || '') : '',
       updated_at: new Date().toISOString(),
       updated_by: whoami()
     };
   };
-  const close = () => { fwView.editing = null; fwView.adding = false; fwView.addDate = null; render(); };
   const check = data => {
     if (!data.client && !data.site) return 'Name the client or the site';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data.work_date || '')) return 'Pick the day';
@@ -3674,6 +3802,37 @@ function wireFwForm(view, editing, month) {
     return '';
   };
   const fresh = (data, extra) => Object.assign({ id: uid(), created_at: new Date().toISOString(), created_by: whoami() }, data, extra || {});
+
+  // Shift: the word goes red the moment it says night.
+  const shiftSel = $('#fwShift', view);
+  shiftSel.onchange = () => shiftSel.classList.toggle('nightx', shiftSel.value === 'night');
+
+  // Scoped is the document. On means pick one; off means take it off.
+  const sw = $('#fwScoped', view), file = $('#fwScopeFile', view);
+  const refresh = () => {
+    const row = sw.closest('.switchrow'), has = scopeDraft !== null ? !!scopeDraft : !!(editing && editing.scope_url);
+    row.classList.toggle('on', has); row.classList.toggle('warn', !has);
+    sw.checked = has;
+    const cur = scopeDraft !== null ? scopeDraft : (editing && editing.scope_url ? { url: editing.scope_url, name: editing.scope_name } : null);
+    $('span', row).innerHTML = cur
+      ? `Yes — <a href="${esc(cur.url)}" target="_blank" rel="noopener">${esc(cur.name || 'scope document')}</a>`
+      : 'No. Switch it on to put the scope document on this line.';
+  };
+  sw.onchange = () => {
+    if (sw.checked) { sw.checked = false; file.click(); }     // on only once a document is in
+    else { scopeDraft = false; refresh(); }
+  };
+  file.onchange = async () => {
+    const f = (file.files || [])[0]; file.value = '';
+    if (!f) return refresh();
+    toast('Sending the scope document…');
+    try {
+      const up = await Store.upload(f);
+      scopeDraft = { url: up.url, name: up.name, type: up.type };
+      toast(up.local ? 'Kept on this phone until there is signal' : 'Scope document on');
+    } catch (e) { toast('Could not take the document: ' + e.message); }
+    refresh();
+  };
 
   $('#fwSave', view).onclick = async function () {
     const data = read();
@@ -3684,8 +3843,7 @@ function wireFwForm(view, editing, month) {
       if (editing) await Store.patch('forward_works', editing.id, data);
       else await Store.insert('forward_works', fresh(data));
       fwView.month = data.month.slice(0, 7);
-      fwView.day = data.work_date;
-      toast(editing ? 'Saved' : `Added to ${fwDayName(data.work_date)} ${fwDayNo(data.work_date)} ${MONTHS[Number(data.work_date.slice(5, 7)) - 1]}`);
+      toast(editing ? 'Saved' : `Added to ${fwWhen(data.work_date)}`);
       close();
     } catch (err) {
       this.disabled = false;
@@ -3699,8 +3857,8 @@ function wireFwForm(view, editing, month) {
     const bad = check(data);
     if (bad) return toast(bad);
     await Store.insert('forward_works', fresh(data, { work_date: day, month: day.slice(0, 7) + '-01', project_id: null }));
-    toast(`Copied to ${fwDayName(day)} ${fwDayNo(day)} ${MONTHS[Number(day.slice(5, 7)) - 1]}`);
-    fwView.month = day.slice(0, 7); fwView.day = day; close();
+    toast(`Copied to ${fwWhen(day)}`);
+    fwView.month = day.slice(0, 7); fwView.day = null; close();
   };
   const cw = $('#fwCopyWeek', view);
   if (cw) cw.onclick = () => { const d = read().work_date; if (!d) return toast('Pick the day first'); copyTo(dayShift(d, 7)); };
@@ -3718,22 +3876,6 @@ function wireFwForm(view, editing, month) {
     if (!confirm('Remove this line from the outline? Any job made from it stays.')) return;
     await Store.remove('forward_works', editing.id);
     toast('Removed'); close();
-  };
-  const mk = $('#fwMakeJob', view);
-  if (mk) mk.onclick = () => {
-    const data = read();
-    jobPrefill = {
-      forward_id: editing.id,
-      name: [data.client, data.site].filter(Boolean).join(' — '),
-      client: data.client, site: data.site, crew: data.crew,
-      work_type: { milling: 'milling', chipseal: 'chipseal', spraying: 'spraying', subbie: 'paving' }[data.crew] || '',
-      description: [data.shift === 'night' ? 'Night shift.' : 'Day shift.', data.notes].filter(Boolean).join(' '),
-      contract_value: data.invoice_value,     // what it is worth: an office figure, never on a site phone
-      start_date: data.work_date || data.month,
-      end_date: data.work_date ? dayShift(data.work_date, data.days - 1) : null
-    };
-    if (!data.crew) delete jobPrefill.crew;
-    go('#/new');
   };
 }
 
@@ -3755,11 +3897,11 @@ function printForwardMonth(month) {
         <th style="width:14mm">Shift</th><th style="width:26mm;text-align:right">Invoice value</th></tr>
       ${inMonth.map(day => {
         const on = weekRows.filter(r => r.work_date === day);
-        return on.map((r, j) => `<tr class="avoid-break">
+        return on.map((r, j) => `<tr class="avoid-break${r.shift === 'night' ? ' night' : ''}">
           <td>${j === 0 ? `<strong>${fwDayName(day)} ${fwDayNo(day)}</strong>` : ''}</td>
           <td>${esc(crewDef(crewOf(r)).label)}</td>
           <td>${esc(r.client || '—')}</td>
-          <td>${esc(r.site || '—')}${fwDays(r) > 1 ? ` <em>· ${fwDays(r)} days</em>` : ''}${r.notes ? `<br><em>${esc(r.notes)}</em>` : ''}</td>
+          <td>${esc(r.site || '—')}${fwDays(r) > 1 ? ` <em>· ${fwDays(r)} days</em>` : ''}${fwScoped(r) ? '' : ' <em class="warnx">· not scoped</em>'}${r.notes ? `<br><em>${esc(r.notes)}</em>` : ''}</td>
           <td>${fwShiftLabel(r.shift)}</td>
           <td style="text-align:right">${money(r.invoice_value)}</td>
         </tr>`).join('');
@@ -3782,7 +3924,8 @@ function printForwardMonth(month) {
       ${groups.map(g => `<tr><td>${esc(g.crew.label)} <em>· ${g.rows.length} job${g.rows.length === 1 ? '' : 's'}</em></td>
         <td style="text-align:right">${esc(fmtMoney(fwTotal(g.rows)))}</td></tr>`).join('')}
       <tr class="tot"><td>${esc(fwLabel(month))} · ${rows.length} job${rows.length === 1 ? '' : 's'} ·
-        ${rows.filter(r => r.shift !== 'night').length} day / ${rows.filter(r => r.shift === 'night').length} night</td>
+        ${rows.filter(r => r.shift !== 'night').length} day / ${rows.filter(r => r.shift === 'night').length} night${
+        rows.some(r => !fwScoped(r)) ? ` · ${rows.filter(r => !fwScoped(r)).length} not yet scoped` : ''}</td>
         <td style="text-align:right">${esc(fmtMoney(fwTotal(rows)))}</td></tr>
     </table>
     <p style="font-size:10pt;color:#444">An outline of the work ahead as the office understands it on ${esc(fmtDate(today()))}.
@@ -3790,14 +3933,14 @@ function printForwardMonth(month) {
 }
 
 function exportForwardCsv(month) {
-  const rows = [['Month', 'Day', 'Days on site', 'Crew', 'Client', 'Site location', 'Shift', 'Invoice value', 'Notes', 'Job']];
+  const rows = [['Month', 'Day', 'Days on site', 'Crew', 'Client', 'Site location', 'Shift', 'Invoice value', 'Scoped', 'Notes', 'Job']];
   fwRows(month).forEach(r => {
     const job = r.project_id ? jobById(r.project_id) : null;
     rows.push([fwLabel(month), r.work_date || '', fwDays(r), crewDef(crewOf(r)).label, r.client || '', r.site || '', fwShiftLabel(r.shift),
-      r.invoice_value == null ? '' : Math.round(Number(r.invoice_value) * 100) / 100, r.notes || '', job ? jobNo(job) : '']);
+      r.invoice_value == null ? '' : Math.round(Number(r.invoice_value) * 100) / 100, fwScoped(r) ? 'Yes' : 'No', r.notes || '', job ? jobNo(job) : '']);
   });
   rows.push([]);
-  rows.push(['TOTAL', '', '', '', '', '', '', Math.round(fwTotal(fwRows(month)) * 100) / 100, '', '']);
+  rows.push(['TOTAL', '', '', '', '', '', '', Math.round(fwTotal(fwRows(month)) * 100) / 100, '', '', '']);
   downloadCsv(`rck-forward-works-${month}.csv`, rows);
 }
 
