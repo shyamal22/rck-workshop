@@ -84,18 +84,22 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   works.** Everyone gets the first two. Forward works appears on Office and Director devices.
   A **house button** sits at the top of every other screen and goes straight back to it — the
   back arrow retraces your steps, the house skips them.
-- **Forward works is the outline of the months ahead**, kept by hand. One line per piece of
-  work: **client, site location, crew, day or night, and the invoice value**. The screen shows
-  one month at a time — arrows either side, the month's total and its day/night split at the
-  top, then the lines **grouped by crew** in the crews' own order with a subtotal on each.
-  Tap a line to change it, remove it, or **copy it to next month** (a standing client's
-  monthly programme takes one tap a month). **Add work** puts a new line into the month you
-  are looking at. The month **prints** as one table, crew by crew with subtotals, and
-  **exports to Excel**.
+- **Forward works is the outline of the months ahead**, kept by hand the way the programme
+  was kept on the spreadsheet. One line per piece of work: **client, site location, crew, the
+  day, how many days, day or night shift, and the invoice value**. The screen shows one month
+  at a time — arrows either side, the month's total and its day/night split at the top. Then
+  **a calendar of the month**: seven columns, Monday to Sunday, a coloured dot on each day for
+  every crew working it; tap a day and its week scrolls into view. Below that, **the weeks,
+  one card each, a day a row** — the same Monday-to-Sunday weeks as the spreadsheet, with grey
+  days where the week runs past the month — and on every row the lines for that day, each
+  with its crew colour, client, site, shift and value, plus a **+** to add work on that day.
+  **By crew** shows the same month grouped by crew instead, with a subtotal on each. Tap any
+  line to change it, remove it, **copy it to next week** or **to next month**. The month
+  **prints** week by week, then what each crew adds up to, and **exports to Excel**.
 - **A line can become a job — on purpose, never by itself.** *Make a job from this line*
-  opens the new-job form with the client, site, crew and a first-day-of-month start filled
-  in; nothing exists on the board until you save it there. Once saved, the line shows the
-  job's number and opens it. Changing the line afterwards does not change the job.
+  opens the new-job form with the client, site, crew and the dates filled in; nothing exists
+  on the board until you save it there. Once saved, the line shows the job's number and opens
+  it. Changing the line afterwards does not change the job.
 - **The crews** are Green, Yellow, Civil, Chipseal, Spraying, Subcontractor asphalt and
   Milling. They are the same list on the board's filter, on a job and in forward works.
 - **The profit and loss on a job** is filled in after it is finished, on the job's own
@@ -148,8 +152,9 @@ out 67mm tall in the middle of a diary. Sign-off is the last thing on the last p
 Everything on the page is laid out to be read across as well as down. A three-night job with
 eighteen photographs prints as five pages rather than eight.
 
-The **forward works** month prints as one table: crew, client, site, shift and invoice
-value, a subtotal under each crew and the month's total at the foot.
+The **forward works** month prints the way it is kept: a table a week at a time, a day a
+row with its crew, client, site, shift and invoice value, a week total on each, then what
+each crew adds up to and the month's total.
 
 All of them open the phone's print dialog — choose *Save as PDF* to email or file.
 

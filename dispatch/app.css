@@ -1377,7 +1377,67 @@ body.kiosk #view { max-width: none; padding: 0; animation: none; }
 .pill.night { background: #1f2937; color: #fff; }
 .fw-form { animation: riseIn var(--t-fast) var(--ease) both; }
 
+/* the month at a glance: seven columns, a dot per crew on each day */
+.fw-cal {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px;
+  background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-1);
+  padding: 10px 8px 8px; margin-bottom: 14px;
+}
+.fw-cal .h { text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; color: var(--ink-3); padding-bottom: 4px; }
+.fw-cal .d {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-height: 46px; padding: 5px 0 4px; border: 0; border-radius: var(--r-sm);
+  background: var(--panel-2); color: var(--ink); font: inherit; cursor: pointer;
+}
+.fw-cal .d b { font-size: 14px; font-weight: 600; line-height: 1; }
+.fw-cal .d.out { background: transparent; color: var(--ink-3); opacity: .45; }
+.fw-cal .d.today b { color: var(--green); }
+.fw-cal .d.today { box-shadow: inset 0 0 0 1.5px var(--green); }
+.fw-cal .d.on { background: var(--ink); color: #fff; }
+.fw-cal .dots { display: flex; gap: 3px; align-items: center; height: 7px; }
+.fw-cal .dots i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+.fw-cal .dots em { font-style: normal; font-size: 9px; font-weight: 700; line-height: 1; }
+
+/* a week: a card; a day: a row */
+.fw-week { background: var(--panel); border-radius: var(--r); box-shadow: var(--sh-1); margin-bottom: 12px; overflow: hidden; animation: riseIn var(--t) var(--ease) both; }
+.fw-wh { display: flex; align-items: baseline; gap: 8px; padding: 11px 14px 9px; border-bottom: 1px solid var(--line); }
+.fw-wh b { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
+.fw-wh span { font-size: 12px; color: var(--ink-3); margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
+.fw-day { display: flex; align-items: stretch; gap: 8px; padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--line); min-height: 40px; }
+.fw-day:last-child { border-bottom: 0; }
+.fw-day.out { opacity: .4; min-height: 28px; }
+.fw-day.on { background: var(--panel-2); }
+.fw-dn { width: 34px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+.fw-dn span { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--ink-3); text-transform: uppercase; }
+.fw-dn b { font-size: 16px; font-weight: 640; }
+.fw-day.today .fw-dn b { color: var(--green); }
+.fw-ents { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; justify-content: center; }
+.fw-ents .none { color: var(--ink-3); font-size: 12px; padding-left: 4px; }
+.fw-ent {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  background: var(--panel-2); border: 0; border-radius: var(--r-sm); padding: 7px 9px 7px 8px;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.fw-ent.on { box-shadow: 0 0 0 2px var(--ink); }
+.fw-ent.cont { opacity: .7; }
+.fw-ent i { width: 4px; align-self: stretch; border-radius: 2px; background: var(--c, var(--ink-3)); flex: none; }
+.fw-ent .who { flex: 1; min-width: 0; }
+.fw-ent .who b { display: block; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fw-ent .who span { display: block; font-size: 11.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.fw-ent .val { flex: none; text-align: right; font-size: 13px; font-weight: 640; font-variant-numeric: tabular-nums; }
+.fw-ent .val em { font-style: normal; font-weight: 500; color: var(--ink-3); }
+.fw-ent .val small { display: block; font-size: 10.5px; font-weight: 600; color: var(--ink-3); margin-top: 1px; }
+.fw-add {
+  flex: none; align-self: center; width: 28px; height: 28px; border-radius: 50%; border: 0;
+  background: transparent; color: var(--ink-3); display: grid; place-items: center; cursor: pointer;
+}
+.fw-add svg { width: 16px; height: 16px; }
+.fw-add:active { background: var(--panel-2); }
+
 /* on paper */
+.doc table.fwp { margin-bottom: 4mm; }
+.doc table.fwp th.wk { text-transform: none; letter-spacing: 0; font-size: 9.5pt; color: var(--d-ink); padding-top: 2mm; }
+.doc table.fwp.sum { width: 60%; margin-left: auto; }
 .doc table.fwp tr.sub td { border-bottom: .7pt solid var(--d-ink-3); color: var(--d-ink-3); font-size: 8pt; padding-top: 1mm; padding-bottom: 2.5mm; }
 .doc table.fwp tr.tot td { border-bottom: 0; border-top: 1pt solid var(--d-ink); font-weight: 700; font-size: 10pt; padding-top: 2.5mm; }
 .doc table.fwp em { font-style: italic; color: var(--d-ink-3); }
