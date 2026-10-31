@@ -80,10 +80,24 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
-- **The app opens on a landing page with three tools: Jobs, Crew & supervisors, and Profit
-  & loss.** Everyone gets the first two. P&L appears on Director devices only, and nothing
-  hints at it otherwise. A **house button** sits at the top of every other screen and goes
-  straight back to it — the back arrow retraces your steps, the house skips them.
+- **The app opens on a landing page with three tools: Jobs, Crew & supervisors, and Forward
+  works.** Everyone gets the first two. Forward works appears on Office and Director devices.
+  A **house button** sits at the top of every other screen and goes straight back to it — the
+  back arrow retraces your steps, the house skips them.
+- **Forward works is the outline of the months ahead**, kept by hand. One line per piece of
+  work: **client, site location, crew, day or night, and the invoice value**. The screen shows
+  one month at a time — arrows either side, the month's total and its day/night split at the
+  top, then the lines **grouped by crew** in the crews' own order with a subtotal on each.
+  Tap a line to change it, remove it, or **copy it to next month** (a standing client's
+  monthly programme takes one tap a month). **Add work** puts a new line into the month you
+  are looking at. The month **prints** as one table, crew by crew with subtotals, and
+  **exports to Excel**.
+- **A line can become a job — on purpose, never by itself.** *Make a job from this line*
+  opens the new-job form with the client, site, crew and a first-day-of-month start filled
+  in; nothing exists on the board until you save it there. Once saved, the line shows the
+  job's number and opens it. Changing the line afterwards does not change the job.
+- **The crews** are Green, Yellow, Civil, Chipseal, Spraying, Subcontractor asphalt and
+  Milling. They are the same list on the board's filter, on a job and in forward works.
 - **The profit and loss on a job** is filled in after it is finished, on the job's own
   **Profit & loss** screen. It is deliberately small: a **description and a cost**, as many
   lines as the job needs. The description box suggests the usual ones — asphalt, emulsion,
@@ -96,17 +110,10 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   it landed where it did.
 - **The whole screen is for directors only.** An office or site device that opens a costing
   link is told so and sent back to the job; the P&L link never appears on the job page.
+  There is no longer a profit-and-loss screen across all jobs: the money stays on each job.
 - **The job P&L prints** as one document: the money, your note, and every entry the
   supervisors wrote — because the reason a job went over is usually in the diary rather than
   the spreadsheet.
-- **⋮ → Profit & loss** opens on the jobs completed this month: invoice, cost and profit for
-  each, before a single choice has been made. **Filter** narrows it — **search by job name,
-  number or site**, **one client**, any dates, or widen it to jobs still on site and planned
-  — and both the printed report and the **Excel export** cover exactly what is filtered.
-  Tapping a job goes straight to its P&L.
-- **The director's report** prints that period — the totals, how they split by client, every
-  job with its margin, and **every issue and delay the supervisors logged**, gathered across
-  all the jobs into one table.
 - The money lives on the job itself. It is never shown on a site phone, never in an office
   device's view, and never exported in a supervisor's CSV. A profit is only worked out when
   both halves are there — half the figures is worse than none.
@@ -141,9 +148,8 @@ out 67mm tall in the middle of a diary. Sign-off is the last thing on the last p
 Everything on the page is laid out to be read across as well as down. A three-night job with
 eighteen photographs prints as five pages rather than eight.
 
-The director's **Profit & loss** report is the period's figures, then how they split by
-client, then a job at a time, then the note on each finished job and everything the crews
-flagged — top down from *how did we do* to *and why*.
+The **forward works** month prints as one table: crew, client, site, shift and invoice
+value, a subtotal under each crew and the month's total at the foot.
 
 All of them open the phone's print dialog — choose *Save as PDF* to email or file.
 
@@ -226,7 +232,7 @@ Android), then **Settings** → name, role, and the two values.
 | Reopen a completed job | | ✓ | ✓ |
 | **See a job's profit and loss** | | | ✓ |
 | **Enter the costs, invoice and variations** | | | ✓ |
-| **The Profit & loss tool across all jobs** | | | ✓ |
+| **Forward works** — the months ahead | | ✓ | ✓ |
 | **Archive a job** | | | ✓ |
 
 A diary entry written from a director's phone reads *· Director* in the record. Supervisors
@@ -288,11 +294,11 @@ Workshop in the same repository and GitHub Pages serves it from
   and office phones by the app, not by the database — same as the office-only documents.
   Anyone holding the key can read it directly. See the note on logins above before deciding
   what to put in those boxes.
-- **The board is filtered by crew.** Yellow, Subbie, Civil and Green, each with its own
-  colour so a chip is recognised before it is read, plus **Unassigned** whenever a job has
-  no crew on it yet. Type of work is still on every job, and in the reports and the
-  spreadsheet — it just isn't a filter, because nobody looks for a job that way. Adding a
-  fifth crew is one line in `CREWS` at the top of `app.js`.
+- **The board is filtered by crew.** Green, Yellow, Civil, Chipseal, Spraying, Subcontractor
+  asphalt and Milling, each with its own colour so a chip is recognised before it is read,
+  plus **Unassigned** whenever a job has no crew on it yet. Type of work is still on every
+  job, and in the reports and the spreadsheet — it just isn't a filter, because nobody looks
+  for a job that way. Adding a crew is one line in `CREWS` at the top of `app.js`.
 - **Types of work aren't a fixed list.** Pick **+ Add a new type…** when creating a job
   and name it — "Chip seal", say — and from then on it's a type like any other, with
   its own filter on the board. Naming one that already exists in a different spelling
