@@ -117,6 +117,8 @@ create table if not exists forward_works (
   site           text not null default '',
   crew           text not null default '',       -- a key from CREWS in app.js, or '' until decided
   shift          text not null default 'day' check (shift in ('day','night')),
+  work_date      date,                           -- the day on site; the month is the month of this day
+  days           integer not null default 1,     -- how many days from work_date, for a spell on site
   invoice_value  numeric,
   notes          text not null default '',
   project_id     uuid references projects (id) on delete set null,
@@ -126,7 +128,13 @@ create table if not exists forward_works (
   updated_by     text not null default ''
 );
 
+-- Columns added after the first release; "create table if not exists"
+-- above does nothing on a database that already has the table.
+alter table forward_works add column if not exists work_date date;
+alter table forward_works add column if not exists days integer not null default 1;
+
 create index if not exists forward_works_month_idx on forward_works (month);
+create index if not exists forward_works_day_idx   on forward_works (work_date);
 
 -- --------------------------------------------------------- job costing
 -- One line of what a finished job actually cost: a description and an
