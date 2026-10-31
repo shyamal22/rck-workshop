@@ -105,6 +105,29 @@ create table if not exists crew_people (
 
 create index if not exists crew_people_key_idx on crew_people (name_key);
 
+-- ------------------------------------------------------- forward works
+-- The outline of the months ahead, kept by the office by hand: one line
+-- per piece of work — who it is for, where, which crew, day or night, and
+-- what it is worth. A job is made from a line on purpose, never by itself;
+-- project_id is set when that happens so the line can point at its job.
+create table if not exists forward_works (
+  id             uuid primary key default gen_random_uuid(),
+  month          date not null,                  -- the first of the month
+  client         text not null default '',
+  site           text not null default '',
+  crew           text not null default '',       -- a key from CREWS in app.js, or '' until decided
+  shift          text not null default 'day' check (shift in ('day','night')),
+  invoice_value  numeric,
+  notes          text not null default '',
+  project_id     uuid references projects (id) on delete set null,
+  created_at     timestamptz not null default now(),
+  created_by     text not null default '',
+  updated_at     timestamptz not null default now(),
+  updated_by     text not null default ''
+);
+
+create index if not exists forward_works_month_idx on forward_works (month);
+
 -- --------------------------------------------------------- job costing
 -- One line of what a finished job actually cost: a description and an
 -- amount. The costing is filled in after the job is done, so there is no
@@ -194,18 +217,21 @@ alter table project_docs  enable row level security;
 alter table diary_entries enable row level security;
 alter table job_costs     enable row level security;
 alter table crew_people   enable row level security;
+alter table forward_works enable row level security;
 
 drop policy if exists projects_all      on projects;
 drop policy if exists project_docs_all  on project_docs;
 drop policy if exists diary_entries_all on diary_entries;
 drop policy if exists job_costs_all     on job_costs;
 drop policy if exists crew_people_all   on crew_people;
+drop policy if exists forward_works_all on forward_works;
 
 create policy projects_all      on projects      for all to anon, authenticated using (true) with check (true);
 create policy project_docs_all  on project_docs  for all to anon, authenticated using (true) with check (true);
 create policy diary_entries_all on diary_entries for all to anon, authenticated using (true) with check (true);
 create policy job_costs_all     on job_costs     for all to anon, authenticated using (true) with check (true);
 create policy crew_people_all   on crew_people   for all to anon, authenticated using (true) with check (true);
+create policy forward_works_all on forward_works for all to anon, authenticated using (true) with check (true);
 
 -- =====================================================================
 --  File storage — job paperwork and site photos

@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.9.1';
+const VERSION = '2.10.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -20,6 +20,7 @@ let updateReady = false;
    just get initials instead of faces — but adding a photo would queue for
    ever, so Settings says so. */
 let peopleTableMissing = false;
+let forwardTableMissing = false;
 
 /* --------------------------------------------------------- job states */
 /* Three, and only three. A job is either coming up, happening, or done. */
@@ -37,10 +38,13 @@ const JOB_STATUS = [
    board is filtered by, so it stays small enough to read at a glance.
    Adding a fifth crew is one line here and nothing else. */
 const CREWS = [
-  { key: 'yellow', label: 'Yellow Crew', dot: '#d99b00' },
-  { key: 'subbie', label: 'Subbie Crew', dot: '#7a6ad4' },
-  { key: 'civil',  label: 'Civil Crew',  dot: '#2b76c9' },
-  { key: 'green',  label: 'Green Crew',  dot: '#1c8a4f' }
+  { key: 'green',    label: 'Green crew',                 dot: '#1c8a4f' },
+  { key: 'yellow',   label: 'Yellow crew',                dot: '#d99b00' },
+  { key: 'civil',    label: 'Civil crew',                 dot: '#2b76c9' },
+  { key: 'chipseal', label: 'Chipseal crew',              dot: '#b5541c' },
+  { key: 'spraying', label: 'Spraying crew',              dot: '#0e8f8a' },
+  { key: 'subbie',   label: 'Subcontractor asphalt crew', dot: '#7a6ad4' },   // key kept: jobs already carry it
+  { key: 'milling',  label: 'Milling crew',               dot: '#4b5563' }
 ];
 const UNCREWED = { key: '', label: 'Unassigned', dot: '#9aa2ab' };
 
@@ -464,7 +468,7 @@ function whoami() { return S.name || 'Unnamed user'; }
    Local cache — the app opens instantly and stays readable on site
    with no signal, which is most of the time
    ================================================================ */
-const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], crew_people: [], localSeq: 0 };
+const DB = { projects: [], project_docs: [], diary_entries: [], job_costs: [], crew_people: [], forward_works: [], localSeq: 0 };
 
 function cacheKey() { return 'rckd.cache.' + (S.localMode ? 'local' : 'remote'); }
 
@@ -512,6 +516,7 @@ function takeCache(raw) {
   DB.diary_entries = raw.diary_entries || [];
   DB.job_costs = raw.job_costs || [];
   DB.crew_people = raw.crew_people || [];
+  DB.forward_works = raw.forward_works || [];
   DB.localSeq = raw.localSeq || 0;
 }
 async function loadCache() {
@@ -672,14 +677,15 @@ const Store = {
   async pull() {
     if (!connected()) return;
     // Each order ends on id so the pages cut cleanly between equal values.
-    const [projects, docs, entries, costs, people] = await Promise.all([
+    const [projects, docs, entries, costs, people, forward] = await Promise.all([
       restAll('projects', 'number.desc,id.asc'),
       restAll('project_docs', 'uploaded_at.asc,id.asc'),
       restAll('diary_entries', 'at.asc,id.asc'),
       restAll('job_costs', 'sort.asc,id.asc'),
       // A table the app can run without: an older database has no crew_people
       // yet, and a missing photo is not a reason to fail the whole refresh.
-      restAll('crew_people', 'name_key.asc,id.asc').catch(() => null)
+      restAll('crew_people', 'name_key.asc,id.asc').catch(() => null),
+      restAll('forward_works', 'month.asc,created_at.asc,id.asc').catch(() => null)
     ]);
     DB.projects = reconcile('projects', projects || []);
     DB.project_docs = reconcile('project_docs', docs || []);
@@ -690,6 +696,8 @@ const Store = {
     // somebody queue a photo that can never send.
     peopleTableMissing = !people;
     if (people) DB.crew_people = reconcile('crew_people', people);
+    forwardTableMissing = !forward;
+    if (forward) DB.forward_works = reconcile('forward_works', forward);
     saveCache();
   },
 
@@ -1076,34 +1084,6 @@ function isTodayJob(p) {
   return false;
 }
 
-/* --------------------------------------------------------- periods */
-/* The only preset left, for the month's figure on the landing page. The
-   P&L itself takes the dates the director picks. */
-function periodRange(key) {
-  const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth();
-  const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-  const lastDay = (yy, mm) => new Date(yy, mm + 1, 0).getDate();
-  if (key === 'month')   return [iso(y, m, 1), iso(y, m, lastDay(y, m))];
-  if (key === 'last')    { const d = new Date(y, m - 1, 1), ly = d.getFullYear(), lm = d.getMonth();
-                           return [iso(ly, lm, 1), iso(ly, lm, lastDay(ly, lm))]; }
-  if (key === 'quarter') { const q = Math.floor(m / 3) * 3;
-                           return [iso(y, q, 1), iso(y, q + 2, lastDay(y, q + 2))]; }
-  if (key === 'fy')      { const fy = m >= 3 ? y : y - 1; return [iso(fy, 3, 1), iso(fy + 1, 2, 31)]; }
-  return ['', ''];
-}
-
-/** A job belongs to a period if it was actually on site in it, or was due
-    to start in it, or finished in it — so a long job counts in every month
-    the crew was out on it, not only the one it started in. */
-function jobInPeriod(p, from, to) {
-  if (!from && !to) return true;
-  const within = d => !!d && (!from || d >= from) && (!to || d <= to);
-  if (within(p.start_date)) return true;
-  if (within((p.completed_at || '').slice(0, 10))) return true;
-  return diaryDays(p.id).some(within);
-}
-
 /* --------------------------------------------------- the money on a job */
 const costLinesFor = id => DB.job_costs
   .filter(l => l.project_id === id)
@@ -1133,30 +1113,6 @@ function costing(p) {
     priced: lines.length > 0 || cost != null,
     done: pnl != null
   };
-}
-
-/** The numbers a director asks for, added up honestly: value and cost are
-    summed only over the jobs that carry them, and the count of those jobs
-    comes back too, so a total can say what it is missing. */
-function periodTotals(list) {
-  const t = { jobs: list.length, days: 0, entries: 0, issues: 0,
-              invoice: 0, variations: 0, revenue: 0, cost: 0, priced: 0, done: 0,
-              ongoing: 0, planned: 0, completed: 0 };
-  list.forEach(p => {
-    t.days += diaryDays(p.id).length;
-    t.entries += entriesFor(p.id).length;
-    t.issues += issueCount(p.id);
-    const c = costing(p);
-    if (c.invoice != null) t.invoice += c.invoice;
-    if (c.variations != null) t.variations += c.variations;
-    if (c.revenue != null) t.revenue += c.revenue;
-    if (c.cost != null) { t.cost += c.cost; t.priced++; }
-    if (c.done) t.done++;
-    t[p.status] = (t[p.status] || 0) + 1;
-  });
-  t.pnl = t.done ? t.revenue - t.cost : null;
-  t.pct = marginPct(t.revenue, t.pnl);
-  return t;
 }
 
 /** Board order: on site first, then what starts soonest, then finished. */
@@ -1372,7 +1328,7 @@ function jobIdFromPath() { return route.path.split('/')[2] || ''; }
 const SCREENS = {
   '/':        { title: 'RCK Dispatch',  render: renderHome },
   '/jobs':    { title: 'Jobs',          render: renderBoard },
-  '/pnl':     { title: 'Profit & loss', render: renderPnl,    back: true },
+  '/forward': { title: 'Forward works', render: renderForward, back: true },
   '/today':   { title: 'Today on site', render: renderToday },
   '/crew':    { title: 'Crew & supervisors', render: renderCrew },
   '/faces':   { title: 'Crew photos',   render: renderFaces, back: true },
@@ -1415,7 +1371,7 @@ function render() {
   else if (route.path.startsWith('/entry/')) { screen = { title: 'Diary entry', render: renderEntry };  back = true; }
   else if (route.path.startsWith('/upload/')){ screen = { title: 'Add document', render: renderUpload }; back = true; }
   else if (route.path.startsWith('/costs/')) { screen = { title: 'Profit & loss', render: renderCosts }; back = true; }
-  else if (route.path === '/overview')       { go('#/pnl'); return; }   // the old name
+  else if (route.path === '/overview' || route.path === '/pnl') { go('#/forward'); return; }   // the old names
 
   if (!screen) { go('#/'); return; }
 
@@ -1668,19 +1624,14 @@ function renderHome(view) {
   const onSite = jobs.filter(p => p.status === 'ongoing').length;
   const planned = jobs.filter(p => p.status === 'planned').length;
 
-  let money = '';
-  if (isDirector()) {
-    const [from, to] = periodRange('month');
-    const inMonth = DB.projects.filter(p => jobInPeriod(p, from, to));
-    const t = inMonth.reduce((acc, p) => {
-      const c = costing(p);
-      if (c.revenue != null) { acc.inv += c.revenue; acc.priced++; }
-      if (c.pnl != null) { acc.margin += c.pnl; acc.withMargin++; }
-      return acc;
-    }, { inv: 0, priced: 0, margin: 0, withMargin: 0 });
-    money = t.priced
-      ? `${esc(fmtMoney(t.inv))} billed this month${t.withMargin ? ' · ' + esc(fmtMoney(t.margin)) + ' P&L' : ''}`
-      : 'Nothing costed this month yet';
+  let ahead = '';
+  if (isOffice()) {
+    const m = fwThisMonth();
+    const rows = fwRows(m);
+    const t = fwTotal(rows);
+    ahead = rows.length
+      ? `${rows.length} job${rows.length === 1 ? '' : 's'} in ${fwLabel(m)} · ${esc(fmtMoney(t))}`
+      : `Nothing in the outline for ${fwLabel(m)} yet`;
   }
 
   const feed = crewFeed(today());
@@ -1705,16 +1656,16 @@ function renderHome(view) {
         <span class="ts">${crewToday}</span>
       </a>
 
-      ${isDirector() ? `
-      <a class="tile money" href="#/pnl">
-        <span class="ti">${icon('chart')}</span>
-        <b>Profit &amp; loss</b>
-        <span class="td">What each job was priced at, and what it did</span>
-        <span class="ts">${money}</span>
+      ${isOffice() ? `
+      <a class="tile plan" href="#/forward">
+        <span class="ti">${icon('calendar')}</span>
+        <b>Forward works</b>
+        <span class="td">What is coming up, month by month, crew by crew</span>
+        <span class="ts">${ahead}</span>
       </a>` : ''}
     </div>
 
-    ${isDirector() ? '<p class="muted tiny center mt">Profit &amp; loss is shown on Director devices only.</p>' : ''}`;
+    ${isOffice() ? '<p class="muted tiny center mt">Forward works is shown on Office and Director devices only.</p>' : ''}`;
 }
 
 /* ================================================================
@@ -2515,8 +2466,6 @@ function renderJob(view) {
       </table>
     </div>
 
-
-
     ${p.status === 'planned' ? `
       <button class="btn primary wide" id="start">${icon('play')}Start job — crew is on site</button>
       <p class="muted small center mt">Adding the first diary entry does this for you.</p>` : ''}
@@ -3106,9 +3055,11 @@ function renderJobEdit(view) {
   }
   $('#title').textContent = editing ? 'Edit job' : 'New job';
 
-  const p = editing || {};
+  // A new job can arrive prefilled from the forward works outline.
+  const from = !editing && jobPrefill ? jobPrefill : null;
+  const p = editing || from || {};
   const keys = allTypeKeys();
-  const cur = editing ? typeOf(editing) : 'milling';
+  const cur = editing ? typeOf(editing) : (from && keys.includes(from.work_type) ? from.work_type : 'milling');
 
   // Everyone who has been named as a supervisor before, so the office picks
   // rather than retypes — and can still type someone new.
@@ -3227,7 +3178,13 @@ function renderJobEdit(view) {
         toast('Saved');
         go('#/job/' + editing.id);
       } else {
+        if (from && from.contract_value != null) data.contract_value = from.contract_value;
         const saved = await createJob(data);
+        // Made from a forward works line: the line now points at its job.
+        if (from && from.forward_id && DB.forward_works.some(r => r.id === from.forward_id)) {
+          await Store.patch('forward_works', from.forward_id, { project_id: saved.id, updated_at: new Date().toISOString(), updated_by: whoami() });
+        }
+        jobPrefill = null;
         toast(connected() ? 'Job created' : 'Saved on this device');
         go('#/job/' + saved.id);
       }
@@ -3401,220 +3358,288 @@ function wireCosts(view, p) {
    and what it was worth. Everything on it is added up from what the
    supervisors and the office entered on the jobs themselves — nothing
    here is typed twice.
-   ================================================================ */
-/* The month you are in, every job in it. That is the question a director
-   opens the app with, so it is answered before a single choice is made.
-   Anything narrower sits behind one button. */
-function monthRange() {
-  const n = new Date(), y = n.getFullYear(), m = n.getMonth();
-  const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-  return [iso(y, m, 1), iso(y, m, new Date(y, m + 1, 0).getDate())];
-}
 /* Finished jobs, this month. A costing is filled in after a job is done, so
    those are the only ones with anything to show. */
-const pnlFilter = (() => {
-  const [from, to] = monthRange();
-  return { status: 'completed', client: 'all', q: '', from, to, sort: 'pnl', open: false };
-})();
-function pnlIsDefault() {
-  const [from, to] = monthRange();
-  return pnlFilter.status === 'completed' && pnlFilter.client === 'all' && !pnlFilter.q
-      && pnlFilter.from === from && pnlFilter.to === to;
+/* ================================================================
+   Screen — forward works
+   The month ahead, and the ones after it: who we are working for,
+   where, which crew, day or night, and what it is worth. An outline
+   the office keeps by hand; jobs are made from it one at a time,
+   never by themselves.
+   ================================================================ */
+const fwView = { month: null, editing: null, adding: false };
+let jobPrefill = null;   // what the new-job form opens with, when a line is turned into a job
+
+function fwThisMonth() { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; }
+function fwMonth() { return fwView.month || fwThisMonth(); }
+function fwShift(month, n) {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function pnlReset() {
-  const [from, to] = monthRange();
-  Object.assign(pnlFilter, { status: 'completed', client: 'all', q: '', from, to });
+function fwLabel(month) {
+  const [y, m] = month.split('-').map(Number);
+  return `${MONTHS_LONG[m - 1]} ${y}`;
+}
+/** The lines in a month, oldest first. */
+function fwRows(month) {
+  return DB.forward_works
+    .filter(r => (r.month || '').slice(0, 7) === month)
+    .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+}
+function fwTotal(rows) { return rows.reduce((t, r) => t + (Number(r.invoice_value) || 0), 0); }
+function fwShiftLabel(v) { return v === 'night' ? 'Night' : 'Day'; }
+/** Lines grouped by crew, in the crews' own order, the undecided last. */
+function fwByCrew(rows) {
+  const groups = CREWS.concat([UNCREWED]).map(c => ({ crew: c, rows: rows.filter(r => crewOf(r) === c.key) }));
+  return groups.filter(g => g.rows.length);
 }
 
-const PNL_STATUS = [
-  { key: 'completed', label: 'Completed' },
-  { key: 'ongoing',   label: 'On site' },
-  { key: 'planned',   label: 'Planned' },
-  { key: 'all',       label: 'Every job' }
-];
-
-function pnlJobs() {
-  const q = pnlFilter.q.trim().toLowerCase();
-  return DB.projects.filter(p => {
-    // An archived job is one that never really ran. It should not be sitting
-    // in a month's figures any more than it should be on the board.
-    if (p.archived) return false;
-    if (pnlFilter.status !== 'all' && p.status !== pnlFilter.status) return false;
-    if (pnlFilter.client !== 'all' && (p.client || '').trim() !== pnlFilter.client) return false;
-    if (q && ![p.name, p.client, p.site, jobNo(p)].some(v => String(v || '').toLowerCase().includes(q))) return false;
-    return jobInPeriod(p, pnlFilter.from, pnlFilter.to);
-  });
-}
-/** What the figures on screen are of, in one line. */
-function pnlLabel() {
-  const [mf, mt] = monthRange();
-  const n = new Date();
-  const when = (pnlFilter.from === mf && pnlFilter.to === mt)
-    ? `${MONTHS_LONG[n.getMonth()]} ${n.getFullYear()}`
-    : (pnlFilter.from || pnlFilter.to)
-      ? `${pnlFilter.from ? fmtDate(pnlFilter.from) : 'the beginning'} to ${pnlFilter.to ? fmtDate(pnlFilter.to) : 'today'}`
-      : 'All time';
-  const who = pnlFilter.client === 'all' ? '' : ` · ${pnlFilter.client}`;
-  const what = pnlFilter.status === 'all' ? '' : ` · ${PNL_STATUS.find(x => x.key === pnlFilter.status).label.toLowerCase()}`;
-  const named = pnlFilter.q ? ` · "${pnlFilter.q}"` : '';
-  return when + who + what + named;
-}
-
-function renderPnl(view) {
-  if (!isDirector()) {
+function renderForward(view) {
+  if (!isOffice()) {
     view.innerHTML = `
       <div class="card">
-        <h2>Director only</h2>
-        <p class="muted small">The profit and loss across every job is for devices set to
-        <strong>Director</strong>. The jobs themselves, their paperwork and their diaries are
-        all open to you.</p>
-        <a class="btn wide mt" href="#/jobs">Open the jobs</a>
+        <h2>Office only</h2>
+        <p class="muted small">The forward works outline is kept from an <strong>Office</strong> or
+        <strong>Director</strong> device. The jobs themselves, their paperwork and their diaries
+        are all open to you.</p>
+        <a class="btn wide mt" href="#/">Back to the jobs</a>
       </div>`;
     return;
   }
-
-  const list = pnlJobs();
-  const t = periodTotals(list);
-  const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim()).filter(Boolean))).sort();
-
-  const val = p => { const c = costing(p); return c.revenue == null ? -Infinity : c.revenue; };
-  const mg  = p => { const c = costing(p); return c.pnl == null ? -Infinity : c.pnl; };
-  const sorters = {
-    pnl:    (a, b) => mg(b) - mg(a),
-    value:  (a, b) => val(b) - val(a),
-    name:   (a, b) => String(a.name || '').localeCompare(String(b.name || '')),
-    date:   (a, b) => String(b.completed_at || b.start_date || '').localeCompare(String(a.completed_at || a.start_date || ''))
-  };
-  const sorted = list.slice().sort(sorters[pnlFilter.sort] || sorters.value);
+  const month = fwMonth();
+  const isThis = month === fwThisMonth();
+  const rows = fwRows(month);
+  const total = fwTotal(rows);
+  const nights = rows.filter(r => r.shift === 'night').length;
+  const editing = fwView.editing ? DB.forward_works.find(r => r.id === fwView.editing) : null;
+  const next = fwRows(fwShift(month, 1));
 
   view.innerHTML = `
+    <div class="daynav">
+      <button class="dn-arrow" id="mPrev" title="The month before">${icon('chevL')}</button>
+      <div class="dn-mid">
+        <b>${esc(fwLabel(month))}</b>
+        <span>${isThis ? 'This month' : `<button class="linky" id="mThis">Back to this month</button>`}</span>
+      </div>
+      <button class="dn-arrow" id="mNext" title="The month after">${icon('chevR')}</button>
+    </div>
+
+    ${forwardTableMissing ? `<div class="banner">The database has not got the forward works table yet.
+      <em>Run the latest <strong>supabase-schema.sql</strong> in Supabase's SQL editor once — it adds
+      the table and nothing else changes — then come back here.</em></div>` : ''}
+
     <div class="ledger">
-      <div class="lh">${esc(pnlLabel())}</div>
-      <div class="lrow"><span>Invoice</span><b>${esc(fmtMoney(t.invoice))}</b></div>
-      <div class="lrow"><span>Variations</span><b>${esc(fmtMoney(t.variations))}</b></div>
-      <div class="lrow"><span>Cost</span><b>${esc(fmtMoney(t.cost))}</b></div>
-      <div class="lrow tot"><span>Profit / loss</span><b class="${
-        t.pnl == null ? '' : t.pnl < 0 ? 'neg' : 'pos'}">${
-        t.pnl == null ? '—' : esc(fmtMoney(t.pnl))}${
-        t.pct != null ? ` <em>${t.pct.toFixed(1)}%</em>` : ''}</b></div>
-      <div class="lf">${list.length} job${list.length === 1 ? '' : 's'}${
-        t.done < list.length ? ` · ${t.done} costed` : ''}</div>
+      <div class="lh">Forward works · ${esc(fwLabel(month))}</div>
+      <div class="lrow"><span>Jobs planned</span><b>${rows.length}</b></div>
+      <div class="lrow"><span>Day / night</span><b>${rows.length - nights} / ${nights}</b></div>
+      <div class="lrow tot"><span>Invoice value</span><b>${esc(fmtMoney(total))}</b></div>
+      <div class="lf">${next.length
+        ? `${fwLabel(fwShift(month, 1))}: ${next.length} job${next.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(next)))}`
+        : `Nothing in ${fwLabel(fwShift(month, 1))} yet`}</div>
     </div>
 
-    <button class="btn wide filterbtn${pnlIsDefault() ? '' : ' on'}" id="filterBtn">
-      ${icon('filter')}${pnlIsDefault() ? 'Filter' : 'Filtered · ' + esc(pnlLabel())}
-    </button>
+    ${fwView.adding || editing ? fwForm(editing, month) : `
+    <button class="btn primary wide mb" id="fwAdd" ${forwardTableMissing ? 'disabled' : ''}>${icon('plus')}Add work to ${esc(fwLabel(month))}</button>`}
 
-    ${pnlFilter.open ? `
-    <div class="card filterpanel">
-      <label class="field"><span>Show</span>
-        <select id="fStatus">
-          ${PNL_STATUS.map(x => `<option value="${x.key}" ${pnlFilter.status === x.key ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}
-        </select></label>
-      <label class="field"><span>Search</span>
-        <input type="text" id="fQ" value="${esc(pnlFilter.q)}"
-          placeholder="Job name, number or site" autocapitalize="off"></label>
-      <label class="field"><span>Client</span>
-        <select id="fClient">
-          <option value="all">Every client</option>
-          ${clients.map(c => `<option value="${esc(c)}" ${pnlFilter.client === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
-        </select></label>
-      <div class="row">
-        <label class="field grow"><span>From</span><input type="date" id="fFrom" value="${esc(pnlFilter.from)}"></label>
-        <label class="field grow"><span>To</span><input type="date" id="fTo" value="${esc(pnlFilter.to)}"></label>
-      </div>
-      <div class="btn-row">
-        <button class="btn sm" id="fAll">All time</button>
-        <button class="btn sm" id="fReset">This month</button>
-        <button class="btn sm primary" id="fClose">Done</button>
-      </div>
-    </div>` : ''}
+    ${fwByCrew(rows).map(g => `
+      <div class="fw-crew">
+        <div class="fw-ch">${crewDot(g.crew.key)} <b>${esc(g.crew.label)}</b>
+          <span>${g.rows.length} job${g.rows.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(g.rows)))}</span></div>
+        ${g.rows.map(r => {
+          const job = r.project_id ? jobById(r.project_id) : null;
+          return `
+          <button class="fw-row${fwView.editing === r.id ? ' on' : ''}" data-id="${r.id}">
+            <div class="fw-main">
+              <b>${esc(r.client || 'Client not named')}</b>
+              <span>${esc(r.site || 'Site to be confirmed')}</span>
+            </div>
+            <div class="fw-side">
+              <b>${esc(fmtMoney(r.invoice_value))}</b>
+              <span class="pill ${r.shift === 'night' ? 'night' : 'plain'}">${fwShiftLabel(r.shift)}</span>
+              ${job ? `<span class="pill plain">${esc(jobNo(job))}</span>` : ''}
+            </div>
+          </button>`; }).join('')}
+      </div>`).join('') || (fwView.adding ? '' : `
+      <div class="empty"><b>Nothing planned for ${esc(fwLabel(month))}</b>
+        Add the work as it is confirmed — client, site, crew, day or night, and what it is worth.</div>`)}
 
-    <div class="filters" id="sortChips">
-      ${[['pnl','By P&L'],['value','By invoice'],['date','By date'],['name','By name']]
-        .map(([k, l]) => `<button class="chip" data-sort="${k}" aria-pressed="${pnlFilter.sort === k}">${l}</button>`).join('')}
-    </div>
-
-    ${sorted.length ? sorted.map((p, i) => {
-      const c = costing(p);
-      return `
-        <button class="job-row status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
-          <div class="hdr">
-            <span class="num">${jobNo(p)}</span>
-            <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
-            ${c.done ? '' : '<span class="pill plain">No costing yet</span>'}
-          </div>
-          <div class="ttl">${esc(p.name)}</div>
-          <div class="sub">
-            ${p.client ? `<span>${esc(p.client)}</span>` : ''}
-            <span>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</span>
-            <span>${esc(fmtShort(p.completed_at || p.start_date))}</span>
-          </div>
-          ${c.priced || c.revenue != null ? `
-          <div class="sub">
-            <span><strong>${esc(fmtMoney(c.revenue))}</strong> billed</span>
-            <span>${esc(fmtMoney(c.cost))} cost</span>
-            ${c.pnl != null ? `<span class="${c.pnl < 0 ? 'neg' : 'pos'}" style="font-weight:640">${
-              esc(fmtMoney(c.pnl))}${c.pct != null ? ' · ' + c.pct.toFixed(1) + '%' : ''}</span>` : ''}
-          </div>` : ''}
-        </button>`;
-    }).join('') : `<div class="empty"><b>No jobs here</b>Nothing finished this month matches.
-      Open the filter for a wider period.</div>`}
-
+    ${rows.length ? `
     <div class="card">
       <div class="btn-row">
-        <button class="btn" id="print">${icon('printer')}Print the report</button>
-        <button class="btn" id="csv">${icon('download')}Export to Excel</button>
+        <button class="btn" id="fwPrint">${icon('printer')}Print the month</button>
+        <button class="btn" id="fwCsv">${icon('download')}Export to Excel</button>
       </div>
-      <p class="muted tiny center mt" style="margin-bottom:0">Both cover exactly what is filtered above.</p>
-    </div>`;
+    </div>` : ''}`;
 
-  $('#filterBtn', view).onclick = () => { pnlFilter.open = !pnlFilter.open; render(); };
-  const on = (id, fn) => { const el = $('#' + id, view); if (el) el.onchange = fn; };
-  on('fStatus', e => { pnlFilter.status = e.target.value; render(); });
-  const q = $('#fQ', view);
-  if (q) q.oninput = e => { pnlFilter.q = e.target.value; clearTimeout(q._t);
-    q._t = setTimeout(() => { const at = q.selectionStart; render();
-      const again = $('#fQ'); if (again) { again.focus(); again.setSelectionRange(at, at); } }, 260); };
-  on('fClient', e => { pnlFilter.client = e.target.value; render(); });
-  on('fFrom',   e => { pnlFilter.from = e.target.value; render(); });
-  on('fTo',     e => { pnlFilter.to = e.target.value; render(); });
-  const click = (id, fn) => { const el = $('#' + id, view); if (el) el.onclick = fn; };
-  click('fReset', () => { pnlReset(); render(); });
-  click('fAll',   () => { pnlFilter.from = ''; pnlFilter.to = ''; render(); });
-  click('fClose', () => { pnlFilter.open = false; render(); });
-
-  $$('#sortChips .chip', view).forEach(b => b.onclick = () => { pnlFilter.sort = b.dataset.sort; render(); });
-  $$('.job-row', view).forEach(b => b.onclick = () => go('#/costs/' + b.dataset.id));
-  $('#print', view).onclick = () => printDirectorReport(sorted);
-  $('#csv', view).onclick = () => exportPnlCsv(sorted);
+  const goMonth = m => { fwView.month = m; fwView.editing = null; fwView.adding = false; render(); };
+  $('#mPrev', view).onclick = () => goMonth(fwShift(month, -1));
+  $('#mNext', view).onclick = () => goMonth(fwShift(month, 1));
+  const back = $('#mThis', view);
+  if (back) back.onclick = () => goMonth(null);
+  const add = $('#fwAdd', view);
+  if (add) add.onclick = () => { fwView.adding = true; fwView.editing = null; render(); window.scrollTo(0, 0); };
+  $$('.fw-row', view).forEach(b => b.onclick = () => { fwView.editing = b.dataset.id; fwView.adding = false; render(); window.scrollTo(0, 0); });
+  const pr = $('#fwPrint', view); if (pr) pr.onclick = () => printForwardMonth(month);
+  const cs = $('#fwCsv', view);   if (cs) cs.onclick = () => exportForwardCsv(month);
+  if (fwView.adding || editing) wireFwForm(view, editing, month);
 }
 
-/** The filtered list as a spreadsheet — a client's month handed straight to
-    the accountant, with the same figures that are on the screen. */
-function exportPnlCsv(list) {
-  const r2 = v => v == null ? '' : Math.round(v * 100) / 100;
-  const rows = [['Job', 'Name', 'Client', 'Site', 'Crew', 'Status', 'First day', 'Completed',
-    'Supervisor', 'Days on site', 'Issues',
-    'Invoice', 'Variations', 'Billed', 'Cost', 'Profit / loss', 'P&L %', 'Note']];
-  list.forEach(p => {
-    const c = costing(p);
-    rows.push([
-      jobNo(p), p.name, p.client, p.site, crewLabel(crewOf(p)), statusLabel(p.status),
-      p.start_date || '', p.completed_at ? fmtDate(p.completed_at) : '', p.supervisor,
-      diaryDays(p.id).length, issueCount(p.id),
-      r2(c.invoice), r2(c.variations), r2(c.revenue), r2(c.cost), r2(c.pnl),
-      c.pct == null ? '' : c.pct.toFixed(1), p.pnl_notes || ''
-    ]);
+/** One line of the outline, to add or to change. */
+function fwForm(r, month) {
+  r = r || {};
+  const clients = Array.from(new Set(DB.projects.map(p => (p.client || '').trim())
+    .concat(DB.forward_works.map(x => (x.client || '').trim())).filter(Boolean))).sort();
+  const job = r.project_id ? jobById(r.project_id) : null;
+  return `
+    <div class="card fw-form">
+      <h2>${r.id ? 'This line' : 'Add work'}</h2>
+      <label class="field"><span>Client</span>
+        <input type="text" id="fwClient" value="${esc(r.client || '')}" placeholder="e.g. Auckland Transport" list="fwClients">
+        <datalist id="fwClients">${clients.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist></label>
+      <label class="field"><span>Site location</span>
+        <input type="text" id="fwSite" value="${esc(r.site || '')}" placeholder="Address, or the stretch of road"></label>
+      <div class="row">
+        <label class="field grow"><span>Crew</span>
+          <select id="fwCrew">
+            <option value="" ${!crewOf(r) ? 'selected' : ''}>Not decided yet</option>
+            ${CREWS.map(c => `<option value="${c.key}" ${crewOf(r) === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+          </select></label>
+        <label class="field grow"><span>Shift</span>
+          <select id="fwShift">
+            <option value="day" ${r.shift !== 'night' ? 'selected' : ''}>Day</option>
+            <option value="night" ${r.shift === 'night' ? 'selected' : ''}>Night</option>
+          </select></label>
+      </div>
+      <div class="row">
+        <label class="field grow"><span>Invoice value</span>
+          <input type="number" id="fwValue" inputmode="decimal" step="any" min="0" value="${r.invoice_value == null ? '' : esc(String(r.invoice_value))}" placeholder="0"></label>
+        <label class="field grow"><span>Month</span>
+          <input type="month" id="fwMonth" value="${esc((r.month || '').slice(0, 7) || month)}"></label>
+      </div>
+      <label class="field"><span>Notes <span class="muted">(optional)</span></span>
+        <input type="text" id="fwNotes" value="${esc(r.notes || '')}" placeholder="Anything the office should remember"></label>
+      <div class="btn-row">
+        <button class="btn primary" id="fwSave">${r.id ? 'Save' : 'Add it'}</button>
+        <button class="btn" id="fwCancel">Cancel</button>
+        ${r.id ? `<button class="btn" id="fwCopy">Copy to next month</button>` : ''}
+        ${r.id ? `<button class="btn danger" id="fwDel">${icon('trash')}Remove</button>` : ''}
+      </div>
+      ${r.id ? `
+      <div class="btn-row mt">
+        ${job
+          ? `<a class="btn wide" href="#/job/${job.id}">${icon('book')}Open ${esc(jobNo(job))} — ${esc(job.name)}</a>`
+          : `<button class="btn wide" id="fwMakeJob">${icon('plus')}Make a job from this line</button>`}
+      </div>
+      <p class="muted tiny mt" style="margin-bottom:0">${job
+        ? 'This line has its job on the board. Changing the line does not change the job.'
+        : 'Opens a new job with the client, site and crew filled in. Nothing is made until you save it there.'}</p>` : ''}
+    </div>`;
+}
+
+function wireFwForm(view, editing, month) {
+  const read = () => ({
+    client: $('#fwClient', view).value.trim(),
+    site: $('#fwSite', view).value.trim(),
+    crew: $('#fwCrew', view).value,
+    shift: $('#fwShift', view).value === 'night' ? 'night' : 'day',
+    invoice_value: $('#fwValue', view).value === '' ? null : Number($('#fwValue', view).value),
+    month: ($('#fwMonth', view).value || month) + '-01',
+    notes: $('#fwNotes', view).value.trim(),
+    updated_at: new Date().toISOString(),
+    updated_by: whoami()
   });
-  const t = periodTotals(list);
+  const close = () => { fwView.editing = null; fwView.adding = false; render(); };
+
+  $('#fwSave', view).onclick = async function () {
+    const data = read();
+    if (!data.client && !data.site) return toast('Name the client or the site');
+    if (data.invoice_value != null && !(data.invoice_value >= 0)) return toast('The invoice value should be a number');
+    if (!/^\d{4}-\d{2}-01$/.test(data.month)) return toast('Pick a month');
+    this.disabled = true;
+    try {
+      if (editing) await Store.patch('forward_works', editing.id, data);
+      else await Store.insert('forward_works', Object.assign({ id: uid(), created_at: new Date().toISOString(), created_by: whoami() }, data));
+      fwView.month = data.month.slice(0, 7);
+      toast(editing ? 'Saved' : 'Added to ' + fwLabel(fwView.month));
+      close();
+    } catch (err) {
+      this.disabled = false;
+      toast('Could not save: ' + err.message);
+    }
+  };
+  $('#fwCancel', view).onclick = close;
+
+  const copy = $('#fwCopy', view);
+  if (copy) copy.onclick = async () => {
+    const data = read();
+    const to = fwShift(data.month.slice(0, 7), 1);
+    await Store.insert('forward_works', Object.assign({}, data, {
+      id: uid(), month: to + '-01', project_id: null, created_at: new Date().toISOString(), created_by: whoami() }));
+    toast('Copied to ' + fwLabel(to));
+    fwView.month = to; close();
+  };
+  const del = $('#fwDel', view);
+  if (del) del.onclick = async () => {
+    if (!confirm('Remove this line from the outline? Any job made from it stays.')) return;
+    await Store.remove('forward_works', editing.id);
+    toast('Removed'); close();
+  };
+  const mk = $('#fwMakeJob', view);
+  if (mk) mk.onclick = () => {
+    const data = read();
+    const crew = crewDef(data.crew);
+    jobPrefill = {
+      forward_id: editing.id,
+      name: [data.client, data.site].filter(Boolean).join(' — '),
+      client: data.client, site: data.site, crew: data.crew,
+      work_type: { milling: 'milling', chipseal: 'chipseal', spraying: 'spraying', subbie: 'paving' }[data.crew] || '',
+      description: [data.shift === 'night' ? 'Night shift.' : 'Day shift.', data.notes].filter(Boolean).join(' '),
+      contract_value: data.invoice_value,     // what it is worth: an office figure, never on a site phone
+      start_date: data.month
+    };
+    if (crew.key === '') delete jobPrefill.crew;
+    go('#/new');
+  };
+}
+
+/** The month on paper: a table a crew at a time, and what it adds up to. */
+function printForwardMonth(month) {
+  const rows = fwRows(month);
+  const groups = fwByCrew(rows);
+  const money = v => v == null || v === '' ? '—' : esc(fmtMoney(v));
+  printDoc(`
+    ${docHead('Forward works', fwLabel(month), `${rows.length} job${rows.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(rows)))}`)}
+    <table class="fwp">
+      <tr><th style="width:34mm">Crew</th><th>Client</th><th>Site location</th>
+        <th style="width:16mm">Shift</th><th style="width:28mm;text-align:right">Invoice value</th></tr>
+      ${groups.map(g => g.rows.map((r, i) => `<tr class="avoid-break">
+        <td>${i === 0 ? `<strong>${esc(g.crew.label)}</strong>` : ''}</td>
+        <td>${esc(r.client || '—')}</td>
+        <td>${esc(r.site || '—')}${r.notes ? `<br><em>${esc(r.notes)}</em>` : ''}</td>
+        <td>${fwShiftLabel(r.shift)}</td>
+        <td style="text-align:right">${money(r.invoice_value)}</td>
+      </tr>`).join('') + (groups.length > 1 ? `<tr class="sub">
+        <td></td><td colspan="3">${esc(g.crew.label)} · ${g.rows.length} job${g.rows.length === 1 ? '' : 's'}</td>
+        <td style="text-align:right">${esc(fmtMoney(fwTotal(g.rows)))}</td></tr>` : '')).join('')}
+      <tr class="tot"><td></td><td colspan="3">${esc(fwLabel(month))} · ${rows.length} job${rows.length === 1 ? '' : 's'} ·
+        ${rows.filter(r => r.shift !== 'night').length} day / ${rows.filter(r => r.shift === 'night').length} night</td>
+        <td style="text-align:right">${esc(fmtMoney(fwTotal(rows)))}</td></tr>
+    </table>
+    <p style="font-size:10pt;color:#444">An outline of the work ahead as the office understands it on ${esc(fmtDate(today()))}.
+    Jobs are confirmed on the board.</p>`, `Forward works · ${fwLabel(month)}`);
+}
+
+function exportForwardCsv(month) {
+  const rows = [['Month', 'Crew', 'Client', 'Site location', 'Shift', 'Invoice value', 'Notes', 'Job']];
+  fwByCrew(fwRows(month)).forEach(g => g.rows.forEach(r => {
+    const job = r.project_id ? jobById(r.project_id) : null;
+    rows.push([fwLabel(month), g.crew.label, r.client || '', r.site || '', fwShiftLabel(r.shift),
+      r.invoice_value == null ? '' : Math.round(Number(r.invoice_value) * 100) / 100, r.notes || '', job ? jobNo(job) : '']);
+  }));
   rows.push([]);
-  rows.push(['TOTAL', pnlLabel(), '', '', '', '', '', '', '', t.days, t.issues,
-    r2(t.invoice), r2(t.variations), r2(t.revenue), r2(t.cost), r2(t.pnl),
-    t.pct == null ? '' : t.pct.toFixed(1), '']);
-  const tag = (pnlFilter.client === 'all' ? 'all-clients' : pnlFilter.client)
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  downloadCsv(`rck-pnl-${tag}-${pnlFilter.from || 'start'}-to-${pnlFilter.to || today()}.csv`, rows);
+  rows.push(['TOTAL', '', '', '', '', Math.round(fwTotal(fwRows(month)) * 100) / 100, '', '']);
+  downloadCsv(`rck-forward-works-${month}.csv`, rows);
 }
 
 /* ================================================================
@@ -3650,12 +3675,12 @@ function renderReports(view) {
       <button class="btn wide" id="period">${icon('printer')}Print jobs summary</button>
     </div>
 
-    ${isDirector() ? `
+    ${isOffice() ? `
     <div class="card">
-      <h2>Across every job</h2>
-      <p class="muted small">Profit and loss over a period: what was invoiced, what it cost, and
-      what is left — added up from the costings and the crews' own entries.</p>
-      <a class="btn primary wide" href="#/pnl">Open profit &amp; loss</a>
+      <h2>Forward works</h2>
+      <p class="muted small">The month's outline — every job planned, crew by crew, with its
+      invoice value — prints and exports from the forward works screen.</p>
+      <a class="btn wide" href="#/forward">Open forward works</a>
     </div>` : ''}
 
     <div class="card">
@@ -4196,145 +4221,6 @@ function printDocRegister(p) {
 /** The period, on paper. The numbers first, then how they split by client,
     then a job at a time, then everything the crews flagged — so it reads
     top-down from "how did we do" to "and why". */
-function printDirectorReport(list) {
-  const jobs = list || pnlJobs();
-  const t = periodTotals(jobs);
-  const money = (v, cents) => v == null ? '—' : esc(fmtMoney(v, cents));
-  const tone = v => v == null ? '' : v < 0 ? ' neg' : ' pos';
-
-  // How the period splits by client — the cut a director asks for next.
-  const byClient = {};
-  jobs.forEach(p => {
-    const k = (p.client || '').trim() || 'No client named';
-    const c = costing(p);
-    const b = byClient[k] || (byClient[k] = { jobs: 0, inv: 0, cost: 0, priced: 0, days: 0, issues: 0 });
-    b.jobs++;
-    b.days += diaryDays(p.id).length;
-    b.issues += issueCount(p.id);
-    if (c.revenue != null) { b.inv += c.revenue; b.priced++; }
-    if (c.cost != null)    { b.cost += c.cost; }
-  });
-  const clients = Object.keys(byClient).sort((a, b) => byClient[b].inv - byClient[a].inv);
-
-  const troubles = [];
-  jobs.forEach(p => entriesFor(p.id).forEach(e => {
-    if ((e.kind === 'issue' || e.kind === 'delay') &&
-        (!pnlFilter.from || (e.entry_date || '') >= pnlFilter.from) &&
-        (!pnlFilter.to || (e.entry_date || '') <= pnlFilter.to)) troubles.push({ p, e });
-  }));
-  troubles.sort((a, b) => (a.e.entry_date || '').localeCompare(b.e.entry_date || ''));
-
-  printDoc(`
-    ${docHead('Profit & loss', pnlLabel(), `${jobs.length} job${jobs.length === 1 ? '' : 's'}`)}
-
-    <div class="figures">
-      <div><div class="n">${money(t.revenue)}</div><div class="l">Billed</div></div>
-      <div><div class="n">${money(t.cost)}</div><div class="l">What it cost</div></div>
-      <div><div class="n${tone(t.pnl)}">${money(t.pnl)}</div><div class="l">Profit / loss</div></div>
-      <div><div class="n${tone(t.pnl)}">${t.pct == null ? '—' : t.pct.toFixed(1) + '%'}</div>
-        <div class="l">Margin</div></div>
-    </div>
-
-    <h2>The bottom line</h2>
-    <table class="pnl">
-      <tr><td class="lead">Invoice</td><td class="num">${money(t.invoice, true)}</td></tr>
-      <tr><td class="lead">Variations claimed</td><td class="num">${money(t.variations, true)}</td></tr>
-      <tr class="sub"><td class="lead">Total billed</td><td class="num">${money(t.revenue, true)}</td></tr>
-      <tr><td class="lead">Less what it cost</td><td class="num">${
-        t.cost == null ? '—' : '(' + esc(fmtMoney(t.cost, true)) + ')'}</td></tr>
-      <tr class="result">
-        <td class="lead">${t.pnl == null ? 'Profit / loss' : t.pnl < 0 ? 'Loss for the period' : 'Profit for the period'}</td>
-        <td class="num${tone(t.pnl)}">${money(t.pnl, true)}${
-          t.pct == null ? '' : `<em>${t.pct.toFixed(1)}% margin</em>`}</td>
-      </tr>
-    </table>
-    <p class="lede"><strong>${t.jobs}</strong> job${t.jobs === 1 ? '' : 's'} — ${t.ongoing || 0} on site, ${
-      t.planned || 0} planned, ${t.completed || 0} completed. <strong>${t.done}</strong> of them costed${
-      t.done < t.jobs ? ', so the figures above cover those only' : ''}. <strong>${t.days}</strong> day${
-      t.days === 1 ? '' : 's'} on site, <strong>${t.entries}</strong> diary entr${
-      t.entries === 1 ? 'y' : 'ies'}, <strong>${t.issues}</strong> issue${
-      t.issues === 1 ? '' : 's'} and delay${t.issues === 1 ? '' : 's'}.</p>
-
-    ${clients.length > 1 ? `
-    <h2>By client</h2>
-    <table>
-      <thead><tr><th>Client</th><th class="num" style="width:13mm">Jobs</th><th class="num" style="width:13mm">Days</th>
-        <th class="num" style="width:27mm">Billed</th><th class="num" style="width:27mm">Cost</th>
-        <th class="num" style="width:29mm">Profit / loss</th></tr></thead>
-      <tbody>
-      ${clients.map(k => {
-        const b = byClient[k];
-        const m = b.priced ? b.inv - b.cost : null;
-        const pct = marginPct(b.inv, m);
-        return `<tr class="avoid-break">
-          <td><strong>${esc(k)}</strong>${b.issues ? `<br><em>${b.issues} issue${b.issues > 1 ? 's' : ''}</em>` : ''}</td>
-          <td class="num">${b.jobs}</td><td class="num">${b.days}</td>
-          <td class="num">${esc(fmtMoney(b.inv))}</td><td class="num">${esc(fmtMoney(b.cost))}</td>
-          <td class="num${tone(m)}">${m == null ? '—' : esc(fmtMoney(m))}${
-            pct != null ? `<em>${pct.toFixed(1)}%</em>` : ''}</td>
-        </tr>`;
-      }).join('')}
-      <tr class="total"><td>All clients</td>
-        <td class="num">${t.jobs}</td><td class="num">${t.days}</td>
-        <td class="num">${money(t.revenue)}</td><td class="num">${money(t.cost)}</td>
-        <td class="num${tone(t.pnl)}">${money(t.pnl)}${
-          t.pct == null ? '' : `<em>${t.pct.toFixed(1)}%</em>`}</td></tr>
-      </tbody>
-    </table>` : ''}
-
-    <h2>Job by job</h2>
-    <table>
-      <thead><tr><th style="width:20mm">Job</th><th>Name and client</th><th style="width:21mm">Status</th>
-        <th class="num" style="width:11mm">Days</th><th class="num" style="width:25mm">Billed</th>
-        <th class="num" style="width:25mm">Cost</th><th class="num" style="width:27mm">Profit / loss</th></tr></thead>
-      <tbody>
-      ${jobs.map(p => {
-        const c = costing(p);
-        const m = c.pnl, pct = c.pct;
-        const iss = issueCount(p.id);
-        return `<tr class="avoid-break">
-          <td><strong>${jobNo(p)}</strong>${c.done ? '' : '<br><em>no costing</em>'}</td>
-          <td>${esc(p.name)}${p.client ? `<br><em>${esc(p.client)}</em>` : ''}${
-            p.supervisor ? `<br>${esc(p.supervisor)} · ${esc(crewLabel(crewOf(p)))}` : ''}</td>
-          <td>${esc(statusLabel(p.status))}</td>
-          <td class="num">${diaryDays(p.id).length}${iss ? `<em class="neg">${iss} iss.</em>` : ''}</td>
-          <td class="num">${money(c.revenue)}</td>
-          <td class="num">${money(c.cost)}</td>
-          <td class="num${tone(m)}">${m == null ? '—' : esc(fmtMoney(m))}${
-            pct != null ? `<em>${pct.toFixed(1)}%</em>` : ''}</td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="7">No jobs in this period.</td></tr>'}
-      ${jobs.length ? `<tr class="total"><td colspan="3">${jobs.length} job${jobs.length === 1 ? '' : 's'}</td>
-        <td class="num">${t.days}</td><td class="num">${money(t.revenue)}</td>
-        <td class="num">${money(t.cost)}</td>
-        <td class="num${tone(t.pnl)}">${money(t.pnl)}${
-          t.pct == null ? '' : `<em>${t.pct.toFixed(1)}%</em>`}</td></tr>` : ''}
-      </tbody>
-    </table>
-
-    ${jobs.some(p => p.pnl_notes) ? `
-    <h2>Where the money went</h2>
-    ${jobs.filter(p => p.pnl_notes).map(p => `
-      <p class="note avoid-break"><strong>${jobNo(p)} ${esc(p.name)}</strong> — ${esc(p.pnl_notes)}</p>`).join('')}` : ''}
-
-    ${troubles.length ? `
-    <h2>What the crews flagged</h2>
-    <table>
-      <tr><th style="width:26mm">Date</th><th style="width:22mm">Job</th>
-        <th>What happened</th><th style="width:26mm">Logged by</th></tr>
-      ${troubles.map(({ p, e }) => `<tr class="avoid-break">
-        <td>${esc(fmtShort(e.entry_date))} ${esc(fmtTime(e.at))}</td>
-        <td>${jobNo(p)}</td>
-        <td class="note"><strong>${esc(entryLabel(e))}</strong>${e.body ? ' — ' + esc(e.body) : ''}</td>
-        <td>${esc(e.author || '')}</td>
-      </tr>`).join('')}
-    </table>` : ''}
-
-    <div class="sig">
-      <div>Director &amp; date</div>
-      <div>Reviewed &amp; date</div>
-    </div>`, `Profit & loss · ${pnlLabel()}`);
-}
 
 /** The job in money: what it cost, what it billed, what is left — and
     every word the supervisors wrote, because the answer to "why did this
@@ -4789,7 +4675,8 @@ function renderSetup(view) {
       waitingToSend: Outbox.all(),
       problem: Outbox.problem(),
       projects: DB.projects, project_docs: DB.project_docs,
-      diary_entries: DB.diary_entries, job_costs: DB.job_costs, crew_people: DB.crew_people
+      diary_entries: DB.diary_entries, job_costs: DB.job_costs, crew_people: DB.crew_people,
+      forward_works: DB.forward_works
     };
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -4858,7 +4745,7 @@ function renderSetup(view) {
     localStorage.removeItem('rckd.outbox.problem');
     Outbox.list = [];
     if (KV.ok) { try { await KV.del(cacheKey()); await KV.del('outbox'); } catch (e) {} }
-    DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = []; DB.crew_people = [];
+    DB.projects = []; DB.project_docs = []; DB.diary_entries = []; DB.job_costs = []; DB.crew_people = []; DB.forward_works = [];
     refresh().then(render);
   };
 }
