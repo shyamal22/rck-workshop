@@ -103,12 +103,11 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   crew, whether it is scoped, and its job if it has one, with **Edit** and **Make a job**.
   Edit is where it is changed, removed, or **copied to next week** or **next month**.
 - **Night shifts read in red** — on the day, in the crew list, in the sheet and on paper.
-- **Scoped is a switch, and the switch is the document.** It only goes on once the scope
-  document has been put on the line (switching it on asks for the file); switching it off
-  takes the document off. Until then the line is **pink** wherever it appears and says *not
-  scoped*, the day on the calendar carries a pink ring, and the month's figures count the
-  unscoped lines. When a job is made from a scoped line, the scope document goes onto the job
-  as its Scope document.
+- **Scoped is a switch.** Flick it in the sheet and it is saved; it is also on the edit form.
+  Until a line is scoped it is **pink** wherever it appears and says *not scoped*, the day on
+  the calendar carries a pink ring, and the month's figures count the unscoped lines. The
+  **scope document** is attached beside the switch (attaching one switches it on); when a job
+  is made from the line, that document goes onto the job as its Scope document.
 - The month **prints** week by week, then what each crew adds up to, and **exports to Excel**
   with a Scoped column.
 - **A line can become a job — on purpose, never by itself.** *Make a job from this line*
