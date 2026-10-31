@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.12.1';
+const VERSION = '2.12.2';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1647,8 +1647,7 @@ function renderHome(view) {
 
   view.innerHTML = `
     <div class="home-brand">
-      ${MARK}
-      <div><b>${esc(BRAND.name)}</b><span>${esc(BRAND.trade)}</span></div>
+      <img class="logo" src="logo.png?v=${VERSION}" alt="RCK Group">
     </div>
     <div class="tiles">
       <a class="tile" href="#/jobs">
@@ -3682,7 +3681,7 @@ function fwSheet(month) {
   }
   return `
     <div class="scrim" id="shScrim"></div>
-    <div class="sheet" role="dialog" aria-modal="true">
+    <div class="bsheet" role="dialog" aria-modal="true">
       <div class="sh-grab"></div>
       <button class="sh-close" id="shClose" title="Close">✕</button>
       ${body}
@@ -4089,18 +4088,6 @@ const BRAND = Object.assign({
   phone:   ''
 }, SITE.brand || {});
 
-/* The mark from the app icon, drawn inline so it needs no network and
-   prints at any size: a lane between two edges. */
-const MARK = `
-  <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
-    <rect width="512" height="512" rx="112" fill="#1b1e22"/>
-    <path d="M182 96 L138 416" stroke="#4c525a" stroke-width="26" stroke-linecap="round" fill="none"/>
-    <path d="M330 96 L374 416" stroke="#4c525a" stroke-width="26" stroke-linecap="round" fill="none"/>
-    <path d="M256 108 L256 172" stroke="#c8971b" stroke-width="34" stroke-linecap="round" fill="none"/>
-    <path d="M256 224 L256 288" stroke="#c8971b" stroke-width="34" stroke-linecap="round" fill="none"/>
-    <path d="M256 340 L256 404" stroke="#c8971b" stroke-width="34" stroke-linecap="round" fill="none"/>
-  </svg>`;
-
 /** The letterhead: who we are on the left, what this is on the right. */
 /** The letterhead. `title` is the document's own heading; a day's document
     passes the date instead and puts its real title in dayHead() below, so
@@ -4111,9 +4098,8 @@ function docHead(kind, title, subtitle) {
   return `
     <div class="doc-head${bare ? ' bare' : ''}">
       <div class="top">
-        ${MARK}
         <div>
-          <div class="org">${esc(BRAND.name)}</div>
+          <img class="logo" src="logo.png?v=${VERSION}" alt="RCK Group">
           <div class="trade">${esc(BRAND.trade)}</div>
           ${contact ? `<div class="contact">${esc(contact)}</div>` : ''}
         </div>
@@ -4537,13 +4523,6 @@ function printDocRegister(p) {
     <h2>Documents on file</h2>
     ${docsTable(p, isOffice())}`, `Document register · ${jobNo(p)}`);
 }
-
-/** The director's report: the period's numbers, every job in it, and every
-    issue and delay the crews logged — the supervisors' and the office's own
-    entries added up, rather than a separate thing anyone has to write. */
-/** The period, on paper. The numbers first, then how they split by client,
-    then a job at a time, then everything the crews flagged — so it reads
-    top-down from "how did we do" to "and why". */
 
 /** The job in money: what it cost, what it billed, what is left — and
     every word the supervisors wrote, because the answer to "why did this
