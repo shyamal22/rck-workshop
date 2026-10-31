@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.12.0';
+const VERSION = '2.12.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -3400,8 +3400,9 @@ function fwDays(r) { return Math.max(1, Math.min(31, Number(r.days) || 1)); }
 function fwLast(r) { return r.work_date ? dayShift(r.work_date, fwDays(r) - 1) : null; }
 /** Does the line's spell on site cover this day? */
 function fwCovers(r, day) { return !!r.work_date && r.work_date <= day && day <= fwLast(r); }
-/** Scoped means the scope document is on the line. Nothing else counts. */
-function fwScoped(r) { return !!(r && r.scope_url); }
+/** Scoped is the office's say-so: the switch on the line. Attaching the
+    scope document switches it on too, since nobody attaches one otherwise. */
+function fwScoped(r) { return !!(r && (r.scoped || r.scope_url)); }
 
 /** The lines in a month, by day then by crew order. */
 function fwRows(month) {
@@ -3664,9 +3665,11 @@ function fwSheet(month) {
         <dt>When</dt><dd>${r.work_date ? esc(fmtDayDate(r.work_date)) + (fwDays(r) > 1 ? ` → ${esc(fmtDayDate(fwLast(r)))} · ${fwDays(r)} days` : '') : 'No day yet'}</dd>
         <dt>Shift</dt><dd class="${r.shift === 'night' ? 'nightx' : ''}">${fwShiftLabel(r.shift)} shift</dd>
         <dt>Crew</dt><dd>${crewDot(c.key)} ${esc(c.label)}</dd>
-        <dt>Scoped</dt><dd>${fwScoped(r)
-          ? `<span class="okx">Yes</span> · <a href="${esc(r.scope_url)}" target="_blank" rel="noopener">${esc(r.scope_name || 'Scope document')}</a>`
-          : '<span class="warnx">No — the scope document is not on it yet</span>'}</dd>
+        <dt>Scoped</dt><dd class="sh-switch"><label class="switch"><input type="checkbox" id="shScoped" ${fwScoped(r) ? 'checked' : ''}><i></i></label>
+          ${fwScoped(r) ? '<span class="okx">Yes</span>' : '<span class="warnx">No</span>'}</dd>
+        <dt>Scope doc</dt><dd>${r.scope_url
+          ? `<a href="${esc(r.scope_url)}" target="_blank" rel="noopener">${esc(r.scope_name || 'Scope document')}</a>`
+          : '<span class="muted">none attached yet</span>'}</dd>
         ${job ? `<dt>Job</dt><dd><a href="#/job/${job.id}">${esc(jobNo(job))} — ${esc(job.name)}</a></dd>` : ''}
         ${r.notes ? `<dt>Note</dt><dd>${esc(r.notes)}</dd>` : ''}
       </dl>
@@ -3722,11 +3725,16 @@ function fwForm(r, month) {
       <label class="field"><span>Invoice value</span>
         <input type="number" id="fwValue" inputmode="decimal" step="any" min="0" value="${r.invoice_value == null ? '' : esc(String(r.invoice_value))}" placeholder="0"></label>
 
-      <div class="switchrow${scope ? ' on' : ' warn'}">
-        <div><b>Scoped</b><span>${scope
-          ? `Yes — <a href="${esc(scope.url)}" target="_blank" rel="noopener">${esc(scope.name || 'scope document')}</a>`
-          : 'No. Switch it on to put the scope document on this line.'}</span></div>
-        <label class="switch"><input type="checkbox" id="fwScoped" ${scope ? 'checked' : ''}><i></i></label>
+      <div class="switchrow${(r.scoped || scope) ? ' on' : ' warn'}">
+        <div><b>Scoped</b><span>${(r.scoped || scope) ? 'Yes' : 'No — it shows pink until it is'}</span></div>
+        <label class="switch"><input type="checkbox" id="fwScoped" ${(r.scoped || scope) ? 'checked' : ''}><i></i></label>
+      </div>
+      <div class="docrow">
+        <div><b>Scope document</b><span id="fwScopeName">${scope
+          ? `<a href="${esc(scope.url)}" target="_blank" rel="noopener">${esc(scope.name || 'scope document')}</a>`
+          : 'None attached yet'}</span></div>
+        <button class="btn sm" id="fwScopeBtn">${scope ? 'Replace' : 'Attach'}</button>
+        ${scope ? '<button class="btn sm" id="fwScopeOff">Remove</button>' : ''}
         <input type="file" id="fwScopeFile" accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx" hidden>
       </div>
 
@@ -3751,6 +3759,12 @@ function wireFwSheet(view, month) {
   const x = $('#shClose', view); if (x) x.onclick = close;
   if (sh.mode === 'info') {
     $('#shEdit', view).onclick = () => { fwView.sheet = { id: r.id, mode: 'edit' }; scopeDraft = null; render(); };
+    // Flick it here and it is saved: the quick way through a month of lines.
+    $('#shScoped', view).onchange = async function () {
+      await Store.patch('forward_works', r.id, { scoped: this.checked, updated_at: new Date().toISOString(), updated_by: whoami() });
+      toast(this.checked ? 'Marked scoped' : 'Marked not scoped');
+      render();
+    };
     const mk = $('#shMakeJob', view);
     if (mk) mk.onclick = () => fwMakeJob(r);
     return;
@@ -3788,6 +3802,7 @@ function wireFwForm(view, editing, month, close) {
       work_date: day || null,
       days: Math.max(1, Math.min(31, Math.round(Number($('#fwNDays', view).value) || 1))),
       month: (day ? day.slice(0, 7) : month) + '-01',
+      scoped: $('#fwScoped', view).checked || !!scope,
       scope_url: scope ? scope.url : '',
       scope_name: scope ? (scope.name || '') : '',
       scope_type: scope ? (scope.type || '') : '',
@@ -3807,31 +3822,37 @@ function wireFwForm(view, editing, month, close) {
   const shiftSel = $('#fwShift', view);
   shiftSel.onchange = () => shiftSel.classList.toggle('nightx', shiftSel.value === 'night');
 
-  // Scoped is the document. On means pick one; off means take it off.
+  // Scoped is the switch. The document is its own thing beside it; attaching
+  // one switches it on, because nobody attaches a scope to an unscoped job.
   const sw = $('#fwScoped', view), file = $('#fwScopeFile', view);
-  const refresh = () => {
-    const row = sw.closest('.switchrow'), has = scopeDraft !== null ? !!scopeDraft : !!(editing && editing.scope_url);
-    row.classList.toggle('on', has); row.classList.toggle('warn', !has);
-    sw.checked = has;
+  const paintSwitch = () => {
+    const row = sw.closest('.switchrow');
+    row.classList.toggle('on', sw.checked); row.classList.toggle('warn', !sw.checked);
+    $('span', row).textContent = sw.checked ? 'Yes' : 'No — it shows pink until it is';
+  };
+  sw.onchange = paintSwitch;
+  const paintDoc = () => {
     const cur = scopeDraft !== null ? scopeDraft : (editing && editing.scope_url ? { url: editing.scope_url, name: editing.scope_name } : null);
-    $('span', row).innerHTML = cur
-      ? `Yes — <a href="${esc(cur.url)}" target="_blank" rel="noopener">${esc(cur.name || 'scope document')}</a>`
-      : 'No. Switch it on to put the scope document on this line.';
+    $('#fwScopeName', view).innerHTML = cur
+      ? `<a href="${esc(cur.url)}" target="_blank" rel="noopener">${esc(cur.name || 'scope document')}</a>`
+      : 'None attached yet';
+    $('#fwScopeBtn', view).textContent = cur ? 'Replace' : 'Attach';
+    const off = $('#fwScopeOff', view); if (off) off.hidden = !cur;
   };
-  sw.onchange = () => {
-    if (sw.checked) { sw.checked = false; file.click(); }     // on only once a document is in
-    else { scopeDraft = false; refresh(); }
-  };
+  $('#fwScopeBtn', view).onclick = () => file.click();
+  const off = $('#fwScopeOff', view);
+  if (off) off.onclick = () => { scopeDraft = false; paintDoc(); };
   file.onchange = async () => {
     const f = (file.files || [])[0]; file.value = '';
-    if (!f) return refresh();
+    if (!f) return;
     toast('Sending the scope document…');
     try {
       const up = await Store.upload(f);
       scopeDraft = { url: up.url, name: up.name, type: up.type };
-      toast(up.local ? 'Kept on this phone until there is signal' : 'Scope document on');
+      sw.checked = true; paintSwitch();
+      toast(up.local ? 'Kept on this phone until there is signal' : 'Scope document attached');
     } catch (e) { toast('Could not take the document: ' + e.message); }
-    refresh();
+    paintDoc();
   };
 
   $('#fwSave', view).onclick = async function () {
