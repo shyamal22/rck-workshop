@@ -80,10 +80,12 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
-- **The app opens on a landing page with three tools: Jobs, Crew & supervisors, and Forward
-  works.** Everyone gets the first two. Forward works appears on Office and Director devices.
-  A **house button** sits at the top of every other screen and goes straight back to it — the
-  back arrow retraces your steps, the house skips them.
+- **The app opens on a landing page under the RCK mark with three tools: Jobs, Crew &
+  supervisors, and Forward works.** Everyone gets the first two. Forward works appears on
+  Office and Director devices, and the same three sit in the bar at the foot of every screen
+  with the New job button (Today on site is still in the ⋮ menu). A **house button** sits at
+  the top of every other screen and goes straight back — the back arrow retraces your steps,
+  the house skips them.
 - **Forward works is the outline of the months ahead**, kept by hand the way the programme
   was kept on the spreadsheet. One line per piece of work: **client, site location, crew, the
   day, how many days, day or night shift, and the invoice value**. The screen shows one month
@@ -93,9 +95,22 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
   one card each, a day a row** — the same Monday-to-Sunday weeks as the spreadsheet, with grey
   days where the week runs past the month — and on every row the lines for that day, each
   with its crew colour, client, site, shift and value, plus a **+** to add work on that day.
-  **By crew** shows the same month grouped by crew instead, with a subtotal on each. Tap any
-  line to change it, remove it, **copy it to next week** or **to next month**. The month
-  **prints** week by week, then what each crew adds up to, and **exports to Excel**.
+  **By crew** shows the same month grouped by crew instead, with a subtotal on each.
+- **Weeks fold.** Only this week opens by itself; tap a week's heading to open or close it,
+  and tap a day on the calendar to see that day alone, with everything else out of the way,
+  until you tap it again or choose *Show the whole month*.
+- **A line opens in a sheet over the page**, not at the top of it: client, site, when, shift,
+  crew, whether it is scoped, and its job if it has one, with **Edit** and **Make a job**.
+  Edit is where it is changed, removed, or **copied to next week** or **next month**.
+- **Night shifts read in red** — on the day, in the crew list, in the sheet and on paper.
+- **Scoped is a switch, and the switch is the document.** It only goes on once the scope
+  document has been put on the line (switching it on asks for the file); switching it off
+  takes the document off. Until then the line is **pink** wherever it appears and says *not
+  scoped*, the day on the calendar carries a pink ring, and the month's figures count the
+  unscoped lines. When a job is made from a scoped line, the scope document goes onto the job
+  as its Scope document.
+- The month **prints** week by week, then what each crew adds up to, and **exports to Excel**
+  with a Scoped column.
 - **A line can become a job — on purpose, never by itself.** *Make a job from this line*
   opens the new-job form with the client, site, crew and the dates filled in; nothing exists
   on the board until you save it there. Once saved, the line shows the job's number and opens

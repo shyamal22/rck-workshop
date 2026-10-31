@@ -120,6 +120,9 @@ create table if not exists forward_works (
   work_date      date,                           -- the day on site; the month is the month of this day
   days           integer not null default 1,     -- how many days from work_date, for a spell on site
   invoice_value  numeric,
+  scope_url      text not null default '',       -- the scope document; "scoped" means this is set
+  scope_name     text not null default '',
+  scope_type     text not null default '',
   notes          text not null default '',
   project_id     uuid references projects (id) on delete set null,
   created_at     timestamptz not null default now(),
@@ -132,6 +135,9 @@ create table if not exists forward_works (
 -- above does nothing on a database that already has the table.
 alter table forward_works add column if not exists work_date date;
 alter table forward_works add column if not exists days integer not null default 1;
+alter table forward_works add column if not exists scope_url  text not null default '';
+alter table forward_works add column if not exists scope_name text not null default '';
+alter table forward_works add column if not exists scope_type text not null default '';
 
 create index if not exists forward_works_month_idx on forward_works (month);
 create index if not exists forward_works_day_idx   on forward_works (work_date);
