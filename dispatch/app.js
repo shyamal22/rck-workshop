@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.12.2';
+const VERSION = '2.13.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -160,6 +160,8 @@ const ENTRY_TYPES = [
   { key: 'issue',         label: 'Issue',              tone: 'red',    mark: true },
   { key: 'delay',         label: 'Delay',              tone: 'yellow', mark: true },
   { key: 'weather',       label: 'Weather',            tone: 'yellow' },
+  { key: 'client_request', label: 'Client request',    tone: 'blue',   mark: true },
+  { key: 'job_complete',  label: 'Job complete',       tone: 'green',  mark: true },
   { key: 'visitor',       label: 'Visitor',            tone: 'blue' },
   { key: 'tm_down',       label: 'Traffic management removed', tone: 'blue' },
   { key: 'note',          label: 'Note',               tone: 'slate' },
@@ -377,18 +379,12 @@ function entryMarked(e) {
   const b = builtinEntry(e && e.kind);
   return b ? !!b.mark : true;   // an added type is something worth marking
 }
-/** Built-in entry types plus every one anybody has added on this job list. */
-function allEntryTypes() {
-  const out = ENTRY_TYPES.slice();
-  const seen = new Set(out.map(t => t.key));
-  DB.diary_entries.forEach(e => {
-    if (e.kind && !seen.has(e.kind)) {
-      seen.add(e.kind);
-      out.push({ key: e.kind, label: entryLabel(e), tone: 'slate', mark: true });
-    }
-  });
-  return out;
-}
+/* What the picker offers, in this order, and nothing else. A type somebody
+   adds is written on that entry and read back from it — it never joins the
+   list. Older entries keep their own kinds and labels. */
+const DIARY_PICK = ['milling_start', 'milling_stop', 'paving_start', 'paving_stop',
+  'issue', 'delay', 'weather', 'client_request', 'job_complete'];
+function pickEntryTypes() { return DIARY_PICK.map(builtinEntry).filter(Boolean); }
 
 /* Inline icons — no icon font, no network request, they inherit text colour. */
 const ICONS = {
@@ -1674,7 +1670,9 @@ function renderHome(view) {
 /* ================================================================
    Screen — job board
    ================================================================ */
-const boardFilter = { crew: 'all', status: 'all', q: '' };
+/* status 'active' is planned and on site together — the board's resting
+   state. Completed jobs show only when their tab is pressed. */
+const boardFilter = { crew: 'all', status: 'active', q: '' };
 
 function jobCard(p, i) {
   const days = daysOnSite(p);
@@ -1752,7 +1750,7 @@ function renderBoard(view) {
   function paint() {
     const q = boardFilter.q.toLowerCase();
     const list = boardOrder(jobs.filter(p => {
-      if (boardFilter.status !== 'all' && p.status !== boardFilter.status) return false;
+      if (boardFilter.status === 'active' ? p.status === 'completed' : p.status !== boardFilter.status) return false;
       if (boardFilter.crew !== 'all') {
         const want = boardFilter.crew === 'none' ? '' : boardFilter.crew;
         if (crewOf(p) !== want) return false;
@@ -1769,7 +1767,7 @@ function renderBoard(view) {
   }
 
   $$('.tally button', view).forEach(b => b.onclick = () => {
-    boardFilter.status = boardFilter.status === b.dataset.status ? 'all' : b.dataset.status;
+    boardFilter.status = boardFilter.status === b.dataset.status ? 'active' : b.dataset.status;
     $$('.tally button', view).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.status === boardFilter.status)));
     paint();
   });
@@ -2431,7 +2429,6 @@ function renderJob(view) {
   const entries = entriesFor(p.id);
   const days = diaryDays(p.id);
   const issues = issueCount(p.id);
-  const last = lastEntry(p.id);
 
   view.innerHTML = `
     ${jobHeader(p, 'job')}
@@ -2446,13 +2443,11 @@ function renderJob(view) {
         <div><span class="n">${docs.length}</span><span class="l">Documents</span></div>
         <div><span class="n" style="color:${issues ? 'var(--red)' : 'inherit'}">${issues}</span><span class="l">Issues</span></div>
       </div>
-      ${last ? `<p class="small muted mt" style="margin-bottom:0">Last entry ${fmtDateTime(last.at)} —
-        <strong>${esc(entryLabel(last))}</strong> by ${esc(last.author || 'someone')}</p>` : ''}
     </div>
 
     <div class="card">
       <table class="data">
-        <tr><th>Status</th><td>${statusLabel(p.status)} <span class="muted">— ${esc(statusDef(p.status).blurb)}</span></td></tr>
+        <tr><th>Status</th><td>${statusLabel(p.status)}</td></tr>
         <tr><th>Crew</th><td>${crewDot(crewOf(p))} ${esc(crewLabel(crewOf(p)))}</td></tr>
         <tr><th>Type of work</th><td>${esc(typeLabel(typeOf(p)))}</td></tr>
         <tr><th>Client</th><td>${esc(p.client || '—')}</td></tr>
@@ -2470,8 +2465,7 @@ function renderJob(view) {
     </div>
 
     ${p.status === 'planned' ? `
-      <button class="btn primary wide" id="start">${icon('play')}Start job — crew is on site</button>
-      <p class="muted small center mt">Adding the first diary entry does this for you.</p>` : ''}
+      <button class="btn primary wide" id="start">${icon('play')}Start job — crew is on site</button>` : ''}
 
     ${p.status === 'ongoing' ? `
       <div class="btn-row">
@@ -2483,15 +2477,8 @@ function renderJob(view) {
       <div class="banner info">This job is finished. The diary and documents stay exactly as they are.
       ${isOffice() ? ' Reopen it below if it was closed by mistake.' : ''}</div>` : ''}
 
-    ${isDirector() ? `
-      <a class="btn wide mb" href="#/costs/${p.id}">${icon('chart')}Profit &amp; loss${
-        costing(p).pnl != null ? ` — ${esc(fmtMoney(costing(p).pnl))}`
-        : costing(p).priced ? ' — part filled in' : ' — not filled in yet'}</a>` : ''}
-
     <div class="section-title">Reports</div>
     <div class="card">
-      <p class="muted small">The full job report is every day of the diary, every entry, the photos
-      and the list of documents — one document, ready to save as a PDF or email on.</p>
       <div class="btn-row">
         <button class="btn" id="fullReport">${icon('printer')}Full job report</button>
         <button class="btn" id="dayReport">${icon('printer')}One day</button>
@@ -2507,12 +2494,7 @@ function renderJob(view) {
           ${isDirector() ? `<button class="btn sm" id="archive">${p.archived ? 'Restore' : 'Archive'}</button>` : ''}
         </div>
         ${isDirector() ? `
-          <p class="muted tiny mt">Archiving takes the job off the board and out of the profit and
-          loss, and keeps every record of it. That is the one to use for a job that was cancelled.</p>
-          <button class="btn sm danger wide" id="del">${icon('trash')}Delete this job for good</button>
-          <p class="muted tiny mt" style="margin-bottom:0">Deleting destroys the diary, the documents
-          and the costing with it, for everyone. There is no undo.</p>`
-        : '<p class="muted tiny mt" style="margin-bottom:0">Archiving or deleting a job is a director\'s call.</p>'}
+          <button class="btn sm danger wide mt" id="del">${icon('trash')}Delete this job for good</button>` : ''}
       </div>` : ''}`;
 
   const startBtn = $('#start', view);
@@ -2553,7 +2535,7 @@ function renderJob(view) {
   const archive = $('#archive', view);
   if (archive) archive.onclick = async () => {
     await Store.patch('projects', p.id, { archived: !p.archived });
-    toast(p.archived ? 'Restored' : 'Archived — off the board and out of the P&L');
+    toast(p.archived ? 'Restored' : 'Archived — off the board');
     render();
   };
 
@@ -2897,8 +2879,13 @@ function renderEntry(view) {
     return;
   }
 
-  const types = allEntryTypes();
-  const wanted = editing ? editing.kind : (route.query.kind || 'note');
+  const types = pickEntryTypes();
+  // Editing an entry of some other kind keeps that kind on offer, so saving
+  // a changed comment never changes what the entry was.
+  const wanted = editing ? editing.kind : (route.query.kind || '');
+  if (wanted && !types.some(t => t.key === wanted)) {
+    types.push({ key: wanted, label: editing ? entryLabel(editing) : (builtinEntry(wanted) || {}).label || humanise(wanted) });
+  }
   const files = [];
   const defDate = editing ? editing.entry_date : today();
 
@@ -2907,6 +2894,7 @@ function renderEntry(view) {
       <div class="tiny muted">${p ? jobNo(p) + ' · ' + esc(p.name) : 'Your own diary — not about a job'}</div>
       <label class="field mt"><span>What happened?</span>
         <select id="kind">
+          ${wanted ? '' : '<option value="" selected>Pick what happened…</option>'}
           ${types.map(t => `<option value="${esc(t.key)}" ${t.key === wanted ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
           <option value="__new">+ Add a new type…</option>
         </select></label>
@@ -2939,20 +2927,21 @@ function renderEntry(view) {
       ? 'The first entry marks the job as started.'
       : 'Entries save on the phone straight away, with or without signal.'}</p>`;
 
-  // "+ Add a new type…" becomes a real, immediately usable type.
+  // "+ Add a new type…" is for this entry only: it goes on the entry, not
+  // on the list.
   const kindSel = $('#kind', view);
   let customLabel = editing && !builtinEntry(editing.kind) ? editing.label : '';
   kindSel.onchange = () => {
     if (kindSel.value !== '__new') return;
-    const name = (prompt('Name the new type of entry, e.g. "Emulsion spray started"') || '').trim();
+    const name = (prompt('What happened? e.g. "Emulsion spray started"') || '').trim();
     if (!name) { kindSel.value = wanted; return; }
     const key = slug(name);
-    const existing = allEntryTypes().find(t => t.key === key);
-    customLabel = existing ? existing.label : name;
-    if (!existing) {
+    const b = builtinEntry(key);
+    customLabel = b ? b.label : name;
+    if (!$(`option[value="${key}"]`, kindSel)) {
       const opt = document.createElement('option');
       opt.value = key;
-      opt.textContent = name;
+      opt.textContent = customLabel;
       kindSel.insertBefore(opt, kindSel.lastElementChild);
     }
     kindSel.value = key;
@@ -2979,7 +2968,7 @@ function renderEntry(view) {
 
   $('#save', view).onclick = async function () {
     const kind = kindSel.value;
-    if (kind === '__new') return toast('Pick what happened');
+    if (!kind || kind === '__new') return toast('Pick what happened');
     const time = $('#time', view).value.trim();
     if (!/^\d{1,2}:\d{2}$/.test(time)) return toast('Time should look like 07:15');
     const date = $('#date', view).value || today();
