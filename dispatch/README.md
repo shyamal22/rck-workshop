@@ -321,8 +321,14 @@ Workshop in the same repository and GitHub Pages serves it from
 - **Types of work aren't a fixed list.** Pick **+ Add a new type…** when creating a job
   and name it — "Chip seal", say — and from then on it's a type like any other, with
   its own filter on the board. Naming one that already exists in a different spelling
-  reuses the existing one rather than making a near-duplicate. Diary entry types work
-  the same way.
+  reuses the existing one rather than making a near-duplicate.
+- **What happened? is a short list.** Milling started, Milling stopped, Paving started, Paving
+  stopped, Issue, Delay, Weather, Client request, Job complete — and **+ Add a new type…** at
+  the end for anything else. A type added that way is written on that one entry and read back
+  from it; it does not join the list. Older entries keep whatever kind they were given.
+- **The board shows planned and on-site jobs.** Completed jobs sit behind the **Completed**
+  tab at the top and show only while it is pressed; press Planned or On site to narrow to one,
+  press it again to come back.
 
 ## Files
 
