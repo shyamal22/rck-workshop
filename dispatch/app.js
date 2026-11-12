@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.15.0';
+const VERSION = '2.15.1';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1469,14 +1469,12 @@ function renderLogPicker(view) {
     view.innerHTML = `
       <div class="empty">
         <b>Nothing to log against</b>
-        No job is running and nothing is booked to start today.
       </div>
       <a class="btn wide" href="#/">See all jobs</a>`;
     return;
   }
 
   view.innerHTML = `
-    <p class="muted small mb">Pick the job you're on. ${esc(fmtDayDate(today()))}.</p>
     ${jobs.map((p, i) => {
       const n = entriesFor(p.id, today()).length;
       return `
@@ -1550,7 +1548,6 @@ function renderJoin(view) {
   view.innerHTML = `
     <div class="card">
       <h2>Set up RCK Dispatch</h2>
-      <p class="muted small">This links your phone to the shared job list. You only do this once.</p>
       <label class="field"><span>Your name</span>
         <input type="text" id="jName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>You are</span>
@@ -1560,9 +1557,7 @@ function renderJoin(view) {
       <button class="btn primary wide" id="jGo">Connect</button>
       <div id="jOut" class="small mt"></div>
     </div>
-
-    <p class="muted small center">Once connected, use <strong>Add to Home Screen</strong>
-    in your browser's share menu so it opens like a normal app.</p>`;
+`;
 
   $('#jGo', view).onclick = async function () {
     const name = $('#jName', view).value.trim();
@@ -1609,8 +1604,6 @@ function renderWelcome(view) {
   view.innerHTML = `
     <div class="card">
       <h2>Set this device up</h2>
-      <p class="muted small">Two things before you start: your name, so the diary records who
-      wrote what, and the connection to the shared job list.</p>
       <a class="btn primary wide mt" href="#/setup">Open settings</a>
     </div>`;
 }
@@ -1639,7 +1632,6 @@ function renderHome(view) {
         <span class="pill"><span class="swatch"></span>${p.status === 'ongoing' ? `day ${daysOnSite(p)}` : startText(p.start_date).text}</span>
       </div>
       <div class="ttl">${esc(p.name)}</div>
-      <div class="sub">${esc(p.client || typeLabel(typeOf(p)))}${p.site ? ` · ${esc(p.site)}` : ''}${p.supervisor ? ` · ${esc(p.supervisor)}` : ''}</div>
     </button>`;
 
   view.innerHTML = `
@@ -1660,7 +1652,7 @@ function renderHome(view) {
       <div class="section-title">On site now<a class="more" href="#/jobs">All jobs</a></div>
       ${onSite.slice(0, 4).map(row).join('')}` : `
       <div class="section-title">On site now</div>
-      <div class="card quiet">Nothing is running right now.${soon.length ? '' : ' Nothing is booked for the next week either.'}</div>`}
+      <div class="card quiet">Nothing on site right now.</div>`}
 
     ${soon.length ? `
       <div class="section-title">Coming up<a class="more" href="#/jobs">All jobs</a></div>
@@ -1668,9 +1660,9 @@ function renderHome(view) {
 
     <div class="section-title">Go to</div>
     <div class="navlist">
-      <a href="#/jobs"><span class="ic">${icon('book')}</span><span class="t"><b>Jobs</b><span>${jobs.length} on the board</span></span>${icon('chevR')}</a>
-      <a href="#/crew"><span class="ic">${icon('people')}</span><span class="t"><b>Crew &amp; supervisors</b><span>${feed.length ? `${crewPeople(feed).length} out today · ${feed.length} logged` : 'Nothing logged today yet'}</span></span>${icon('chevR')}</a>
-      ${fw ? `<a href="#/forward"><span class="ic plan">${icon('calendar')}</span><span class="t"><b>Forward works</b><span>${fw.rows.length ? `${fw.rows.length} jobs in ${fwLabel(fw.m)} · ${esc(fmtMoney(fw.total))}` : `Nothing in ${fwLabel(fw.m)} yet`}</span></span>${icon('chevR')}</a>` : ''}
+      <a href="#/jobs"><span class="ic">${icon('book')}</span><span class="t"><b>Jobs</b></span>${icon('chevR')}</a>
+      <a href="#/crew"><span class="ic">${icon('people')}</span><span class="t"><b>Crew &amp; supervisors</b></span>${icon('chevR')}</a>
+      ${fw ? `<a href="#/forward"><span class="ic plan">${icon('calendar')}</span><span class="t"><b>Forward works</b></span>${icon('chevR')}</a>` : ''}
     </div>`;
 
   $$('.job-row', view).forEach(b => b.onclick = () => go('#/job/' + b.dataset.id));
@@ -1744,11 +1736,10 @@ function renderBoard(view) {
     view.innerHTML = `
       <div class="empty">
         <b>No jobs yet</b>
-        The office loads a job, hangs the paperwork on it, and the crew picks it up here.
       </div>
       ${isOffice()
         ? '<a class="btn primary wide" href="#/new">Create the first job</a>'
-        : '<p class="muted small center">Nothing has been dispatched yet.</p>'}`;
+        : ''}`;
     return;
   }
 
@@ -1796,7 +1787,7 @@ function renderBoard(view) {
 
     grid.innerHTML = list.length
       ? list.map(jobCard).join('')
-      : `<div class="empty" style="grid-column:1/-1"><b>Nothing matches</b>Try clearing the filters.</div>`;
+      : `<div class="empty" style="grid-column:1/-1"><b>Nothing matches</b></div>`;
     wireJobCards(grid);
   }
 
@@ -1832,7 +1823,6 @@ function renderToday(view) {
     view.innerHTML = `
       <div class="empty">
         <b>Nothing on today</b>
-        No job is running and nothing is booked to start in the next week.
       </div>
       ${isOffice() ? '<a class="btn primary wide" href="#/new">Plan a job</a>' : ''}`;
     return;
@@ -1860,7 +1850,7 @@ function renderToday(view) {
 
   view.innerHTML = `
     <p class="muted small mb">${esc(fmtDayDate(day))}</p>
-    ${jobs.length ? rows : '<div class="empty"><b>No job running today</b>Nothing has been started.</div>'}
+    ${jobs.length ? rows : '<div class="empty"><b>No job running today</b></div>'}
     ${soon.length ? `
       <div class="section-title">Coming up</div>
       ${soon.map((p, i) => `
@@ -2172,8 +2162,6 @@ function renderCrew(view) {
       </div>`
     : `<div class="empty">
         <b>Nobody out ${isToday ? 'yet today' : 'on this day'}</b>
-        When somebody writes in a job diary, adds a document, or puts a note in their own
-        diary, they show up here.
       </div>`}`;
 
   wireCrewDay(view, day);
@@ -2192,7 +2180,6 @@ function renderPersonDay(view, people, day, isToday, who) {
       ${crewDayNav(day, isToday)}
       <div class="empty">
         <b>${esc(name)} logged nothing ${isToday ? 'today' : 'that day'}</b>
-        Move the day above, or go back to everyone.
       </div>
       <a class="btn wide" href="#/crew">Back to the crew</a>`;
     wireCrewDay(view, day);
@@ -2259,8 +2246,6 @@ function renderFaces(view) {
     view.innerHTML = `
       <div class="card">
         <h2>Director only</h2>
-        <p class="muted small">Setting other people's photos is a director's job. Your own is in
-        Settings, under <strong>Your photo</strong>.</p>
         <a class="btn wide mt" href="#/crew">Back to the crew</a>
       </div>`;
     return;
@@ -2271,8 +2256,6 @@ function renderFaces(view) {
   const withPhoto = people.filter(x => personPhoto(x.name)).length;
 
   view.innerHTML = `
-    <p class="muted small mb">A photo goes against the name, not the phone — so it shows on the
-    crew screen and at the top of that person's printed day, wherever it was added from.</p>
 
     ${peopleTableMissing ? `<div class="banner">The database has not got the
       <code>crew_people</code> table yet. Run the current <code>supabase-schema.sql</code> in
@@ -2300,13 +2283,10 @@ function renderFaces(view) {
           personPhoto(x.name) ? 'Change' : icon('camera') + 'Add'}</button>
         ${personPhoto(x.name) ? `<button class="cdel" data-clear="${esc(x.name)}" title="Remove">${icon('trash')}</button>` : ''}
       </div>`).join('')
-    : '<div class="empty"><b>Nobody yet</b>Names appear here once somebody writes in a diary or is put on a job as supervisor.</div>'}
+    : '<div class="empty"><b>Nobody yet</b></div>'}
 
     <div class="card mt">
       <h2>Somebody not here yet</h2>
-      <p class="muted small">A new starter has no name in the app until they write something.
-      Add it and their photo now, and it will be waiting when they do — spell it exactly as
-      they will in Settings.</p>
       <label class="field"><span>Their name</span>
         <input type="text" id="newFace" placeholder="e.g. Joe R"></label>
       <input type="file" id="newFaceFile" accept="image/*" hidden>
@@ -2390,8 +2370,6 @@ function crewSayBox(day, isToday) {
       <button class="btn wide" id="cAddPhoto" type="button">${icon('camera')}Add photos</button>
       <div class="thumbs" id="cThumbs"></div>
       <button class="btn primary wide mt" id="cPost">${icon('plus')}Add to the diary</button>
-      <p class="muted tiny center mt" style="margin-bottom:0">Goes in under
-      <strong>${esc(whoami())}</strong>${isToday ? '' : ', dated ' + esc(fmtShort(day))}.</p>
     </div>`;
 }
 
@@ -2655,15 +2633,12 @@ function renderDocs(view) {
 
     <a class="btn primary wide" href="#/upload/${p.id}">${icon('clip')}Add a document</a>
     ${isOffice()
-      ? '<p class="muted small center mt">PMP, scope, job cards, drawings, spreadsheets, photos — anything at all.</p>'
-      : '<p class="muted small center mt">Site photos and paperwork you pick up on the job go here too.</p>'}
+      ? '' : ''}
 
     ${docs.length ? groups.map(([label, list]) => `
       <div class="section-title">${esc(label)}</div>
       <div class="card">${list.map((d, i) => docRow(d, i, isOffice())).join('')}</div>`).join('')
-      : `<div class="empty"><b>No documents yet</b>${isOffice()
-          ? 'Load the PMP, the scope and the job cards so the crew has them on site.'
-          : 'The office has not put anything on this job yet.'}</div>`}
+      : `<div class="empty"><b>No documents yet</b></div>`}
 
     ${docs.length ? `<div class="card">
       <button class="btn wide sm" id="register">${icon('printer')}Print the document register</button>
@@ -2706,8 +2681,6 @@ function renderUpload(view) {
     <div class="card">
       <input type="file" id="files" multiple hidden>
       <button class="btn wide" id="pick" type="button">${icon('clip')}Choose files</button>
-      <p class="muted tiny center mt" style="margin-bottom:0">PDFs, Word, Excel, photos — anything.
-      Several at once is fine.</p>
       <div id="picked" class="mt"></div>
     </div>
 
@@ -2731,9 +2704,7 @@ function renderUpload(view) {
         <textarea id="notes" placeholder="e.g. Revision C — supersedes the one issued Monday"></textarea></label>
     </div>
 
-    <button class="btn primary wide" id="save">Add to job</button>
-    <p class="muted small center mt">With no signal the file is held on this phone and sent
-    the moment there is coverage.</p>`;
+    <button class="btn primary wide" id="save">Add to job</button>`;
 
   const input = $('#files', view);
   $('#pick', view).onclick = () => input.click();
@@ -2884,7 +2855,7 @@ function renderDiary(view) {
           : `<p class="muted small" style="margin:0">Nothing logged for today yet.
              <a href="#/entry/${p.id}">Start the day →</a></p>`}
         </div>`;
-    }).join('') || `<div class="empty"><b>Nothing logged yet</b>The first entry starts the job.</div>`}`;
+    }).join('') || `<div class="empty"><b>Nothing logged yet</b></div>`}`;
   $$('[data-day]', view).forEach(b => b.onclick = () => printDayReport(p, b.dataset.day));
   $$('.tl-e', view).forEach(el => el.onclick = ev => {
     if (ev.target.closest('a')) return;   // opening a photo isn't editing
@@ -2908,7 +2879,7 @@ function renderEntry(view) {
 
   if (p && p.status === 'completed' && !isOffice()) {
     view.innerHTML = `<div class="card"><h2>This job is completed</h2>
-      <p class="muted small">The diary is closed. Ask the office if something needs adding.</p>
+      <p class="muted small">The diary is closed.</p>
       <a class="btn wide mt" href="#/diary/${p.id}">Back to the diary</a></div>`;
     return;
   }
@@ -2951,15 +2922,11 @@ function renderEntry(view) {
       <button class="btn wide" id="addPhoto" type="button">${icon('camera')}Add photos</button>
       <div class="thumbs" id="thumbs"></div>
       ${editing && (editing.files || []).length
-        ? `<p class="muted tiny mt" style="margin-bottom:0">${(editing.files || []).length} photo(s) already on this entry.
-           New ones are added alongside them.</p>` : ''}
+        ? `<p class="muted tiny mt" style="margin-bottom:0">${(editing.files || []).length} photo(s) already on this entry.</p>` : ''}
     </div>
 
     <button class="btn primary wide" id="save">${editing ? 'Save changes' : 'Add to diary'}</button>
-    ${editing ? `<button class="btn danger wide mt" id="del">Delete this entry</button>` : ''}
-    <p class="muted small center mt">${p && p.status === 'planned'
-      ? 'The first entry marks the job as started.'
-      : 'Entries save on the phone straight away, with or without signal.'}</p>`;
+    ${editing ? `<button class="btn danger wide mt" id="del">Delete this entry</button>` : ''}`;
 
   // "+ Add a new type…" is for this entry only: it goes on the entry, not
   // on the list.
@@ -3071,9 +3038,7 @@ function renderJobEdit(view) {
     view.innerHTML = `
       <div class="card">
         <h2>Office only</h2>
-        <p class="muted small">Jobs are planned and edited from an <strong>Office</strong> or
-        <strong>Director</strong> device. This phone is set to <strong>Supervisor</strong> — you can
-        run any job that is dispatched to you, keep its diary and read its paperwork.</p>
+        <p class="muted small">Office and Director devices only.</p>
         <a class="btn wide mt" href="#/">Back to the jobs</a>
         <a class="btn wide mt" href="#/setup">Change this device's role</a>
       </div>`;
@@ -3144,7 +3109,7 @@ function renderJobEdit(view) {
     </div>` : ''}
 
     <button class="btn primary wide" id="save">${editing ? 'Save job' : 'Create job'}</button>
-    ${editing ? '' : '<p class="muted small center mt">It starts as <strong>Planned</strong>. Load the paperwork onto it next.</p>'}`;
+    `;
 
   // "+ Add a new type…" turns into a real type the moment it is named.
   const typeSel = $('#type', view);
@@ -3505,9 +3470,7 @@ function renderForward(view) {
     view.innerHTML = `
       <div class="card">
         <h2>Office only</h2>
-        <p class="muted small">The forward works outline is kept from an <strong>Office</strong> or
-        <strong>Director</strong> device. The jobs themselves, their paperwork and their diaries
-        are all open to you.</p>
+        <p class="muted small">Office and Director devices only.</p>
         <a class="btn wide mt" href="#/">Back to the jobs</a>
       </div>`;
     return;
@@ -3559,7 +3522,7 @@ function renderForward(view) {
 
     ${undated.length ? `
     <div class="fw-week open">
-      <div class="fw-wh"><b>No day yet</b><span>${undated.length} line${undated.length === 1 ? '' : 's'} · tap one to give it a day</span></div>
+      <div class="fw-wh"><b>No day yet</b><span>${undated.length} line${undated.length === 1 ? '' : 's'}</span></div>
       <div class="fw-ents pad">${undated.map(r => fwEntry(r, null)).join('')}</div>
     </div>` : ''}
 
@@ -3596,8 +3559,7 @@ function renderForward(view) {
             </div>
           </button>`; }).join('')}
       </div>`).join('') || `
-      <div class="empty"><b>Nothing planned for ${esc(fwLabel(month))}</b>
-        Add the work as it is confirmed — client, site, crew, day or night, and what it is worth.</div>`;
+      <div class="empty"><b>Nothing planned for ${esc(fwLabel(month))}</b></div>`;
 
   view.innerHTML = `
     <div class="daynav">
@@ -3747,7 +3709,7 @@ function fwForm(r, month) {
         <input type="number" id="fwValue" inputmode="decimal" step="any" min="0" value="${r.invoice_value == null ? '' : esc(String(r.invoice_value))}" placeholder="0"></label>
 
       <div class="switchrow${(r.scoped || scope) ? ' on' : ' warn'}">
-        <div><b>Scoped</b><span>${(r.scoped || scope) ? 'Yes' : 'No — it shows pink until it is'}</span></div>
+        <div><b>Scoped</b><span>${(r.scoped || scope) ? 'Yes' : 'No'}</span></div>
         <label class="switch"><input type="checkbox" id="fwScoped" ${(r.scoped || scope) ? 'checked' : ''}><i></i></label>
       </div>
       <div class="docrow">
@@ -3849,7 +3811,7 @@ function wireFwForm(view, editing, month, close) {
   const paintSwitch = () => {
     const row = sw.closest('.switchrow');
     row.classList.toggle('on', sw.checked); row.classList.toggle('warn', !sw.checked);
-    $('span', row).textContent = sw.checked ? 'Yes' : 'No — it shows pink until it is';
+    $('span', row).textContent = sw.checked ? 'Yes' : 'No';
   };
   sw.onchange = paintSwitch;
   const paintDoc = () => {
@@ -3995,8 +3957,6 @@ function renderReports(view) {
   view.innerHTML = `
     <div class="card">
       <h2>One job, start to finish</h2>
-      <p class="muted small">Everything on a job: the details, the documents on file, and every day of
-      the diary with its photos. This is the record you send the client.</p>
       <label class="field"><span>Job</span>
         <select id="job">
           ${jobs.map(p => `<option value="${p.id}">${esc(jobNo(p))} — ${esc(p.name)}${p.archived ? ' (archived)' : ''}</option>`).join('')
@@ -4010,8 +3970,6 @@ function renderReports(view) {
 
     <div class="card">
       <h2>Jobs over a period</h2>
-      <p class="muted small">Every job that ran between two dates, with its days on site,
-      issues raised and how it finished.</p>
       <div class="row">
         <label class="field grow"><span>From</span><input type="date" id="from"></label>
         <label class="field grow"><span>To</span><input type="date" id="to"></label>
@@ -4022,22 +3980,17 @@ function renderReports(view) {
     ${isOffice() ? `
     <div class="card">
       <h2>Forward works</h2>
-      <p class="muted small">The month's outline — every job planned, crew by crew, with its
-      invoice value — prints and exports from the forward works screen.</p>
       <a class="btn wide" href="#/forward">Open forward works</a>
     </div>` : ''}
 
     <div class="card">
       <h2>For Excel</h2>
-      <p class="muted small">A spreadsheet of jobs, or of every diary entry ever written.</p>
       <div class="btn-row">
         <button class="btn sm" id="csvJobs">Jobs CSV</button>
         <button class="btn sm" id="csvDiary">Diary CSV</button>
       </div>
     </div>
-
-    <p class="muted small center">Reports open your device's print dialog — choose
-    <strong>Save as PDF</strong> to email or file it.</p>`;
+`;
 
   const pick = () => jobById($('#job', view).value);
 
@@ -4790,18 +4743,13 @@ function renderSetup(view) {
         <input type="text" id="sName" value="${esc(S.name)}" placeholder="e.g. Dave T"></label>
       <label class="field"><span>This device is used by</span>
         <select id="sRole">
-          ${ROLES.map(r => `<option value="${r.key}" ${S.role === r.key ? 'selected' : ''}>${esc(r.label)} — ${esc(r.blurb)}</option>`).join('')}
+          ${ROLES.map(r => `<option value="${r.key}" ${S.role === r.key ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}
         </select></label>
-      <div class="tiny muted">${ROLES.map(r =>
-        `<p style="margin-bottom:6px"><strong>${esc(r.label)}</strong> — ${esc(r.hint)}</p>`).join('')}</div>
       <button class="btn primary wide" id="saveMe">Save</button>
     </div>
 
     <div class="card">
       <h2>Your photo</h2>
-      <p class="muted small">Set it once and it stays — on the crew screen, and at the top of
-      your printed day so everyone can see whose it is. It goes against your name, so the
-      office sees it too.</p>
       ${peopleTableMissing ? `<div class="banner">The database has not got the
         <code>crew_people</code> table yet, so a photo could not be saved for everyone.
         Run the current <code>supabase-schema.sql</code> in Supabase → SQL Editor first —
@@ -4822,8 +4770,6 @@ function renderSetup(view) {
 
     <div class="card">
       <h2>Shared data</h2>
-      <p class="muted small">These come from Supabase → Settings → API. Everyone who enters the same
-      two values sees the same jobs and diaries.</p>
       <label class="field"><span>Project URL</span>
         <input type="text" id="sUrl" value="${esc(S.supabaseUrl)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Anon public key</span>
@@ -4838,8 +4784,6 @@ function renderSetup(view) {
     ${connected() ? `
     <div class="card">
       <h2>Set up someone else's phone</h2>
-      <p class="muted small">Send this link to the supervisor. One tap connects their phone —
-      they never type the key. Treat it like a key: only send it to RCK people.</p>
       <label class="field"><span>Setup link</span>
         <input type="text" id="sLink" value="${esc(setupLink())}" readonly onclick="this.select()"></label>
       <div class="btn-row">
@@ -4850,8 +4794,6 @@ function renderSetup(view) {
 
     <div class="card">
       <h2>Try it without a connection</h2>
-      <p class="muted small">Practice mode: everything works, but the data stays on this phone only.
-      Nobody else sees it and it never reaches the office screen.</p>
       <label class="field"><span>Mode</span>
         <select id="sLocal">
           <option value="0" ${!S.localMode ? 'selected' : ''}>Shared (Supabase)</option>
@@ -4877,8 +4819,6 @@ function renderSetup(view) {
         <button class="btn primary" id="retry">Try again now</button>
         <button class="btn" id="backup">${icon('download')}Download a backup</button>
       </div>
-      <p class="muted tiny mt" style="margin-bottom:0">The backup is a file holding everything on this
-      device, sent or not. Keep it before changing anything here.</p>
     </div>` : ''}
 
     <div class="card">
@@ -4903,9 +4843,6 @@ function renderSetup(view) {
         <button class="btn sm" id="backupAll">Download a backup</button>
         <button class="btn sm" id="clear">Clear this device</button>
       </div>
-      <p class="muted tiny mt" style="margin-bottom:0">New versions arrive on their own. <strong>Get the
-      latest app</strong> is there for when you want to make sure — it throws away the copy on this
-      phone and fetches a fresh one. Nothing you have entered is touched.</p>
     </div>`;
 
   /* A face is small — 420px square is plenty for a tile and a printed
