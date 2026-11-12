@@ -80,12 +80,17 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
-- **The app opens on a landing page under the RCK mark with three tools: Jobs, Crew &
-  supervisors, and Forward works.** Everyone gets the first two. Forward works appears on
-  Office and Director devices, and the same three sit in the bar at the foot of every screen
-  with the New job button (Today on site is still in the ⋮ menu). A **house button** sits at
-  the top of every other screen and goes straight back — the back arrow retraces your steps,
-  the house skips them.
+- **The app opens on the day.** Under the RCK logo and your name: four figures (on site,
+  planned, issues today, and not-yet-scoped for the office), then the jobs **on site now** and
+  **coming up** this week, each a tap away, then the way in to Jobs, Crew & supervisors and
+  Forward works. Forward works appears on Office and Director devices. The same three sit in
+  the bar at the foot of every screen with the New job button (Today on site is still in the
+  ⋮ menu). A **house button** sits at the top of every other screen and goes straight back —
+  the back arrow retraces your steps, the house skips them.
+- **A job card reads its dates as a line**: the first day on the left, the last on the right,
+  a dot where today is, and under it how far along the job is — *day 3 on site*, *tomorrow*,
+  *2 days overdue*. The status is the coloured chip top right; crew, supervisor and any issues
+  sit along the foot.
 - **Forward works is the outline of the months ahead**, kept by hand the way the programme
   was kept on the spreadsheet. One line per piece of work: **client, site location, crew, the
   day, how many days, day or night shift, and the invoice value**. The screen shows one month
@@ -327,8 +332,8 @@ Workshop in the same repository and GitHub Pages serves it from
   the end for anything else. A type added that way is written on that one entry and read back
   from it; it does not join the list. Older entries keep whatever kind they were given.
 - **The board shows planned and on-site jobs.** Completed jobs sit behind the **Completed**
-  tab at the top and show only while it is pressed; press Planned or On site to narrow to one,
-  press it again to come back.
+  pill at the top and show only while it is pressed; press Planned or On site to narrow to one,
+  press it again to come back. Each pill carries its count.
 
 ## Files
 
@@ -340,4 +345,5 @@ Workshop in the same repository and GitHub Pages serves it from
 | `config.js` | Your Supabase URL and key |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
 | `sw.js` | Offline caching |
+| `tests/smoke.mjs` | A walk through the app in headless Chromium against a mock Supabase: `node dispatch/tests/smoke.mjs` (needs Playwright) |
 | `check.mjs` | `node dispatch/check.mjs` — fails if any class the app writes has no rule in `app.css` |

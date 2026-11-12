@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.14.0';
+const VERSION = '2.15.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1622,49 +1622,58 @@ function renderWelcome(view) {
    ================================================================ */
 function renderHome(view) {
   const jobs = activeJobs();
-  const onSite = jobs.filter(p => p.status === 'ongoing').length;
-  const planned = jobs.filter(p => p.status === 'planned').length;
-
-  let ahead = '';
-  if (isOffice()) {
-    const m = fwThisMonth();
-    const rows = fwRows(m);
-    const t = fwTotal(rows);
-    ahead = rows.length
-      ? `${rows.length} job${rows.length === 1 ? '' : 's'} in ${fwLabel(m)} · ${esc(fmtMoney(t))}`
-      : `Nothing in the outline for ${fwLabel(m)} yet`;
-  }
-
+  const onSite = boardOrder(jobs.filter(p => p.status === 'ongoing'));
+  const soon = boardOrder(jobs.filter(p => p.status === 'planned' && daysFromToday(p.start_date) != null && daysFromToday(p.start_date) <= 7));
   const feed = crewFeed(today());
-  const heads = crewPeople(feed).length;
-  const crewToday = feed.length
-    ? `${heads} ${heads === 1 ? 'person has' : 'people have'} logged ${feed.length} thing${feed.length === 1 ? '' : 's'} today`
-    : 'Nothing logged today yet';
+  const issues = feed.filter(it => it.type === 'entry' && (it.e.kind === 'issue' || it.e.kind === 'delay')).length;
+  const office = isOffice();
+  let fw = null;
+  if (office) {
+    const m = fwThisMonth(), rows = fwRows(m);
+    fw = { m, rows, total: fwTotal(rows), unscoped: rows.filter(r => !fwScoped(r)).length };
+  }
+  const row = (p, i) => `
+    <button class="job-row compact status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
+      <div class="hdr">
+        <span class="num">${jobNo(p)}</span>
+        <span class="pill"><span class="swatch"></span>${p.status === 'ongoing' ? `day ${daysOnSite(p)}` : startText(p.start_date).text}</span>
+      </div>
+      <div class="ttl">${esc(p.name)}</div>
+      <div class="sub">${esc(p.client || typeLabel(typeOf(p)))}${p.site ? ` · ${esc(p.site)}` : ''}${p.supervisor ? ` · ${esc(p.supervisor)}` : ''}</div>
+    </button>`;
 
   view.innerHTML = `
     <div class="home-brand">
       <img class="logo" src="logo.png?v=${VERSION}" alt="RCK Group">
+      <div class="who"><b>${esc(S.name ? S.name.split(' ')[0] : 'RCK Dispatch')}</b><span>${esc(fmtDayDate(today()))}</span></div>
+      ${S.name ? `<a class="me" href="#/setup" aria-label="Settings">${faceMark(S.name, 'big')}</a>` : ''}
     </div>
-    <div class="tiles">
-      <a class="tile" href="#/jobs">
-        <span class="ti">${icon('book')}</span>
-        <b>Jobs</b>
-        <span class="ts">${jobs.length} job${jobs.length === 1 ? '' : 's'} · ${onSite} on site · ${planned} planned</span>
-      </a>
 
-      <a class="tile" href="#/crew">
-        <span class="ti">${icon('people')}</span>
-        <b>Crew &amp; supervisors</b>
-        <span class="ts">${crewToday}</span>
-      </a>
+    <div class="stat home">
+      <a href="#/jobs" class="status-green"><span class="n">${onSite.length}</span><span class="l">On site</span></a>
+      <a href="#/jobs" class="status-blue"><span class="n">${jobs.filter(p => p.status === 'planned').length}</span><span class="l">Planned</span></a>
+      <a href="#/crew" class="${issues ? 'status-red' : ''}"><span class="n">${issues}</span><span class="l">Issues today</span></a>
+      ${fw ? `<a href="#/forward" class="${fw.unscoped ? 'warn' : ''}"><span class="n">${fw.unscoped}</span><span class="l">Not scoped</span></a>` : `<a href="#/crew"><span class="n">${feed.length}</span><span class="l">Logged today</span></a>`}
+    </div>
 
-      ${isOffice() ? `
-      <a class="tile plan" href="#/forward">
-        <span class="ti">${icon('calendar')}</span>
-        <b>Forward works</b>
-        <span class="ts">${ahead}</span>
-      </a>` : ''}
+    ${onSite.length ? `
+      <div class="section-title">On site now<a class="more" href="#/jobs">All jobs</a></div>
+      ${onSite.slice(0, 4).map(row).join('')}` : `
+      <div class="section-title">On site now</div>
+      <div class="card quiet">Nothing is running right now.${soon.length ? '' : ' Nothing is booked for the next week either.'}</div>`}
+
+    ${soon.length ? `
+      <div class="section-title">Coming up<a class="more" href="#/jobs">All jobs</a></div>
+      ${soon.slice(0, 3).map(row).join('')}` : ''}
+
+    <div class="section-title">Go to</div>
+    <div class="navlist">
+      <a href="#/jobs"><span class="ic">${icon('book')}</span><span class="t"><b>Jobs</b><span>${jobs.length} on the board</span></span>${icon('chevR')}</a>
+      <a href="#/crew"><span class="ic">${icon('people')}</span><span class="t"><b>Crew &amp; supervisors</b><span>${feed.length ? `${crewPeople(feed).length} out today · ${feed.length} logged` : 'Nothing logged today yet'}</span></span>${icon('chevR')}</a>
+      ${fw ? `<a href="#/forward"><span class="ic plan">${icon('calendar')}</span><span class="t"><b>Forward works</b><span>${fw.rows.length ? `${fw.rows.length} jobs in ${fwLabel(fw.m)} · ${esc(fmtMoney(fw.total))}` : `Nothing in ${fwLabel(fw.m)} yet`}</span></span>${icon('chevR')}</a>` : ''}
     </div>`;
+
+  $$('.job-row', view).forEach(b => b.onclick = () => go('#/job/' + b.dataset.id));
 }
 
 /* ================================================================
@@ -1683,20 +1692,45 @@ function jobCard(p, i) {
 
   return `
     <button class="job-card status-${statusTone(p.status)}" data-id="${p.id}" style="--i:${i}">
-      <div class="num">${jobNo(p)}</div>
-      <div class="name">${esc(p.name)}</div>
-      <div class="client">${esc(p.client || typeLabel(typeOf(p)))}</div>
-      ${p.site ? `<div class="line">${icon('pin')}${esc(p.site)}</div>` : ''}
-      <div class="line">${icon('calendar')}<span class="${when.late ? 'overdue' : ''}">${esc(when.text)}</span>${
-        p.start_date ? ` · ${esc(fmtShort(p.start_date))}${p.end_date && p.end_date !== p.start_date ? '–' + esc(fmtShort(p.end_date)) : ''}` : ''}</div>
-      ${p.supervisor ? `<div class="line">${icon('person')}${esc(p.supervisor)}</div>` : ''}
-      <div class="foot">
-        <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
-        ${crewPill(p)}
+      <div class="hdr">
+        <span class="num">${jobNo(p)}</span>
         ${p._unsent ? '<span class="pill plain">Not sent yet</span>' : ''}
-        ${issues ? `<span class="pill plain">${issues} issue${issues > 1 ? 's' : ''}</span>` : ''}
+        <span class="pill"><span class="swatch"></span>${statusLabel(p.status)}</span>
+      </div>
+      <div class="name">${esc(p.name)}</div>
+      <div class="client">${esc(p.client || typeLabel(typeOf(p)))}${p.site ? ` · ${esc(p.site)}` : ''}</div>
+      ${dateLine(p, when)}
+      <div class="foot">
+        ${crewPill(p)}
+        ${p.supervisor ? `<span class="who">${faceMark(p.supervisor, 'xs')}${esc(p.supervisor)}</span>` : ''}
+        ${issues ? `<span class="pill plain issues">${issues} issue${issues > 1 ? 's' : ''}</span>` : ''}
       </div>
     </button>`;
+}
+
+/** Where the job is between its first and last planned day, as a line:
+    a dot at today, the dates at either end. */
+function dateLine(p, when) {
+  const start = p.start_date, end = p.end_date || p.start_date;
+  if (!start) return `<div class="dline none"><span class="${when.late ? 'overdue' : ''}">${esc(when.text)}</span></div>`;
+  const t = today();
+  let pct = 0;
+  if (p.status === 'completed') pct = 100;
+  else if (t >= end) pct = 100;
+  else if (t > start) {
+    const span = (new Date(end + 'T00:00:00') - new Date(start + 'T00:00:00')) / 86400000;
+    const gone = (new Date(t + 'T00:00:00') - new Date(start + 'T00:00:00')) / 86400000;
+    pct = Math.round(100 * gone / Math.max(1, span));
+  }
+  return `
+    <div class="dline" style="--pct:${pct}%">
+      <div class="track"><i class="fill"></i><i class="now"></i></div>
+      <div class="ends">
+        <span>${esc(fmtShort(start))}</span>
+        <span class="mid ${when.late ? 'overdue' : ''}">${esc(when.text)}</span>
+        <span>${end !== start ? esc(fmtShort(end)) : ''}</span>
+      </div>
+    </div>`;
 }
 
 function wireJobCards(root) {
@@ -1729,8 +1763,8 @@ function renderBoard(view) {
     <div class="tally">
       ${JOB_STATUS.map(s => `
         <button class="status-${s.tone}" data-status="${s.key}" aria-pressed="${boardFilter.status === s.key}">
-          <span class="n">${counts[s.key] || 0}</span>
           <span class="l">${s.label}</span>
+          <span class="n">${counts[s.key] || 0}</span>
         </button>`).join('')}
     </div>
 
@@ -2470,7 +2504,7 @@ function renderJob(view) {
     ${p.status === 'ongoing' ? `
       <div class="btn-row">
         <a class="btn primary" href="#/entry/${p.id}">${icon('plus')}Add diary entry</a>
-        <button class="btn" id="finish">${icon('check')}Project completed</button>
+        <button class="btn" id="finish">${icon('check')}Complete job</button>
       </div>` : ''}
 
     ${p.status === 'completed' ? `
@@ -3579,15 +3613,14 @@ function renderForward(view) {
       <em>Run the latest <strong>supabase-schema.sql</strong> in Supabase's SQL editor once — it adds
       the table and nothing else changes — then come back here.</em></div>` : ''}
 
-    <div class="ledger">
-      <div class="lh">Forward works · ${esc(fwLabel(month))}</div>
-      <div class="lrow"><span>Jobs planned</span><b>${rows.length}</b></div>
-      <div class="lrow"><span>Day / night</span><b>${rows.length - nights} / <em class="nightx">${nights}</em></b></div>
-      ${unscoped ? `<div class="lrow"><span>Not yet scoped</span><b class="warnx">${unscoped}</b></div>` : ''}
-      <div class="lrow tot"><span>Invoice value</span><b>${esc(fmtMoney(total))}</b></div>
-      <div class="lf">${next.length
-        ? `${fwLabel(fwShift(month, 1))}: ${next.length} job${next.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(next)))}`
-        : `Nothing in ${fwLabel(fwShift(month, 1))} yet`}</div>
+    <div class="fwstats">
+      <div class="big"><span class="l">Invoice value</span><span class="n">${esc(fmtMoney(total))}</span>
+        <span class="s">${next.length
+          ? `${fwLabel(fwShift(month, 1))}: ${next.length} job${next.length === 1 ? '' : 's'} · ${esc(fmtMoney(fwTotal(next)))}`
+          : `Nothing in ${fwLabel(fwShift(month, 1))} yet`}</span></div>
+      <div><span class="n">${rows.length}</span><span class="l">Jobs</span></div>
+      <div><span class="n">${rows.length - nights} <em>/</em> <em class="nightx">${nights}</em></span><span class="l">Day / night</span></div>
+      <div class="${unscoped ? 'warn' : ''}"><span class="n">${unscoped}</span><span class="l">Not scoped</span></div>
     </div>
 
     <button class="btn primary wide mb" id="fwAdd" ${forwardTableMissing ? 'disabled' : ''}>${icon('plus')}Add work to ${esc(fwLabel(month))}</button>
@@ -3655,7 +3688,7 @@ function fwSheet(month) {
         <dt>Crew</dt><dd>${crewDot(c.key)} ${esc(c.label)}</dd>
         <dt>Scoped</dt><dd class="sh-switch"><label class="switch"><input type="checkbox" id="shScoped" ${fwScoped(r) ? 'checked' : ''}><i></i></label>
           ${fwScoped(r) ? '<span class="okx">Yes</span>' : '<span class="warnx">No</span>'}</dd>
-        <dt>Scope doc</dt><dd>${r.scope_url
+        <dt>Document</dt><dd>${r.scope_url
           ? `<a href="${esc(r.scope_url)}" target="_blank" rel="noopener">${esc(r.scope_name || 'Scope document')}</a>`
           : '<span class="muted">none attached yet</span>'}</dd>
         ${job ? `<dt>Job</dt><dd><a href="#/job/${job.id}">${esc(jobNo(job))} — ${esc(job.name)}</a></dd>` : ''}
