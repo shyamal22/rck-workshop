@@ -77,7 +77,7 @@ await setRole('supervisor'); await p.goto(BASE + '#/'); await t(500);
 check('supervisor bar is Jobs, Crew, Log', (await p.evaluate(() => Array.from(document.querySelectorAll('#tabbar a')).filter(a => !a.hidden).map(a => a.textContent.trim()))).join(',') === 'Jobs,Crew,Log');
 await setRole('office'); await p.goto(BASE + '#/'); await t(500);
 check('office bar adds Forward works', (await p.evaluate(() => Array.from(document.querySelectorAll('#tabbar a')).filter(a => !a.hidden).map(a => a.textContent.trim()))).join(',') === 'Jobs,Crew,Forward works,New job');
-check('logo and name up top', await has('.home-brand img.logo') && (await text('.home-brand .who b')) === 'Sam');
+check('logo and the day up top', await has('.home-brand img.logo') && /Sam/.test(await text('.home-day span')) && await has('.home-day b'));
 check('four figures', (await p.evaluate(() => document.querySelectorAll('.stat.home > a').length)) === 4);
 check('go-to list has three ways in', (await p.evaluate(() => document.querySelectorAll('.navlist a').length)) === 3);
 

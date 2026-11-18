@@ -12,22 +12,27 @@
   /* Surfaces. Warm rather than blue-grey: paper and asphalt, not screen
      default. The panel is very slightly off-white, which is what stops a
      page of cards reading as a template somebody generated. */
-  --bg:        #141416;
-  --panel:     #1f1f23;
-  --panel-2:   #2a2a2f;
+  /* Asphalt at dusk: a warm charcoal, lit from the top-left. One accent,
+     the yellow off the RCK mark, for what you can act on. */
+  --bg:        #121311;
+  --panel:     #1b1c19;
+  --panel-2:   #252622;
 
-  /* Ink on the dark. */
-  --ink:       #f4f4f6;
-  --ink-2:     #b6b6bf;
-  --ink-3:     #80808a;
-  --line:      #2c2c32;
-  --line-2:    #3b3b42;
-  /* Text on a light surface (a white pill button, a pressed chip). */
-  --on-ink:    #141416;
-  /* The two accents: periwinkle for what is active, sand for what waits. */
-  --accent:    #7c74f6;
-  --accent-ink:#ffffff;
+  /* Ink on the dark, warmed. */
+  --ink:       #f3f1ea;
+  --ink-2:     #b9b6ab;
+  --ink-3:     #807d73;
+  --line:      rgba(255, 255, 255, .07);
+  --line-2:    rgba(255, 255, 255, .13);
+  /* Text on a light or accent surface. */
+  --on-ink:    #15150f;
+  --accent:    #f2d24b;
+  --accent-ink:#15150f;
+  --accent-soft: rgba(242, 210, 75, .14);
   --sand:      #e9c56a;
+
+  --font-ui:      'Instrument Sans', 'Helvetica Neue', Helvetica, sans-serif;
+  --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
 
   /* State. Each has a pastel fill for the whole card and a deep tone for
      text on top of it — every pairing clears 4.5:1, including yellow, which
@@ -35,16 +40,16 @@
 
      green  = on site now   ·  blue = planned, not started
      slate  = finished      ·  yellow/red = something needs attention */
-  --green:     #8fe3a9;
-  --green-bg:  #1f3a2b;
-  --yellow:    #f2cf6b;
-  --yellow-bg: #3a3118;
-  --red:       #ff7a6b;
-  --red-bg:    #3f2522;
-  --blue:      #a39dff;
-  --blue-bg:   #2c2a5c;
-  --slate:     #a6a6b0;
-  --slate-bg:  #2a2a2f;
+  --green:     #8ed49c;
+  --green-bg:  #1c2e22;
+  --yellow:    #e8c35a;
+  --yellow-bg: #332c17;
+  --red:       #ff7f70;
+  --red-bg:    #3a2420;
+  --blue:      #a9c3d6;
+  --blue-bg:   #1f2a32;
+  --slate:     #a9a79e;
+  --slate-bg:  #262722;
 
   /* Shape. Slightly softer and less uniform than a 14-everywhere grid —
      the small radius is genuinely smaller, so surfaces differ by their
@@ -83,7 +88,8 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.5 ui-rounded, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 16px/1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
   padding-bottom: calc(74px + var(--safe-b));
   overscroll-behavior-y: none;
 }
@@ -1707,3 +1713,133 @@ hr, .section-title::after { border-color: var(--line); background: var(--line); 
 #topbar { box-shadow: none; }
 .faces .face b, .face b { color: var(--ink); }
 .sh-facts { grid-template-columns: 86px 1fr; }
+
+/* =====================================================================
+   Editorial — the type and the light.
+   Instrument Sans for everything you read in passing; Instrument Serif,
+   roman and italic, for the few things that should feel set: the day,
+   the big figures, a job's name, a month. Surfaces are lit from the top
+   rather than painted flat, and the only colour you can act on is the
+   yellow off the mark.
+   ===================================================================== */
+@font-face { font-family: 'Instrument Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/instrument-sans-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Instrument Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/instrument-sans-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Instrument Sans'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/instrument-sans-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Instrument Sans'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/instrument-sans-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Instrument Serif'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/instrument-serif-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Instrument Serif'; font-style: italic; font-weight: 400; font-display: swap; src: url('fonts/instrument-serif-latin-400-italic.woff2') format('woff2'); }
+
+/* ---- light ----------------------------------------------------------- */
+body {
+  background:
+    radial-gradient(900px 520px at 12% -8%, rgba(242, 210, 75, .075), transparent 62%),
+    radial-gradient(640px 420px at 108% 18%, rgba(255, 255, 255, .035), transparent 58%),
+    var(--bg);
+  background-attachment: fixed;
+}
+.card, .job-card, .job-row, .fw-week, .fw-cal, .navlist, .stat.home > a, .fwstats > div, .daynav, .tally button, .ledger, .bsheet, .face {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, 0) 55%);
+  background-color: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 0 rgba(0, 0, 0, .35);
+}
+.bsheet { box-shadow: inset 0 1px 0 var(--line-2), 0 -14px 48px rgba(0, 0, 0, .6); }
+#topbar { background: linear-gradient(180deg, rgba(18, 19, 17, .96), rgba(18, 19, 17, .82)); }
+#tabbar { background: linear-gradient(180deg, rgba(18, 19, 17, .88), rgba(18, 19, 17, .98)); box-shadow: 0 -1px 0 var(--line); }
+.fw-ent, .fw-cal .d, .navlist .ic, .tile .ti, .switchrow, .docrow, .tl-chip {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .03), rgba(255, 255, 255, 0));
+  background-color: var(--panel-2);
+}
+input[type=text], input[type=date], input[type=number], input[type=month], input[type=password], textarea, select {
+  background: linear-gradient(180deg, rgba(0, 0, 0, .18), rgba(0, 0, 0, 0) 60%), var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+input:focus, textarea:focus, select:focus { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* ---- the one accent --------------------------------------------------- */
+.btn.primary {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, 0) 55%), var(--accent);
+  color: var(--accent-ink); box-shadow: 0 1px 0 rgba(0, 0, 0, .3), 0 6px 18px rgba(242, 210, 75, .18);
+}
+.btn.primary:active { background: var(--accent); filter: brightness(.94); }
+.btn { background: linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 60%), var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
+.btn.danger { background: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, 0) 55%), var(--red); box-shadow: none; }
+.chip[aria-pressed="true"], .tally button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.tally button[aria-pressed="true"] .l, .tally button[aria-pressed="true"] .n { color: var(--accent-ink); }
+.tally button[aria-pressed="true"] .n { background: rgba(0, 0, 0, .14); }
+.chip[aria-pressed="true"] .crew-dot { box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .35); }
+.seg { background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.seg a.on { background: var(--ink); color: var(--on-ink); }
+#tabbar a.on { background: transparent; color: var(--accent); }
+#tabbar a.on::after { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: 1px; }
+#tabbar .fab { background: linear-gradient(180deg, rgba(255, 255, 255, .25), rgba(255, 255, 255, 0) 55%), var(--accent); color: var(--accent-ink); box-shadow: 0 4px 14px rgba(242, 210, 75, .28); }
+#tabbar a.tab-primary.on { color: var(--ink); }
+#tabbar a.tab-primary.on::after { display: none; }
+.linky, .section-title .more, .sh-facts a, .navlist .t a { color: var(--accent); }
+.fw-cal .d.on { background: var(--accent); color: var(--accent-ink); }
+.fw-cal .d.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.fw-cal .d.today b, .fw-day.today .fw-dn b { color: var(--accent); }
+.fw-ent.on { box-shadow: 0 0 0 2px var(--accent); }
+.fw-row.on { box-shadow: 0 0 0 2px var(--accent); }
+.fw-day.on { background: var(--accent-soft); }
+.tile.plan .ti, .navlist .ic.plan { background: var(--accent); color: var(--accent-ink); }
+.dot.ok { background: var(--green); }
+:focus-visible { outline-color: var(--accent); }
+.switch input:checked + i { background: var(--accent); }
+.dayhead.today h3 em, .pill.night, .job-card .pill, .job-row .pill { color: var(--on-ink); }
+
+/* ---- type --------------------------------------------------------- */
+h1, h2, h3, .card h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: -.005em; }
+h2, .card h2 { font-size: 23px; line-height: 1.15; }
+#topbar strong { font-family: var(--font-display); font-weight: 400; font-size: 23px; letter-spacing: 0; }
+.job-card .name, .job-row .ttl, .job-row.compact .ttl, .sh-head b, .empty b, .dn-mid b, .fw-wh b, .face b, .tile b {
+  font-family: var(--font-display); font-weight: 400; letter-spacing: 0;
+}
+.job-card .name { font-size: 21px; line-height: 1.15; margin-top: 8px; }
+.job-row .ttl, .job-row.compact .ttl { font-size: 19px; line-height: 1.15; }
+.sh-head b { font-size: 24px; }
+.dn-mid b { font-size: 19px; }
+.fw-wh b { font-size: 17px; }
+.empty b { font-size: 20px; }
+.fw-ent .who b { font-weight: 600; }
+.section-title { font-family: var(--font-ui); font-size: 11.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin: 26px 2px 10px; }
+.section-title .more { letter-spacing: 0; text-transform: none; font-size: 12.5px; font-weight: 600; }
+.job-card .num, .job-row .num, .tiny { letter-spacing: .08em; }
+.stat .n, .stat.home > a .n, .fwstats .n, .tally .n, .ledger .lrow b, .figures .n, .sh-head strong {
+  font-family: var(--font-display); font-weight: 400; letter-spacing: -.01em; font-variant-numeric: lining-nums tabular-nums;
+}
+.fwstats .n em { font-family: var(--font-display); }
+.stat .l, .fwstats .l { font-family: var(--font-ui); }
+
+/* ---- the landing page: a greeting, the day set large, one figure that leads */
+.home-brand { padding: 2px 2px 0; }
+.home-brand .logo { width: 96px; }
+.home-brand .me { margin-left: auto; }
+.home-day { padding: 14px 2px 18px; }
+.home-day span { display: block; font-size: 13px; color: var(--ink-3); letter-spacing: .02em; }
+.home-day b { display: block; font-family: var(--font-display); font-weight: 400; font-size: 44px; line-height: .98; letter-spacing: -.01em; margin-top: 6px; }
+.stat.home { grid-template-columns: 1.45fr 1fr; grid-auto-rows: minmax(0, auto); gap: 8px; margin-bottom: 8px; }
+.stat.home > a.lead { grid-row: 1 / span 3; display: flex; flex-direction: column; justify-content: space-between; padding: 16px 18px 16px; min-height: 100%; }
+.stat.home > a.lead .k { font-size: 11.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.stat.home > a.lead .n { margin-top: auto; }
+.stat.home > a.lead .n { font-size: 84px; line-height: .9; }
+.stat.home > a.lead .l { font-size: 14px; color: var(--ink-2); margin-top: 10px; }
+.stat.home > a:not(.lead) { padding: 12px 14px 11px; }
+.stat.home > a:not(.lead) .n { font-size: 30px; }
+.stat.home > a:not(.lead) .l { margin-top: 3px; }
+
+/* ---- forward works: the value leads, the rest follows --------------- */
+.fwstats { grid-template-columns: 1.5fr 1fr; }
+.fwstats > div.big { grid-column: 1; grid-row: 1 / span 2; display: flex; flex-direction: column; justify-content: flex-end; }
+.fwstats .big .n { font-size: 40px; line-height: 1; }
+.fwstats > div:nth-child(2) { grid-column: 2; grid-row: 1; }
+.fwstats > div:nth-child(3) { grid-column: 2; grid-row: 2; }
+.fwstats > div:nth-child(4) { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; }
+.fwstats > div:nth-child(4) .n { font-size: 22px; }
+.fwstats > div:nth-child(4) .l { margin-top: 0; }
+.fwstats > div.warn { background-image: linear-gradient(90deg, rgba(255, 143, 194, .14), rgba(255, 143, 194, 0) 70%); }
+
+/* ---- small things that were still generic -------------------------- */
+.pill { font-weight: 600; letter-spacing: .01em; }
+.tile { padding: 16px 18px 14px; }
+.ledger .lh { letter-spacing: .12em; }
+.kb-head h1 { font-family: var(--font-display); font-weight: 400; }

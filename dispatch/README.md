@@ -80,6 +80,11 @@ diary entry makes it *on site*; the supervisor taps **Project completed** and it
 **For the director**
 - Everything above, on the same phone — a director can plan a job in the morning and keep
   its diary on site in the afternoon.
+- **The look.** Warm charcoal lit from the top-left, the yellow off the RCK mark as the one
+  colour you can act on, Instrument Sans for what you read in passing and Instrument Serif for
+  the few things that should feel set — the day, the big figures, a job's name, a month.
+  Status keeps its own quiet colours: mint on site, slate-blue planned, coral for issues and
+  night shifts, pink for a line not yet scoped. Paper keeps its own palette.
 - **The app opens on the day.** Under the RCK logo and your name: four figures (on site,
   planned, issues today, and not-yet-scoped for the office), then the jobs **on site now** and
   **coming up** this week, each a tap away, then the way in to Jobs, Crew & supervisors and
@@ -345,5 +350,6 @@ Workshop in the same repository and GitHub Pages serves it from
 | `config.js` | Your Supabase URL and key |
 | `supabase-schema.sql` | Run once in Supabase to create the database |
 | `sw.js` | Offline caching |
+| `fonts/` | Instrument Sans and Instrument Serif (SIL Open Font License), served with the app so they work offline |
 | `tests/smoke.mjs` | A walk through the app in headless Chromium against a mock Supabase: `node dispatch/tests/smoke.mjs` (needs Playwright) |
 | `check.mjs` | `node dispatch/check.mjs` — fails if any class the app writes has no rule in `app.css` |
