@@ -9,7 +9,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '2.15.1';
+const VERSION = '2.16.0';
 
 /* A newer version has downloaded but can't take over until every tab of the
    old one is gone. Rather than leave someone tapping a feature that isn't
@@ -1637,12 +1637,15 @@ function renderHome(view) {
   view.innerHTML = `
     <div class="home-brand">
       <img class="logo" src="logo.png?v=${VERSION}" alt="RCK Group">
-      <div class="who"><b>${esc(S.name ? S.name.split(' ')[0] : 'RCK Dispatch')}</b><span>${esc(fmtDayDate(today()))}</span></div>
       ${S.name ? `<a class="me" href="#/setup" aria-label="Settings">${faceMark(S.name, 'big')}</a>` : ''}
+    </div>
+    <div class="home-day">
+      <span>${S.name ? `Kia ora, ${esc(S.name.split(' ')[0])}` : 'RCK Dispatch'}</span>
+      <b>${esc(DAYS[new Date().getDay()])}<br>${new Date().getDate()} ${esc(MONTHS_LONG[new Date().getMonth()])}</b>
     </div>
 
     <div class="stat home">
-      <a href="#/jobs" class="status-green"><span class="n">${onSite.length}</span><span class="l">On site</span></a>
+      <a href="#/jobs" class="lead status-green"><span class="k">Right now</span><span class="n">${onSite.length}</span><span class="l">${onSite.length === 1 ? 'job on site' : 'jobs on site'}</span></a>
       <a href="#/jobs" class="status-blue"><span class="n">${jobs.filter(p => p.status === 'planned').length}</span><span class="l">Planned</span></a>
       <a href="#/crew" class="${issues ? 'status-red' : ''}"><span class="n">${issues}</span><span class="l">Issues today</span></a>
       ${fw ? `<a href="#/forward" class="${fw.unscoped ? 'warn' : ''}"><span class="n">${fw.unscoped}</span><span class="l">Not scoped</span></a>` : `<a href="#/crew"><span class="n">${feed.length}</span><span class="l">Logged today</span></a>`}
