@@ -4,7 +4,7 @@
    ===================================================================== */
 'use strict';
 
-const VERSION = '3.6.0';
+const VERSION = '3.7.0';
 
 /* ------------------------------------------------------------ fleet */
 /* The types RCK started with. Anyone can add more when adding gear — a new
@@ -1995,6 +1995,9 @@ function renderReports(view) {
       <p class="muted small">All work orders as a CSV file for Excel.</p>
       <button class="btn wide" id="xlsx">${icon('grid')}All assets \u2014 Excel</button>
       <button class="btn wide mt" id="csv">Work orders \u2014 CSV</button>
+      <button class="btn wide mt" id="dump">${icon('file')}Everything \u2014 one file for moving the data</button>
+      <p class="tiny muted" style="margin:8px 2px 0">The whole database as one file: every asset, work order, update, photo link and
+        manual. For taking the data somewhere else, not for reading.</p>
     </div>`;
 
   $('#fleet', view).onclick = () => printFleetStatus();
@@ -2004,6 +2007,7 @@ function renderReports(view) {
   };
   $('#csv', view).onclick = exportCsv;
   $('#xlsx', view).onclick = exportAssetsXlsx;
+  $('#dump', view).onclick = exportEverything;
 }
 
 function exportCsv() {
@@ -2046,6 +2050,42 @@ function exportAssetsXlsx() {
   const widths = [10, 12, 26, 22, 18, 10, 9, 24, 18, 14, 40, 8, 12];
   downloadBlob(xlsxFile('Assets', head, rows, widths), `rck-assets-${today()}.xlsx`);
   toast(`${rows.length} asset${rows.length === 1 ? '' : 's'} exported`);
+}
+
+/* ------------------------------------------------------------------
+   The whole database as one file, for taking the data somewhere else.
+   Plain JSON, every table as stored, with a note at the top saying what
+   each thing is — so whoever (or whatever) reads it needs nothing from
+   here to make sense of it. Photos and manuals are links into public
+   Storage, which is where the bytes live; they are not embedded.
+   ------------------------------------------------------------------ */
+function exportEverything() {
+  const counts = { gear: DB.gear.length, work_orders: DB.work_orders.length,
+                   wo_updates: DB.wo_updates.length, manuals: DB.manuals.length };
+  const bundle = {
+    _about: {
+      what: 'RCK Workshop — complete data export',
+      app_version: VERSION,
+      exported_at: new Date().toISOString(),
+      exported_by: whoami(),
+      source: connected() ? 'shared database' : 'this device only (practice mode)',
+      tables: {
+        gear: 'Every asset. category is the gear type (miller, paver, roller, bobcat, truck, trailer, or any added). retired=true means off the fleet but kept for history. location is free text; hours/hours_at/hours_by are an hour-meter reading if one was ever taken.',
+        work_orders: 'One per damage report. gear_id -> gear.id. severity: red = out of operation, orange = damaged but usable. status: new | in_progress | awaiting_parts | external | complete | cancelled. A work order is open unless status is complete or cancelled; the colour of a machine is red if any open order is red, orange if any is open, else green. repairer: internal | external | null; external_company/external_ref/cost go with external. assigned_to is a person name. target_date is the promised back-in-service date.',
+        wo_updates: 'The history, one row per event. work_order_id -> work_orders.id, or null for a personal diary note. kind: created | comment | note | status | external | complete | reopen | file. author is the person; created_at is when. For kind=file, meta is {name,type,size,url} and url is a public link to the file in Storage. A person\u2019s day is every row with their name as author on that calendar day.',
+        manuals: 'Uploaded operator/workshop manuals. file is {name,type,size,url}; url is a public link.'
+      },
+      ids: 'All ids are UUID strings. Dates are ISO-8601; timestamps are UTC.',
+      counts
+    },
+    gear: DB.gear,
+    work_orders: DB.work_orders,
+    wo_updates: DB.wo_updates.slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))),
+    manuals: DB.manuals
+  };
+  const json = JSON.stringify(cacheSafe(bundle), null, 1);
+  downloadBlob(new Blob([json], { type: 'application/json' }), `rck-workshop-everything-${today()}.json`);
+  toast(`${counts.gear} assets, ${counts.work_orders} work orders, ${counts.wo_updates} updates, ${counts.manuals} manuals`);
 }
 
 /** One sheet: a bold frozen header row, sized columns, numbers as numbers. */

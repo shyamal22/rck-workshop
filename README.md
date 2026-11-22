@@ -125,6 +125,9 @@ then comments and history, attachments and photos, and sign-off lines.
   notes, retired, added. A real `.xlsx` with a frozen header and a filter row,
   written by the app itself so it works with no signal.
 - **CSV export** of all work orders.
+- **Everything as one file** — the whole database as JSON with a note at the top
+  explaining each table, for moving the data into another system. Photos and
+  manuals are public links into Storage, not embedded.
 
 Every change is written to the work order's history, with who did it and when, so
 the record of a machine's repairs is complete without anyone having to keep it.
