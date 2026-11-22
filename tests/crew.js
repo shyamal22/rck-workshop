@@ -7,7 +7,8 @@ const http = require('http'); const fs = require('fs'); const path = require('pa
 const ROOT = path.resolve(__dirname, '..');
 const CHROME = process.env.CHROME || (() => {   // whichever chromium the sandbox has
   try { const d = fs.readdirSync('/opt/pw-browsers').filter(n => /^chromium-\d+$/.test(n)).sort().pop();
-        return d ? `/opt/pw-browsers/${d}/chrome-linux/chrome` : ''; } catch (e) { return ''; } })();
+        return ['chrome-linux64', 'chrome-linux'].map(l => `/opt/pw-browsers/${d}/${l}/chrome`).find(f => fs.existsSync(f)) || '';
+  } catch (e) { return ''; } })();
 const T = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
   '.png':'image/png', '.svg':'image/svg+xml', '.webmanifest':'application/manifest+json' };
 const server = http.createServer((q, r) => {
